@@ -73,14 +73,13 @@ export class Input {
   }
 
   update() {
-    // Store previous frame state
-    for (const [key, val] of this.keys) {
-      this.prevKeys.set(key, val);
-    }
+    // No-op — prev was already saved at end of last frame.
+    // Input events modify this.keys between frames, so we must NOT
+    // overwrite prev here (otherwise justPressed always returns false).
   }
 
   endFrame() {
-    // Copy current to prev after processing
+    // Snapshot current state as "previous" for next frame's justPressed checks.
     for (const [key, val] of this.keys) {
       this.prevKeys.set(key, val);
     }
