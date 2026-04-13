@@ -61,7 +61,7 @@ export class Player {
 
     // Jump
     if (this.onGround && input.justPressed("space")) {
-      this.velocity.y = 8;
+      this.velocity.y = 12;
       this.onGround = false;
     }
 
