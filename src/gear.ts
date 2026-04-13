@@ -18,11 +18,13 @@ export class Gear {
     // Gear body
     const bodyGeo = new THREE.CylinderGeometry(radius, radius, height, 32);
     const bodyMat = new THREE.MeshStandardMaterial({
-      color, // Bronze / Copper
+      color,
       metalness: 0.9,
-      roughness: 0.3
+      roughness: 0.28
     });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.castShadow = true;
+    body.receiveShadow = true;
     this.mesh.add(body);
 
     // Teeth
@@ -34,6 +36,8 @@ export class Gear {
       const tooth = new THREE.Mesh(toothGeo, toothMat);
       tooth.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
       tooth.rotation.y = -angle;
+      tooth.castShadow = true;
+      tooth.receiveShadow = true;
       this.mesh.add(tooth);
     }
   }

@@ -15,10 +15,12 @@ export class Player {
     const bodyMat = new THREE.MeshStandardMaterial({
       color: 0xcd7f32, // Bronze
       metalness: 0.9,
-      roughness: 0.3
+      roughness: 0.22
     });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.position.y = this.height / 2;
+    body.castShadow = true;
+    body.receiveShadow = true;
     this.mesh.add(body);
 
     // Eyes
@@ -26,15 +28,19 @@ export class Player {
     const eyeMat = new THREE.MeshStandardMaterial({
       color: 0x00ffff,
       emissive: 0x00ffff,
-      emissiveIntensity: 2
+      emissiveIntensity: 6,
+      metalness: 0.1,
+      roughness: 0.15
     });
 
     const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
     leftEye.position.set(-0.1, 0.45, 0.25);
+    leftEye.castShadow = true;
     this.mesh.add(leftEye);
 
     const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
     rightEye.position.set(0.1, 0.45, 0.25);
+    rightEye.castShadow = true;
     this.mesh.add(rightEye);
   }
 

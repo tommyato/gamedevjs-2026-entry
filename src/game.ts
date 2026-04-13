@@ -61,28 +61,50 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.2;
+    this.renderer.toneMappingExposure = 1.35;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.insertBefore(this.renderer.domElement, container.firstChild);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x050508);
-    this.scene.fog = new THREE.FogExp2(0x050508, 0.05);
+    this.scene.background = new THREE.Color(0x120b08);
+    this.scene.fog = new THREE.FogExp2(0x120b08, 0.018);
 
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    this.camera.position.set(0, 5, 10);
-    this.camera.lookAt(0, 0, 0);
+    this.camera.position.set(0, 6.5, 12);
+    this.camera.lookAt(0, 2, 0);
 
-    const ambient = new THREE.AmbientLight(0x222244, 0.3);
+    const ambient = new THREE.AmbientLight(0xc7aa7a, 1.35);
     this.scene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xffaa44, 1.0);
-    dir.position.set(5, 10, 7);
-    this.scene.add(dir);
+
+    const hemisphere = new THREE.HemisphereLight(0xf2dcc2, 0x2b1a10, 1.1);
+    this.scene.add(hemisphere);
+
+    const keyLight = new THREE.DirectionalLight(0xffd6a3, 2.8);
+    keyLight.position.set(8, 18, 10);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.set(2048, 2048);
+    keyLight.shadow.camera.near = 1;
+    keyLight.shadow.camera.far = 80;
+    keyLight.shadow.camera.left = -16;
+    keyLight.shadow.camera.right = 16;
+    keyLight.shadow.camera.top = 16;
+    keyLight.shadow.camera.bottom = -16;
+    keyLight.shadow.bias = -0.0008;
+    keyLight.target.position.set(0, 10, 0);
+    this.scene.add(keyLight);
+    this.scene.add(keyLight.target);
+
+    const fillLight = new THREE.DirectionalLight(0xb8703a, 1.4);
+    fillLight.position.set(-7, 9, -6);
+    this.scene.add(fillLight);
 
     const renderPass = new RenderPass(this.scene, this.camera);
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      1.2, 0.4, 0.85
+      1.05, 0.55, 0.72
     );
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(renderPass);
@@ -93,12 +115,14 @@ export class Game {
     // Tower central pillar
     const towerGeo = new THREE.CylinderGeometry(0.8, 0.8, 400, 12);
     const towerMat = new THREE.MeshStandardMaterial({
-      color: 0x221100,
+      color: 0x6f4a22,
       metalness: 0.8,
-      roughness: 0.5
+      roughness: 0.38
     });
     this.towerBase = new THREE.Mesh(towerGeo, towerMat);
     this.towerBase.position.y = 190;
+    this.towerBase.castShadow = true;
+    this.towerBase.receiveShadow = true;
     this.scene.add(this.towerBase);
 
     // Initial gears
@@ -125,8 +149,10 @@ export class Game {
     this.gears.forEach(g => this.scene.remove(g.mesh));
     this.gears = [];
 
+    const gearPalette = [0x8c6239, 0xb87333, 0xa67c52, 0x7c5a2c];
+
     // Starting platform
-    const startGear = new Gear(2.5, 0.4, 0, 0x444444);
+    const startGear = new Gear(2.5, 0.4, 0, 0x8f6b3d);
     startGear.mesh.position.set(0, -0.2, 0);
     this.gears.push(startGear);
     this.scene.add(startGear.mesh);
@@ -136,7 +162,8 @@ export class Game {
       const radius = 1.2 + Math.random() * 1.5;
       const angle = Math.random() * Math.PI * 2;
       const dist = 1.5 + Math.random() * 2.0;
-      const gear = new Gear(radius, 0.3, 0.3 + Math.random() * 0.7);
+      const color = gearPalette[Math.floor(Math.random() * gearPalette.length)];
+      const gear = new Gear(radius, 0.3, 0.3 + Math.random() * 0.7, color);
       gear.mesh.position.set(Math.cos(angle) * dist, i * 2.5, Math.sin(angle) * dist);
       this.gears.push(gear);
       this.scene.add(gear.mesh);
@@ -261,6 +288,7 @@ export class Game {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.composer.setSize(w, h);
+    this.bloomPass.setSize(w, h);
   }
 
   private pauseAnimationLoop() {
