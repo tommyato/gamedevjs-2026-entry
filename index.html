@@ -3,39 +3,43 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GAMEDEVJS 2026</title>
+  <title>CLOCKWORK CLIMB — GAMEDEV.JS JAM 2026</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #020208; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #050508; }
     canvas { display: block; }
     #game-container { width: 100%; height: 100%; position: relative; }
 
     #hud {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      pointer-events: none; font-family: 'Orbitron', ui-monospace, 'Cascadia Code', 'Fira Code', monospace; color: #fff; z-index: 10;
+      pointer-events: none; font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; color: #fff; z-index: 10;
+    }
+    #hud-score-label {
+        position: absolute; top: 20px; right: 120px; font-size: 16px; color: #aa8844;
     }
     #hud-score {
       position: absolute; top: 20px; right: 28px; font-size: 32px; font-weight: 700;
-      color: #00ffcc; text-shadow: 0 0 20px rgba(0,255,204,0.5);
+      color: #ffaa44; text-shadow: 0 0 20px rgba(255,170,68,0.5);
     }
 
     #title-overlay {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       z-index: 20; pointer-events: auto;
+      background: rgba(0,0,0,0.4);
     }
     #title-overlay h1 {
-      font-family: 'Orbitron', ui-monospace, 'Cascadia Code', 'Fira Code', monospace; font-size: 56px; font-weight: 900;
-      color: #00ffcc; text-shadow: 0 0 60px rgba(0,255,204,0.4);
-      letter-spacing: 6px; margin-bottom: 16px;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 56px; font-weight: 900;
+      color: #ffaa44; text-shadow: 0 0 60px rgba(255,170,68,0.4);
+      letter-spacing: 6px; margin-bottom: 16px; text-align: center;
     }
     #title-overlay .tagline {
-      font-family: 'Orbitron', ui-monospace, 'Cascadia Code', 'Fira Code', monospace; font-size: 14px; color: #668899;
-      letter-spacing: 4px; margin-bottom: 40px;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 14px; color: #668899;
+      letter-spacing: 4px; margin-bottom: 40px; text-align: center;
     }
     #title-overlay .prompt {
-      font-family: 'Orbitron', ui-monospace, 'Cascadia Code', 'Fira Code', monospace; font-size: 18px; color: #ffcc00;
-      animation: pulse 1.5s ease-in-out infinite;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 18px; color: #ffcc00;
+      animation: pulse 1.5s ease-in-out infinite; text-align: center;
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
     .hidden { display: none !important; }
@@ -44,12 +48,13 @@
 <body>
   <div id="game-container">
     <div id="hud" class="hidden">
+      <div id="hud-score-label">HEIGHT:</div>
       <div id="hud-score">0</div>
     </div>
     <div id="title-overlay">
-      <h1>GAME TITLE</h1>
-      <div class="tagline">GAMEDEV.JS JAM 2026</div>
-      <div class="prompt">PRESS SPACE OR CLICK</div>
+      <h1>CLOCKWORK CLIMB</h1>
+      <div class="tagline">GAMEDEV.JS JAM 2026 — Theme: MACHINES</div>
+      <div class="prompt">PRESS SPACE OR CLICK TO CLIMB</div>
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
