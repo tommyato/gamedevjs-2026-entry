@@ -78,8 +78,8 @@ export class Player {
     }
   }
 
-  reset(y = 0) {
-    this.mesh.position.set(0, y, 0);
+  reset(y = 0, z = 0) {
+    this.mesh.position.set(0, y, z);
     this.velocity.set(0, 0, 0);
     this.onGround = true;
     this.highestY = y;

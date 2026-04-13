@@ -129,6 +129,7 @@ export class Game {
     this.resetLevel();
 
     this.scene.add(this.player.mesh);
+    this.player.reset(0, 2);
 
     this.hud = document.getElementById("hud")!;
     this.titleOverlay = document.getElementById("title-overlay")!;
@@ -211,7 +212,7 @@ export class Game {
     playClick();
     this.state = GameState.Playing;
     this.score = 0;
-    this.player.reset(0);
+    this.player.reset(0, 2);
     this.resetLevel();
     this.hud.classList.remove("hidden");
     this.titleOverlay.classList.add("hidden");
@@ -222,16 +223,18 @@ export class Game {
 
     // Player ground check
     let foundGround = false;
-    for (const gear of this.gears) {
-        const result = gear.checkCollision(this.player.mesh.position, 0.3);
-        if (result.onGear) {
-            this.player.onGround = true;
-            this.player.mesh.position.y = result.y;
-            this.player.velocity.y = 0;
-            // Inherit momentum
-            this.player.mesh.position.addScaledVector(result.momentum, dt);
-            foundGround = true;
-            break;
+    if (this.player.velocity.y <= 0) {
+        for (const gear of this.gears) {
+            const result = gear.checkCollision(this.player.mesh.position, 0.3);
+            if (result.onGear) {
+                this.player.onGround = true;
+                this.player.mesh.position.y = result.y;
+                this.player.velocity.y = 0;
+                // Inherit momentum
+                this.player.mesh.position.addScaledVector(result.momentum, dt);
+                foundGround = true;
+                break;
+            }
         }
     }
     if (!foundGround) {
@@ -239,6 +242,15 @@ export class Game {
     }
 
     this.player.update(dt, this.input);
+
+    // Pole collision
+    const distFromCenter = Math.hypot(this.player.mesh.position.x, this.player.mesh.position.z);
+    const minRadius = 0.8 + 0.3; // pole radius + player radius
+    if (distFromCenter < minRadius && distFromCenter > 0.001) {
+        const pushOut = minRadius / distFromCenter;
+        this.player.mesh.position.x *= pushOut;
+        this.player.mesh.position.z *= pushOut;
+    }
 
     // Camera follow
     const targetCamY = this.player.mesh.position.y + 5;
