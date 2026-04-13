@@ -2,8 +2,18 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { initAudio, playClick, setAudioEnabled } from "./audio";
 import { Input } from "./input";
-import { initAudio, playClick } from "./audio";
+import {
+  isAudioEnabled,
+  onAudioChange,
+  platformInit,
+  registerPauseHandlers,
+  signalFirstFrame,
+  signalGameReady,
+  signalLoadComplete,
+  submitScore,
+} from "./platform";
 
 /**
  * Game skeleton — Three.js scene with bloom, state machine, responsive resize.
@@ -24,6 +34,9 @@ export class Game {
   private composer!: EffectComposer;
   private bloomPass!: UnrealBloomPass;
   private clock = new THREE.Clock();
+  private readonly animationLoop = () => this.loop();
+  private animationLoopRunning = false;
+  private hasRenderedFirstFrame = false;
 
   // Input
   private input = new Input();
@@ -40,10 +53,12 @@ export class Game {
 
   async start() {
     this.init();
-    this.renderer.setAnimationLoop(() => this.loop());
+    this.resumeAnimationLoop();
+    signalGameReady();
   }
 
   private init() {
+    platformInit();
     this.highScore = parseInt(localStorage.getItem("gameHighScore") || "0", 10);
 
     // Renderer
@@ -103,6 +118,14 @@ export class Game {
 
     // Resize
     window.addEventListener("resize", () => this.onResize());
+
+    registerPauseHandlers(
+      () => this.pauseAnimationLoop(),
+      () => this.resumeAnimationLoop()
+    );
+    setAudioEnabled(isAudioEnabled());
+    onAudioChange((enabled) => setAudioEnabled(enabled));
+    signalLoadComplete();
   }
 
   private loop() {
@@ -122,6 +145,10 @@ export class Game {
     }
 
     this.composer.render();
+    if (!this.hasRenderedFirstFrame) {
+      this.hasRenderedFirstFrame = true;
+      signalFirstFrame();
+    }
     this.input.endFrame();
   }
 
@@ -162,6 +189,10 @@ export class Game {
 
   private die() {
     this.state = GameState.GameOver;
+    void submitScore(this.score).catch((error: unknown) => {
+      console.error("Failed to submit score", error);
+    });
+
     if (this.score > this.highScore) {
       this.highScore = this.score;
       localStorage.setItem("gameHighScore", String(this.highScore));
@@ -181,5 +212,25 @@ export class Game {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.composer.setSize(w, h);
+  }
+
+  private pauseAnimationLoop() {
+    if (!this.animationLoopRunning) {
+      return;
+    }
+
+    this.renderer.setAnimationLoop(null);
+    this.animationLoopRunning = false;
+    this.clock.stop();
+  }
+
+  private resumeAnimationLoop() {
+    if (this.animationLoopRunning) {
+      return;
+    }
+
+    this.clock.start();
+    this.renderer.setAnimationLoop(this.animationLoop);
+    this.animationLoopRunning = true;
   }
 }

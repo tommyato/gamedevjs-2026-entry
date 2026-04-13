@@ -6,12 +6,22 @@
 let ctx: AudioContext | null = null;
 let masterGain: GainNode | null = null;
 let initialized = false;
+const DEFAULT_MASTER_VOLUME = 0.5;
+let audioEnabled = true;
+
+function applyMasterVolume() {
+  if (!masterGain) {
+    return;
+  }
+
+  masterGain.gain.value = audioEnabled ? DEFAULT_MASTER_VOLUME : 0;
+}
 
 function ensureContext(): AudioContext {
   if (!ctx) {
     ctx = new AudioContext();
     masterGain = ctx.createGain();
-    masterGain.gain.value = 0.5;
+    applyMasterVolume();
     masterGain.connect(ctx.destination);
   }
   if (ctx.state === "suspended") {
@@ -22,7 +32,9 @@ function ensureContext(): AudioContext {
 
 /** Call on first user interaction to unlock audio */
 export function initAudio() {
-  if (initialized) return;
+  if (initialized) {
+    return;
+  }
   ensureContext();
   initialized = true;
 }
@@ -34,7 +46,9 @@ export function playTone(
   type: OscillatorType = "sine",
   volume: number = 0.1
 ) {
-  if (!ctx || !masterGain) return;
+  if (!ctx || !masterGain) {
+    return;
+  }
   const t = ctx.currentTime;
 
   const osc = ctx.createOscillator();
@@ -58,7 +72,9 @@ export function playClick() {
 
 /** Positive/collect sound */
 export function playCollect(pitch: number = 1) {
-  if (!ctx || !masterGain) return;
+  if (!ctx || !masterGain) {
+    return;
+  }
   const t = ctx.currentTime;
   const baseFreq = 600 * pitch;
 
@@ -79,7 +95,9 @@ export function playCollect(pitch: number = 1) {
 
 /** Negative/hit sound */
 export function playHit() {
-  if (!ctx || !masterGain) return;
+  if (!ctx || !masterGain) {
+    return;
+  }
   const t = ctx.currentTime;
 
   // Noise burst
@@ -115,8 +133,15 @@ export function playHit() {
   osc.stop(t + 0.26);
 }
 
+export function setAudioEnabled(enabled: boolean) {
+  audioEnabled = enabled;
+  applyMasterVolume();
+}
+
 export function stopAudio() {
-  if (!ctx) return;
+  if (!ctx) {
+    return;
+  }
   ctx.close();
   ctx = null;
   masterGain = null;

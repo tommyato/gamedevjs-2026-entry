@@ -1,0 +1,6 @@
+game_id = "REPLACE_ME"
+upload_dir = "./dist"
+
+[custom]
+version = "0.1.0"
+entrypoint = "index.html"

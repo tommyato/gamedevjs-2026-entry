@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GAMEDEVJS 2026</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #020208; }
     canvas { display: block; }
@@ -13,7 +12,7 @@
 
     #hud {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      pointer-events: none; font-family: 'Orbitron', monospace; color: #fff; z-index: 10;
+      pointer-events: none; font-family: 'Orbitron', ui-monospace, 'Cascadia Code', 'Fira Code', monospace; color: #fff; z-index: 10;
     }
     #hud-score {
       position: absolute; top: 20px; right: 28px; font-size: 32px; font-weight: 700;
@@ -26,16 +25,16 @@
       z-index: 20; pointer-events: auto;
     }
     #title-overlay h1 {
-      font-family: 'Orbitron', monospace; font-size: 56px; font-weight: 900;
+      font-family: 'Orbitron', ui-monospace, 'Cascadia Code', 'Fira Code', monospace; font-size: 56px; font-weight: 900;
       color: #00ffcc; text-shadow: 0 0 60px rgba(0,255,204,0.4);
       letter-spacing: 6px; margin-bottom: 16px;
     }
     #title-overlay .tagline {
-      font-family: 'Orbitron', monospace; font-size: 14px; color: #668899;
+      font-family: 'Orbitron', ui-monospace, 'Cascadia Code', 'Fira Code', monospace; font-size: 14px; color: #668899;
       letter-spacing: 4px; margin-bottom: 40px;
     }
     #title-overlay .prompt {
-      font-family: 'Orbitron', monospace; font-size: 18px; color: #ffcc00;
+      font-family: 'Orbitron', ui-monospace, 'Cascadia Code', 'Fira Code', monospace; font-size: 18px; color: #ffcc00;
       animation: pulse 1.5s ease-in-out infinite;
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
