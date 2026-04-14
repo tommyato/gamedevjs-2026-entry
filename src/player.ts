@@ -11,9 +11,12 @@ export class Player {
   public onGround = false;
   private radius = 0.3;
   private height = 0.6;
+  private readonly moveSpeed = 5;
   public highestY = 0;
   private readonly visualRoot = new THREE.Group();
   private scaleYImpulse = 0;
+  private speedBoostTimer = 0;
+  private speedBoostStrength = 1;
 
   constructor() {
     this.mesh.add(this.visualRoot);
@@ -54,8 +57,12 @@ export class Player {
 
   update(dt: number, input: Input): PlayerUpdateResult {
     const move = input.getMovement();
-    const speed = 5;
     let jumped = false;
+    this.speedBoostTimer = Math.max(0, this.speedBoostTimer - dt);
+    const speedBoost = this.speedBoostTimer > 0
+      ? THREE.MathUtils.lerp(this.speedBoostStrength, 1, 1 - this.speedBoostTimer / 0.9)
+      : 1;
+    const speed = this.moveSpeed * speedBoost;
 
     // Movement relative to world
     this.mesh.position.x += move.x * speed * dt;
@@ -114,12 +121,19 @@ export class Player {
     this.scaleYImpulse = -THREE.MathUtils.clamp(impactSpeed * 0.028, 0.08, 0.22);
   }
 
+  giveSpeedBoost(multiplier: number, duration: number) {
+    this.speedBoostStrength = Math.max(this.speedBoostStrength, multiplier);
+    this.speedBoostTimer = Math.max(this.speedBoostTimer, duration);
+  }
+
   reset(y = 0, z = 0) {
     this.mesh.position.set(0, y, z);
     this.velocity.set(0, 0, 0);
     this.onGround = true;
     this.highestY = y;
     this.scaleYImpulse = 0;
+    this.speedBoostTimer = 0;
+    this.speedBoostStrength = 1;
     this.visualRoot.scale.setScalar(1);
     this.visualRoot.rotation.set(0, 0, 0);
   }
