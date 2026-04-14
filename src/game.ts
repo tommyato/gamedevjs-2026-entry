@@ -461,6 +461,10 @@ export class Game {
 
     if (this.player.velocity.y <= 0) {
       for (const gear of this.gears) {
+        // Prevent landing on a gear the player jumped through from below
+        const gearBottom = gear.mesh.position.y - gear.height / 2;
+        if (this.player.prevY < gearBottom - 0.05) continue;
+
         const result = gear.checkCollision(this.player.mesh.position, 0.3);
         if (!result.onGear) {
           continue;
@@ -487,6 +491,17 @@ export class Game {
         this.player.mesh.rotation.y += gear.getAngularVelocity() * dt;
         foundGround = true;
         break;
+      }
+    }
+
+    if (this.player.velocity.y > 0) {
+      for (const gear of this.gears) {
+        const block = gear.checkBlockFromBelow(this.player.mesh.position, 0.6, 0.3);
+        if (block.blocked) {
+          this.player.mesh.position.y = block.capY;
+          this.player.velocity.y = 0;
+          break;
+        }
       }
     }
 

@@ -9,6 +9,7 @@ export class Player {
   public mesh = new THREE.Group();
   public velocity = new THREE.Vector3();
   public onGround = false;
+  public prevY = 0;
   private radius = 0.3;
   private height = 0.6;
   private readonly moveSpeed = 5;
@@ -56,6 +57,7 @@ export class Player {
   }
 
   update(dt: number, input: Input): PlayerUpdateResult {
+    this.prevY = this.mesh.position.y;
     const move = input.getMovement();
     let jumped = false;
     this.speedBoostTimer = Math.max(0, this.speedBoostTimer - dt);
@@ -131,6 +133,7 @@ export class Player {
     this.velocity.set(0, 0, 0);
     this.onGround = true;
     this.highestY = y;
+    this.prevY = y;
     this.scaleYImpulse = 0;
     this.speedBoostTimer = 0;
     this.speedBoostStrength = 1;
