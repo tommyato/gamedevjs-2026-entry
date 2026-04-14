@@ -119,7 +119,7 @@ export class Game {
     const renderPass = new RenderPass(this.scene, this.camera);
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      1.05, 0.55, 0.72
+      0.45, 0.4, 0.82
     );
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(renderPass);

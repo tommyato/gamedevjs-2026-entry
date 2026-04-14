@@ -140,7 +140,7 @@ export class Gear {
         const dx = playerPos.x - this.mesh.position.x;
         const dz = playerPos.z - this.mesh.position.z;
         const radialVel = this.rotationSpeed * this.rotationDir;
-        const momentum = new THREE.Vector3(-dz * radialVel, 0, dx * radialVel);
+        const momentum = new THREE.Vector3(dz * radialVel, 0, -dx * radialVel);
 
         return { onGear: true, y: gearTop, momentum };
     }
