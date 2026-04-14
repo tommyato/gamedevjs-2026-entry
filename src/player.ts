@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { Input } from "./input";
 
+export type PlayerUpdateResult = {
+  jumped: boolean;
+};
+
 export class Player {
   public mesh = new THREE.Group();
   public velocity = new THREE.Vector3();
@@ -8,8 +12,12 @@ export class Player {
   private radius = 0.3;
   private height = 0.6;
   public highestY = 0;
+  private readonly visualRoot = new THREE.Group();
+  private scaleYImpulse = 0;
 
   constructor() {
+    this.mesh.add(this.visualRoot);
+
     // Body
     const bodyGeo = new THREE.CylinderGeometry(this.radius, this.radius, this.height, 12);
     const bodyMat = new THREE.MeshStandardMaterial({
@@ -21,7 +29,7 @@ export class Player {
     body.position.y = this.height / 2;
     body.castShadow = true;
     body.receiveShadow = true;
-    this.mesh.add(body);
+    this.visualRoot.add(body);
 
     // Eyes
     const eyeGeo = new THREE.SphereGeometry(0.05, 8, 8);
@@ -36,17 +44,18 @@ export class Player {
     const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
     leftEye.position.set(-0.1, 0.45, 0.25);
     leftEye.castShadow = true;
-    this.mesh.add(leftEye);
+    this.visualRoot.add(leftEye);
 
     const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
     rightEye.position.set(0.1, 0.45, 0.25);
     rightEye.castShadow = true;
-    this.mesh.add(rightEye);
+    this.visualRoot.add(rightEye);
   }
 
-  update(dt: number, input: Input) {
+  update(dt: number, input: Input): PlayerUpdateResult {
     const move = input.getMovement();
     const speed = 5;
+    let jumped = false;
 
     // Movement relative to world
     this.mesh.position.x += move.x * speed * dt;
@@ -63,12 +72,14 @@ export class Player {
     if (this.onGround && input.justPressed("space")) {
       this.velocity.y = 12;
       this.onGround = false;
+      this.scaleYImpulse = 0.22;
+      jumped = true;
     }
 
     this.mesh.position.y += this.velocity.y * dt;
 
     if (this.mesh.position.y > this.highestY) {
-        this.highestY = this.mesh.position.y;
+      this.highestY = this.mesh.position.y;
     }
 
     // Look in movement direction
@@ -76,6 +87,31 @@ export class Player {
       const angle = Math.atan2(move.x, move.y);
       this.mesh.rotation.y = angle;
     }
+
+    const verticalVelocityFactor = THREE.MathUtils.clamp(this.velocity.y / 14, -1, 1);
+    const airborneScaleY = verticalVelocityFactor > 0
+      ? verticalVelocityFactor * 0.12
+      : verticalVelocityFactor * 0.08;
+    const targetScaleY = 1 + airborneScaleY + this.scaleYImpulse;
+    const targetScaleXZ = 1 - (targetScaleY - 1) * 0.45;
+    const scaleLerp = 1 - Math.exp(-dt * 14);
+    this.visualRoot.scale.x = THREE.MathUtils.lerp(this.visualRoot.scale.x, targetScaleXZ, scaleLerp);
+    this.visualRoot.scale.y = THREE.MathUtils.lerp(this.visualRoot.scale.y, targetScaleY, scaleLerp);
+    this.visualRoot.scale.z = THREE.MathUtils.lerp(this.visualRoot.scale.z, targetScaleXZ, scaleLerp);
+    this.scaleYImpulse = THREE.MathUtils.lerp(this.scaleYImpulse, 0, 1 - Math.exp(-dt * 10));
+
+    const targetLean = THREE.MathUtils.clamp(-move.x * 0.16, -0.16, 0.16);
+    this.visualRoot.rotation.z = THREE.MathUtils.lerp(
+      this.visualRoot.rotation.z,
+      targetLean,
+      1 - Math.exp(-dt * 10)
+    );
+
+    return { jumped };
+  }
+
+  land(impactSpeed: number) {
+    this.scaleYImpulse = -THREE.MathUtils.clamp(impactSpeed * 0.028, 0.08, 0.22);
   }
 
   reset(y = 0, z = 0) {
@@ -83,5 +119,8 @@ export class Player {
     this.velocity.set(0, 0, 0);
     this.onGround = true;
     this.highestY = y;
+    this.scaleYImpulse = 0;
+    this.visualRoot.scale.setScalar(1);
+    this.visualRoot.rotation.set(0, 0, 0);
   }
 }

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { initAudio, playClick, setAudioEnabled } from "./audio";
+import { initAudio, playClick, playHit, playJump, playLand, playMilestone, setAudioEnabled } from "./audio";
 import { Input } from "./input";
 import {
   isAudioEnabled,
@@ -42,10 +42,21 @@ export class Game {
   private hud!: HTMLElement;
   private titleOverlay!: HTMLElement;
   private hudScore!: HTMLElement;
+  private hudBest!: HTMLElement;
+  private hudStatus!: HTMLElement;
+  private hudToast!: HTMLElement;
+  private titleHeading!: HTMLElement;
+  private titleTagline!: HTMLElement;
+  private titlePrompt!: HTMLElement;
 
   private player = new Player();
   private gears: Gear[] = [];
   private towerBase!: THREE.Mesh;
+  private playerLight!: THREE.PointLight;
+  private readonly cameraLookTarget = new THREE.Vector3();
+  private cameraKick = 0;
+  private nextMilestone = 25;
+  private toastTimer = 0;
 
   async start() {
     this.init();
@@ -63,18 +74,18 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.35;
+    this.renderer.toneMappingExposure = 1.5;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.insertBefore(this.renderer.domElement, container.firstChild);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x120b08);
-    this.scene.fog = new THREE.FogExp2(0x120b08, 0.018);
+    this.scene.background = new THREE.Color(0x140d0a);
+    this.scene.fog = new THREE.FogExp2(0x140d0a, 0.014);
 
-    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    this.camera.position.set(0, 6.5, 12);
-    this.camera.lookAt(0, 2, 0);
+    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 1000);
+    this.camera.position.set(0, 6.8, 11.2);
+    this.camera.lookAt(0, 4, 0);
 
     const ambient = new THREE.AmbientLight(0xc7aa7a, 1.35);
     this.scene.add(ambient);
@@ -100,6 +111,10 @@ export class Game {
     const fillLight = new THREE.DirectionalLight(0xb8703a, 1.4);
     fillLight.position.set(-7, 9, -6);
     this.scene.add(fillLight);
+
+    this.playerLight = new THREE.PointLight(0xffc06a, 26, 16, 2);
+    this.playerLight.position.set(0, 4.5, 4);
+    this.scene.add(this.playerLight);
 
     const renderPass = new RenderPass(this.scene, this.camera);
     this.bloomPass = new UnrealBloomPass(
@@ -134,6 +149,12 @@ export class Game {
     this.hud = document.getElementById("hud")!;
     this.titleOverlay = document.getElementById("title-overlay")!;
     this.hudScore = document.getElementById("hud-score")!;
+    this.hudBest = document.getElementById("hud-best")!;
+    this.hudStatus = document.getElementById("hud-status")!;
+    this.hudToast = document.getElementById("hud-toast")!;
+    this.titleHeading = this.titleOverlay.querySelector("h1")!;
+    this.titleTagline = this.titleOverlay.querySelector(".tagline")!;
+    this.titlePrompt = this.titleOverlay.querySelector(".prompt")!;
 
     window.addEventListener("resize", () => this.onResize());
 
@@ -197,10 +218,11 @@ export class Game {
 
   private updateTitle(dt: number) {
     const t = performance.now() * 0.0003;
-    this.camera.position.set(Math.sin(t) * 10, 5, Math.cos(t) * 10);
-    this.camera.lookAt(0, 2, 0);
+    this.camera.position.set(Math.sin(t) * 8.6, 6.2 + Math.sin(t * 2) * 0.25, Math.cos(t) * 8.6 + 1.2);
+    this.camera.lookAt(0, 4.2, 0);
 
     this.gears.forEach(g => g.update(dt));
+    this.updatePlayerLight(dt);
 
     if (this.input.justPressed("space") || this.input.justPressed("click")) {
       this.startGame();
@@ -212,8 +234,15 @@ export class Game {
     playClick();
     this.state = GameState.Playing;
     this.score = 0;
+    this.nextMilestone = 25;
+    this.toastTimer = 0;
+    this.cameraKick = 0;
     this.player.reset(0, 2);
     this.resetLevel();
+    this.updateHud(dtZero());
+    this.titleHeading.textContent = "CLOCKWORK CLIMB";
+    this.titleTagline.textContent = "GAMEDEV.JS JAM 2026 — Theme: MACHINES";
+    this.titlePrompt.textContent = "PRESS SPACE OR CLICK TO CLIMB";
     this.hud.classList.remove("hidden");
     this.titleOverlay.classList.add("hidden");
   }
@@ -223,55 +252,90 @@ export class Game {
 
     // Player ground check
     let foundGround = false;
+    const wasOnGround = this.player.onGround;
+    const landingSpeed = Math.max(0, -this.player.velocity.y);
     if (this.player.velocity.y <= 0) {
-        for (const gear of this.gears) {
-            const result = gear.checkCollision(this.player.mesh.position, 0.3);
-            if (result.onGear) {
-                this.player.onGround = true;
-                this.player.mesh.position.y = result.y;
-                this.player.velocity.y = 0;
-                // Inherit momentum and match the gear's rotation direction visually.
-                this.player.mesh.position.addScaledVector(result.momentum, dt);
-                this.player.mesh.rotation.y += gear.rotationSpeed * gear.rotationDir * dt;
-                foundGround = true;
-                break;
-            }
+      for (const gear of this.gears) {
+        const result = gear.checkCollision(this.player.mesh.position, 0.3);
+        if (result.onGear) {
+          this.player.onGround = true;
+          this.player.mesh.position.y = result.y;
+          this.player.velocity.y = 0;
+          if (!wasOnGround) {
+            this.player.land(landingSpeed);
+            playLand(landingSpeed / 12);
+            this.cameraKick = Math.min(this.cameraKick + landingSpeed * 0.015, 0.28);
+          }
+
+          // Inherit momentum and match the gear's rotation direction visually.
+          this.player.mesh.position.addScaledVector(result.momentum, dt);
+          this.player.mesh.rotation.y += gear.rotationSpeed * gear.rotationDir * dt;
+          foundGround = true;
+          break;
         }
+      }
     }
     if (!foundGround) {
-        this.player.onGround = false;
+      this.player.onGround = false;
     }
 
-    this.player.update(dt, this.input);
+    const playerFrame = this.player.update(dt, this.input);
+    if (playerFrame.jumped) {
+      playJump();
+      this.cameraKick = Math.max(this.cameraKick, 0.12);
+    }
 
     // Pole collision
     const distFromCenter = Math.hypot(this.player.mesh.position.x, this.player.mesh.position.z);
     const minRadius = 0.8 + 0.3; // pole radius + player radius
     if (distFromCenter < minRadius && distFromCenter > 0.001) {
-        const pushOut = minRadius / distFromCenter;
-        this.player.mesh.position.x *= pushOut;
-        this.player.mesh.position.z *= pushOut;
+      const pushOut = minRadius / distFromCenter;
+      this.player.mesh.position.x *= pushOut;
+      this.player.mesh.position.z *= pushOut;
     }
 
     // Camera follow
-    const targetCamY = this.player.mesh.position.y + 5;
-    this.camera.position.y += (targetCamY - this.camera.position.y) * dt * 2;
-    this.camera.position.x += (this.player.mesh.position.x * 0.5 - this.camera.position.x) * dt;
-    this.camera.position.z += (this.player.mesh.position.z + 10 - this.camera.position.z) * dt;
-    this.camera.lookAt(this.player.mesh.position.x, this.player.mesh.position.y + 1, this.player.mesh.position.z);
+    const verticalLead = THREE.MathUtils.clamp(this.player.velocity.y * 0.12, -1.2, 1.6);
+    const followLerp = 1 - Math.exp(-dt * (this.player.onGround ? 5.5 : 4));
+    const targetCamX = this.player.mesh.position.x * 0.42;
+    const targetCamY = this.player.mesh.position.y + 6.1 + verticalLead + this.cameraKick;
+    const targetCamZ = this.player.mesh.position.z + 10.2 + Math.max(-this.player.velocity.y * 0.08, 0);
+    this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, targetCamX, followLerp);
+    this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, targetCamY, followLerp);
+    this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetCamZ, followLerp);
+    this.cameraLookTarget.set(
+      this.player.mesh.position.x * 0.2,
+      this.player.mesh.position.y + 1.3 + verticalLead * 0.35,
+      this.player.mesh.position.z - 0.6
+    );
+    this.camera.lookAt(this.cameraLookTarget);
+    const targetFov = THREE.MathUtils.clamp(58 + Math.max(-this.player.velocity.y - 5, 0) * 0.45, 58, 64);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, followLerp);
+    this.camera.updateProjectionMatrix();
+    this.cameraKick = THREE.MathUtils.lerp(this.cameraKick, 0, 1 - Math.exp(-dt * 7));
+    this.updatePlayerLight(dt);
 
     // Score based on height
+    const previousScore = this.score;
     this.score = Math.max(this.score, Math.floor(this.player.mesh.position.y));
-    this.hudScore.textContent = String(this.score);
+    if (this.score > previousScore && this.score >= this.nextMilestone) {
+      while (this.score >= this.nextMilestone) {
+        this.showToast(`CHECKPOINT ${this.nextMilestone}m`);
+        playMilestone(1 + this.nextMilestone / 220);
+        this.nextMilestone += 25;
+      }
+    }
+    this.updateHud(dt);
 
     // Death check
     if (this.player.mesh.position.y < this.camera.position.y - 12) {
-        this.die();
+      this.die();
     }
   }
 
   private die() {
     this.state = GameState.GameOver;
+    playHit();
     void submitScore(this.score).catch((error: unknown) => {
       console.error("Failed to submit score", error);
     });
@@ -280,15 +344,17 @@ export class Game {
       this.highScore = this.score;
       localStorage.setItem("gameHighScore", String(this.highScore));
     }
-    
+
+    this.updateHud(dtZero());
     this.titleOverlay.classList.remove("hidden");
-    const titleText = this.titleOverlay.querySelector("h1");
-    if (titleText) titleText.textContent = "GAME OVER";
-    const promptText = this.titleOverlay.querySelector(".prompt");
-    if (promptText) promptText.textContent = "PRESS SPACE TO RESTART";
+    this.titleHeading.textContent = "GAME OVER";
+    this.titleTagline.textContent = `FINAL HEIGHT ${this.score}m · BEST ${this.highScore}m`;
+    this.titlePrompt.textContent = "PRESS SPACE TO RESTART";
   }
 
   private updateGameOver(dt: number) {
+    this.updatePlayerLight(dt);
+
     if (this.input.justPressed("space") || this.input.justPressed("click")) {
       this.startGame();
     }
@@ -321,4 +387,34 @@ export class Game {
     this.renderer.setAnimationLoop(this.animationLoop);
     this.animationLoopRunning = true;
   }
+
+  private updateHud(dt: number) {
+    this.hudScore.textContent = String(this.score);
+    this.hudBest.textContent = String(Math.max(this.highScore, this.score));
+    this.hudStatus.textContent = `NEXT ${this.nextMilestone}m`;
+
+    this.toastTimer = Math.max(0, this.toastTimer - dt);
+    const toastVisible = this.toastTimer > 0;
+    const visibility = Math.min(this.toastTimer / 0.9, 1);
+    this.hudToast.style.opacity = toastVisible ? String(visibility) : "0";
+    this.hudToast.style.transform = `translate(-50%, ${toastVisible ? (1 - visibility) * 10 : 12}px)`;
+  }
+
+  private showToast(message: string) {
+    this.hudToast.textContent = message;
+    this.toastTimer = 1.3;
+    this.hudToast.style.opacity = "1";
+    this.hudToast.style.transform = "translate(-50%, 0)";
+  }
+
+  private updatePlayerLight(dt: number) {
+    const lightLerp = 1 - Math.exp(-dt * 5);
+    this.playerLight.position.x = THREE.MathUtils.lerp(this.playerLight.position.x, this.player.mesh.position.x, lightLerp);
+    this.playerLight.position.y = THREE.MathUtils.lerp(this.playerLight.position.y, this.player.mesh.position.y + 3.2, lightLerp);
+    this.playerLight.position.z = THREE.MathUtils.lerp(this.playerLight.position.z, this.player.mesh.position.z + 2.6, lightLerp);
+  }
+}
+
+function dtZero(): number {
+  return 0;
 }

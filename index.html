@@ -6,27 +6,90 @@
   <title>CLOCKWORK CLIMB — GAMEDEV.JS JAM 2026</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #050508; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: radial-gradient(circle at top, #1d140f 0%, #050508 65%); }
     canvas { display: block; }
     #game-container { width: 100%; height: 100%; position: relative; }
 
     #hud {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       pointer-events: none; font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; color: #fff; z-index: 10;
+      padding: 20px;
     }
-    #hud-score-label {
-        position: absolute; top: 20px; right: 120px; font-size: 16px; color: #aa8844;
+    .hud-panel {
+      position: absolute; top: 20px; right: 20px;
+      min-width: 220px;
+      padding: 16px 18px;
+      border: 1px solid rgba(255, 196, 120, 0.18);
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62));
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08);
+      backdrop-filter: blur(10px);
+    }
+    .hud-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .hud-row + .hud-row {
+      margin-top: 10px;
+    }
+    .hud-label {
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: #c7a271;
     }
     #hud-score {
-      position: absolute; top: 20px; right: 28px; font-size: 32px; font-weight: 700;
-      color: #ffaa44; text-shadow: 0 0 20px rgba(255,170,68,0.5);
+      font-size: 40px;
+      font-weight: 900;
+      color: #ffaa44;
+      text-shadow: 0 0 24px rgba(255,170,68,0.45);
+    }
+    #hud-best {
+      font-size: 20px;
+      font-weight: 700;
+      color: #f3d7b1;
+    }
+    #hud-status {
+      margin-top: 14px;
+      font-size: 12px;
+      letter-spacing: 2px;
+      color: #7fd6ff;
+    }
+    #hud-toast {
+      position: absolute;
+      top: 76px;
+      left: 50%;
+      transform: translate(-50%, 12px);
+      padding: 10px 18px;
+      border-radius: 999px;
+      border: 1px solid rgba(122, 223, 255, 0.32);
+      background: rgba(10, 21, 28, 0.8);
+      color: #aef0ff;
+      font-size: 14px;
+      letter-spacing: 2px;
+      opacity: 0;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+      transition: opacity 120ms ease-out, transform 120ms ease-out;
+    }
+    #hud-controls {
+      position: absolute;
+      left: 20px;
+      bottom: 20px;
+      padding: 10px 14px;
+      border-radius: 14px;
+      background: rgba(10, 10, 12, 0.46);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: #a8adb7;
+      font-size: 11px;
+      letter-spacing: 2px;
     }
 
     #title-overlay {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       z-index: 20; pointer-events: auto;
-      background: rgba(0,0,0,0.4);
+      background: radial-gradient(circle at center, rgba(0,0,0,0.18), rgba(0,0,0,0.58));
     }
     #title-overlay h1 {
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 56px; font-weight: 900;
@@ -45,11 +108,24 @@
     .hidden { display: none !important; }
   </style>
 </head>
-<body>
+  <body>
   <div id="game-container">
     <div id="hud" class="hidden">
-      <div id="hud-score-label">HEIGHT:</div>
-      <div id="hud-score">0</div>
+      <div class="hud-panel">
+        <div class="hud-row">
+          <div>
+            <div class="hud-label">HEIGHT</div>
+            <div id="hud-score">0</div>
+          </div>
+          <div>
+            <div class="hud-label">BEST</div>
+            <div id="hud-best">0</div>
+          </div>
+        </div>
+        <div id="hud-status">NEXT 25m</div>
+      </div>
+      <div id="hud-toast"></div>
+      <div id="hud-controls">WASD / ARROWS TO MOVE · SPACE OR TAP TO JUMP</div>
     </div>
     <div id="title-overlay">
       <h1>CLOCKWORK CLIMB</h1>
