@@ -230,8 +230,9 @@ export class Game {
                 this.player.onGround = true;
                 this.player.mesh.position.y = result.y;
                 this.player.velocity.y = 0;
-                // Inherit momentum
+                // Inherit momentum and match the gear's rotation direction visually.
                 this.player.mesh.position.addScaledVector(result.momentum, dt);
+                this.player.mesh.rotation.y += gear.rotationSpeed * gear.rotationDir * dt;
                 foundGround = true;
                 break;
             }
