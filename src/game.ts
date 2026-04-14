@@ -155,16 +155,16 @@ export class Game {
     fillLight.position.set(-7, 9, -6);
     this.scene.add(fillLight);
 
-    this.playerLight = new THREE.PointLight(0xffc06a, 26, 16, 2);
+    this.playerLight = new THREE.PointLight(0xffc06a, 12, 16, 2);
     this.playerLight.position.set(0, 4.5, 4);
     this.scene.add(this.playerLight);
 
     const renderPass = new RenderPass(this.scene, this.camera);
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.45,
-      0.4,
-      0.82
+      0.18,
+      0.25,
+      0.92
     );
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(renderPass);

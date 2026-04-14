@@ -62,7 +62,7 @@ export class Gear {
     this.bodyMaterial = new THREE.MeshStandardMaterial({
       color: bodyColor.clone().multiplyScalar(this.variant === "crumbling" ? 0.72 : 0.82),
       emissive: bodyColor.clone().multiplyScalar(0.08 + danger * 0.1),
-      emissiveIntensity: 0.75,
+      emissiveIntensity: 0.3,
       metalness: 0.9,
       roughness: this.variant === "crumbling" ? 0.48 : 0.34,
     });
@@ -75,7 +75,7 @@ export class Gear {
     this.topSurfaceMaterial = new THREE.MeshStandardMaterial({
       color: topColor,
       emissive: topColor.clone().multiplyScalar(0.22 + danger * 0.16),
-      emissiveIntensity: 0.9,
+      emissiveIntensity: 0.35,
       metalness: 0.78,
       roughness: 0.22,
     });
@@ -89,7 +89,7 @@ export class Gear {
     const landingRingMat = new THREE.MeshStandardMaterial({
       color: this.variant === "speed" ? 0x95dfff : this.variant === "reverse" ? 0xff8876 : 0xffcf8e,
       emissive: this.variant === "speed" ? 0x57b9ff : this.variant === "reverse" ? 0xff5a44 : 0xffb14a,
-      emissiveIntensity: 1.3 + danger * 0.5,
+      emissiveIntensity: 0.5 + danger * 0.15,
       metalness: 0.55,
       roughness: 0.3,
     });
@@ -104,7 +104,7 @@ export class Gear {
     this.detailMaterial = new THREE.MeshStandardMaterial({
       color: this.variant === "crumbling" ? 0x1d1817 : 0x2b2623,
       emissive: this.variant === "speed" ? 0x11355e : 0x150f0a,
-      emissiveIntensity: this.variant === "speed" ? 1.4 : 0.9,
+      emissiveIntensity: this.variant === "speed" ? 0.5 : 0.35,
       metalness: 0.92,
       roughness: 0.26,
     });
@@ -118,7 +118,7 @@ export class Gear {
     this.accentMaterial = new THREE.MeshStandardMaterial({
       color: this.variant === "speed" ? 0xb7efff : this.variant === "reverse" ? 0xff8c7a : 0xf6b86f,
       emissive: this.variant === "speed" ? 0x4ab8ff : this.variant === "reverse" ? 0xff694f : 0xffa43c,
-      emissiveIntensity: this.variant === "reverse" ? 1.2 : 1,
+      emissiveIntensity: this.variant === "reverse" ? 0.45 : 0.35,
       metalness: 0.72,
       roughness: 0.24,
     });
@@ -136,7 +136,7 @@ export class Gear {
     const markerMat = new THREE.MeshStandardMaterial({
       color: this.variant === "speed" ? 0x9ef5ff : this.variant === "reverse" ? 0xffb4aa : 0x9ef5ff,
       emissive: this.variant === "speed" ? 0x58e1ff : this.variant === "reverse" ? 0xff5a44 : 0x58e1ff,
-      emissiveIntensity: 2.2,
+      emissiveIntensity: 0.65,
       metalness: 0.4,
       roughness: 0.18,
     });
@@ -149,7 +149,7 @@ export class Gear {
     this.toothMaterial = new THREE.MeshStandardMaterial({
       color: toothColor,
       emissive: toothColor.clone().multiplyScalar(0.1 + danger * 0.1),
-      emissiveIntensity: 0.75,
+      emissiveIntensity: 0.3,
       metalness: 0.88,
       roughness: 0.24,
     });
@@ -173,7 +173,7 @@ export class Gear {
     const crackMaterial = new THREE.MeshStandardMaterial({
       color: 0x2a2120,
       emissive: 0x120c0c,
-      emissiveIntensity: 0.45,
+      emissiveIntensity: 0.2,
       metalness: 0.35,
       roughness: 0.72,
     });

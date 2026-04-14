@@ -39,7 +39,7 @@ export class Player {
     const eyeMat = new THREE.MeshStandardMaterial({
       color: 0x00ffff,
       emissive: 0x00ffff,
-      emissiveIntensity: 6,
+      emissiveIntensity: 1.5,
       metalness: 0.1,
       roughness: 0.15
     });

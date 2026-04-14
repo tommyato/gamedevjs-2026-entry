@@ -16,7 +16,7 @@ export class BoltCollectible {
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0xffd765,
       emissive: 0xffc13b,
-      emissiveIntensity: 1.5,
+      emissiveIntensity: 0.6,
       metalness: 0.82,
       roughness: 0.22,
       transparent: true,
@@ -25,7 +25,7 @@ export class BoltCollectible {
     const coreMaterial = new THREE.MeshStandardMaterial({
       color: 0xfff0a4,
       emissive: 0xffd45d,
-      emissiveIntensity: 1.8,
+      emissiveIntensity: 0.7,
       metalness: 0.55,
       roughness: 0.18,
       transparent: true,
