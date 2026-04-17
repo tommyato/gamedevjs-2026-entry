@@ -49,11 +49,11 @@ interface YoutubePlayablesSdk {
 }
 
 declare global {
-  var WavedashJS: WavedashSdk | undefined;
+  var WavedashJS: WavedashSdk | Promise<WavedashSdk> | undefined;
   var ytgame: YoutubePlayablesSdk | undefined;
 
   interface Window {
-    WavedashJS?: WavedashSdk;
+    WavedashJS?: WavedashSdk | Promise<WavedashSdk>;
     ytgame?: YoutubePlayablesSdk;
   }
 }
@@ -62,6 +62,7 @@ const DEFAULT_USERNAME = "Player";
 const DEFAULT_SAVE_KEY = "gameSave";
 const LEADERBOARD_SLUG = "high-score";
 let resolvedLeaderboardId: string | null = null;
+let resolvedWavedashSdk: WavedashSdk | null = null;
 
 function hasWavedash(): boolean {
   return typeof WavedashJS !== "undefined";
@@ -71,12 +72,25 @@ function hasYoutubePlayables(): boolean {
   return typeof ytgame !== "undefined";
 }
 
-function getWavedashSdk(): WavedashSdk | null {
-  if (!hasWavedash()) {
-    return null;
-  }
+async function resolveWavedashSdk(): Promise<WavedashSdk | null> {
+  if (resolvedWavedashSdk) return resolvedWavedashSdk;
+  if (!hasWavedash()) return null;
 
-  return WavedashJS ?? null;
+  try {
+    // WavedashJS may be a Promise that resolves to the SDK
+    const sdk = await WavedashJS;
+    if (sdk && typeof sdk.init === "function") {
+      resolvedWavedashSdk = sdk;
+      return sdk;
+    }
+  } catch {
+    // SDK resolution failed (e.g. config timeout) — continue without it
+  }
+  return null;
+}
+
+function getWavedashSdkSync(): WavedashSdk | null {
+  return resolvedWavedashSdk;
 }
 
 function getYoutubePlayablesSdk(): YoutubePlayablesSdk | null {
@@ -96,7 +110,7 @@ function getStorage(): Storage | null {
 }
 
 export async function platformInit() {
-  const wavedash = getWavedashSdk();
+  const wavedash = await resolveWavedashSdk();
   if (!wavedash) {
     return;
   }
@@ -116,7 +130,7 @@ export async function platformInit() {
 }
 
 export function getUsername(): string {
-  const wavedash = getWavedashSdk();
+  const wavedash = getWavedashSdkSync();
   if (!wavedash) {
     return DEFAULT_USERNAME;
   }
@@ -126,7 +140,7 @@ export function getUsername(): string {
 }
 
 export async function submitScore(score: number) {
-  const wavedash = getWavedashSdk();
+  const wavedash = getWavedashSdkSync();
   if (!wavedash || !resolvedLeaderboardId) {
     return;
   }
@@ -134,12 +148,13 @@ export async function submitScore(score: number) {
   await wavedash.uploadLeaderboardScore(resolvedLeaderboardId, score, true);
 }
 
-export function signalLoadComplete() {
-  if (typeof window === "undefined" || typeof window.WavedashJS === "undefined") {
+export async function signalLoadComplete() {
+  const wavedash = await resolveWavedashSdk();
+  if (!wavedash || typeof wavedash.loadComplete !== "function") {
     return;
   }
 
-  window.WavedashJS.loadComplete();
+  wavedash.loadComplete();
 }
 
 export function signalFirstFrame() {

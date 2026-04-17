@@ -119,13 +119,13 @@ export class Game {
   private toastTimer = 0;
 
   async start() {
-    this.init();
+    await this.init();
     this.resumeAnimationLoop();
     signalGameReady();
   }
 
-  private init() {
-    platformInit();
+  private async init() {
+    await platformInit();
     this.highScore = parseInt(localStorage.getItem("gameHighScore") || "0", 10);
 
     const container = document.getElementById("game-container");
@@ -283,7 +283,7 @@ export class Game {
     );
     setAudioEnabled(isAudioEnabled());
     onAudioChange((enabled) => setAudioEnabled(enabled));
-    signalLoadComplete();
+    await signalLoadComplete();
   }
 
   private resetLevel() {
