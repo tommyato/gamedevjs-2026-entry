@@ -27,6 +27,12 @@ interface WavedashSdk {
     keepBest: boolean
   ): Promise<void>;
   loadComplete(): void;
+  setAchievement(achievementId: string, storeNow?: boolean): void;
+  getAchievement(achievementId: string): boolean;
+  setStat(statId: string, value: number, storeNow?: boolean): void;
+  getStat(statId: string): number;
+  requestStats(): Promise<{ success: boolean }>;
+  storeStats(): void;
 }
 
 interface YoutubePlayablesGame {
@@ -222,6 +228,34 @@ export async function writeSaveData(data: string): Promise<void> {
 
   const storage = getStorage();
   storage?.setItem(DEFAULT_SAVE_KEY, data);
+}
+
+export function unlockAchievement(id: string) {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.setAchievement !== "function") return;
+  try {
+    if (!sdk.getAchievement(id)) {
+      sdk.setAchievement(id, true);
+    }
+  } catch { /* fail silently */ }
+}
+
+export function updateStat(id: string, value: number) {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.setStat !== "function") return;
+  try { sdk.setStat(id, value, false); } catch {}
+}
+
+export async function requestStats(): Promise<{ success: boolean }> {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.requestStats !== "function") return { success: false };
+  try { return await sdk.requestStats(); } catch { return { success: false }; }
+}
+
+export function storeStats() {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.storeStats !== "function") return;
+  try { sdk.storeStats(); } catch {}
 }
 
 export type { WavedashSdk, YoutubePlayablesSdk };

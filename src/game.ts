@@ -35,6 +35,7 @@ import {
   signalGameReady,
   signalLoadComplete,
   submitScore,
+  unlockAchievement,
 } from "./platform";
 import { Player } from "./player";
 
@@ -121,6 +122,7 @@ export class Game {
   private gameTime = 0;
   private nextMilestone = 25;
   private toastTimer = 0;
+  private readonly unlockedThisRun = new Set<string>();
 
   async start() {
     await this.init();
@@ -499,6 +501,7 @@ export class Game {
     this.boltScore = 0;
     this.nextMilestone = 25;
     this.toastTimer = 0;
+    this.unlockedThisRun.clear();
     this.cameraKick = 0;
     this.isDying = false;
     this.deathFreezeTimer = 0;
@@ -614,6 +617,7 @@ export class Game {
     this.updatePlayerShadow();
     this.updateScores();
     this.updateHud(dt);
+    this.checkMilestoneAchievements();
 
     if (this.player.mesh.position.y < this.camera.position.y - 12) {
       this.startDeath();
@@ -748,6 +752,20 @@ export class Game {
     }
   }
 
+  private checkMilestoneAchievements() {
+    const unlock = (id: string) => {
+      if (!this.unlockedThisRun.has(id)) {
+        this.unlockedThisRun.add(id);
+        unlockAchievement(id);
+      }
+    };
+    if (this.heightScore >= 50) unlock('sky_high');
+    if (this.heightScore >= 100) unlock('cloud_walker');
+    if (this.boltCount >= 10) unlock('bolt_collector');
+    if (this.boltCount >= 25) unlock('bolt_hoarder');
+    if (this.gameTime >= 60) unlock('endurance');
+  }
+
   private die() {
     this.isDying = false;
     this.state = GameState.GameOver;
@@ -762,6 +780,10 @@ export class Game {
     void submitScore(this.score).catch((error: unknown) => {
       console.error("Failed to submit score", error);
     });
+
+    if (this.score > 0) unlockAchievement('first_climb');
+    if (this.score >= 500) unlockAchievement('rising_star');
+    if (this.score >= 2000) unlockAchievement('gear_master');
 
     const isNewBest = this.score > this.highScore;
     if (isNewBest) {

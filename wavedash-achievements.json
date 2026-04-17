@@ -1,0 +1,44 @@
+{
+  "achievements": [
+    {
+      "identifier": "first_climb",
+      "display_name": "First Climb",
+      "description": "Complete your first game"
+    },
+    {
+      "identifier": "rising_star",
+      "display_name": "Rising Star",
+      "description": "Score 500 points in a single run"
+    },
+    {
+      "identifier": "gear_master",
+      "display_name": "Gear Master",
+      "description": "Score 2,000 points in a single run"
+    },
+    {
+      "identifier": "sky_high",
+      "display_name": "Sky High",
+      "description": "Reach 50 meters in height"
+    },
+    {
+      "identifier": "cloud_walker",
+      "display_name": "Cloud Walker",
+      "description": "Reach 100 meters in height"
+    },
+    {
+      "identifier": "bolt_collector",
+      "display_name": "Bolt Collector",
+      "description": "Collect 10 bolts in a single run"
+    },
+    {
+      "identifier": "bolt_hoarder",
+      "display_name": "Bolt Hoarder",
+      "description": "Collect 25 bolts in a single run"
+    },
+    {
+      "identifier": "endurance",
+      "display_name": "Endurance",
+      "description": "Survive for 60 seconds"
+    }
+  ]
+}
