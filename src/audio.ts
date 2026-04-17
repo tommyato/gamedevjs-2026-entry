@@ -178,6 +178,89 @@ export function playLand(strength: number = 1) {
   click.stop(t + 0.06);
 }
 
+export function playGearTick(distance: number, speed: number) {
+  if (!ctx || !masterGain) {
+    return;
+  }
+
+  const distanceFactor = Math.max(0, 1 - Math.min(distance, 15) / 15);
+  if (distanceFactor <= 0) {
+    return;
+  }
+
+  const t = ctx.currentTime;
+  const speedFactor = Math.max(0.3, Math.min(1.9, Math.abs(speed) * 0.75 + 0.25));
+  const volume = 0.0025 + distanceFactor * 0.012 * speedFactor;
+
+  const click = ctx.createOscillator();
+  click.type = "square";
+  click.frequency.setValueAtTime(760 + speedFactor * 190, t);
+  click.frequency.exponentialRampToValueAtTime(420 + speedFactor * 70, t + 0.024);
+
+  const body = ctx.createOscillator();
+  body.type = "triangle";
+  body.frequency.setValueAtTime(160 + speedFactor * 36, t);
+  body.frequency.exponentialRampToValueAtTime(92, t + 0.05);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(1350 + speedFactor * 260, t);
+  filter.Q.setValueAtTime(8, t);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.001, t);
+  gain.gain.exponentialRampToValueAtTime(volume, t + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.055);
+
+  click.connect(filter);
+  body.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+  click.start(t);
+  body.start(t);
+  click.stop(t + 0.03);
+  body.stop(t + 0.06);
+}
+
+export function playSteamHiss(distance: number = 0) {
+  if (!ctx || !masterGain) {
+    return;
+  }
+
+  const distanceFactor = Math.max(0, 1 - Math.min(distance, 18) / 18);
+  if (distanceFactor <= 0) {
+    return;
+  }
+
+  const t = ctx.currentTime;
+  const dur = 0.22;
+  const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let index = 0; index < data.length; index += 1) {
+    const falloff = 1 - index / data.length;
+    data[index] = (Math.random() * 2 - 1) * falloff;
+  }
+
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(900, t);
+  filter.Q.setValueAtTime(0.8, t);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.001, t);
+  gain.gain.exponentialRampToValueAtTime(0.01 * distanceFactor, t + 0.03);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+  src.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+  src.start(t);
+  src.stop(t + dur + 0.01);
+}
+
 export function playMilestone(pitch: number = 1) {
   if (!ctx || !masterGain) {
     return;

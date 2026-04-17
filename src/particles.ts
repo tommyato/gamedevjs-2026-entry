@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { Gear } from "./gear";
 
-type ParticleKind = "dust" | "spark" | "ambient";
+type ParticleKind = "dust" | "spark" | "ambient" | "steam";
 
 type Particle = {
   active: boolean;
@@ -57,7 +57,6 @@ export class ParticleSystem {
   }
 
   update(dt: number, playerPosition: THREE.Vector3) {
-    let ambientCount = 0;
     for (const particle of this.particles) {
       if (!particle.active) {
         continue;
@@ -70,25 +69,15 @@ export class ParticleSystem {
         continue;
       }
 
-      if (particle.kind === "ambient") {
-        ambientCount += 1;
-      }
-
       particle.velocity.multiplyScalar(Math.max(0, 1 - particle.drag * dt));
       particle.velocity.y -= particle.gravity * dt;
       particle.mesh.position.addScaledVector(particle.velocity, dt);
 
       const material = particle.mesh.material;
       if (material instanceof THREE.MeshBasicMaterial) {
-        material.opacity = 1 - particle.life / particle.maxLife;
+        const fade = 1 - particle.life / particle.maxLife;
+        material.opacity = particle.kind === "steam" ? fade * 0.55 : fade;
       }
-    }
-
-    while (ambientCount < 18) {
-      if (!this.spawnAmbient(playerPosition)) {
-        break;
-      }
-      ambientCount += 1;
     }
   }
 
@@ -188,33 +177,61 @@ export class ParticleSystem {
     this.setMaterial(particle, 0xff9548, 0.9);
   }
 
-  private spawnAmbient(playerPosition: THREE.Vector3): boolean {
+  spawnJumpSparks(position: THREE.Vector3) {
+    const count = 3 + Math.floor(Math.random() * 3);
+    for (let index = 0; index < count; index += 1) {
+      const particle = this.acquire();
+      if (!particle) {
+        return;
+      }
+
+      particle.kind = "spark";
+      particle.life = 0;
+      particle.maxLife = 0.3;
+      particle.drag = 1.8;
+      particle.gravity = 4.2;
+      particle.mesh.visible = true;
+      particle.mesh.position.set(
+        position.x + (Math.random() - 0.5) * 0.22,
+        position.y + 0.05,
+        position.z + (Math.random() - 0.5) * 0.22
+      );
+      particle.velocity.set(
+        (Math.random() - 0.5) * 0.75,
+        1.8 + Math.random() * 0.8,
+        (Math.random() - 0.5) * 0.75
+      );
+      this.scale.setScalar(0.045 + Math.random() * 0.02);
+      particle.mesh.scale.copy(this.scale);
+      this.setMaterial(particle, Math.random() > 0.5 ? 0xffd05a : 0xff8e2b, 0.95);
+    }
+  }
+
+  spawnSteamPuff(position: THREE.Vector3) {
     const particle = this.acquire();
     if (!particle) {
-      return false;
+      return;
     }
 
-    particle.kind = "ambient";
+    particle.kind = "steam";
     particle.life = 0;
-    particle.maxLife = 4 + Math.random() * 3;
-    particle.drag = 0.15;
-    particle.gravity = -0.12;
+    particle.maxLife = 3 + Math.random() * 1.2;
+    particle.drag = 0.18;
+    particle.gravity = -0.28;
     particle.mesh.visible = true;
-    this.spawnCenter.copy(playerPosition);
     particle.mesh.position.set(
-      this.spawnCenter.x + (Math.random() - 0.5) * 16,
-      this.spawnCenter.y - 6 + Math.random() * 18,
-      this.spawnCenter.z - 8 + Math.random() * 18
+      position.x + (Math.random() - 0.5) * 1.8,
+      position.y + (Math.random() - 0.5) * 0.6,
+      position.z + (Math.random() - 0.5) * 1.8
     );
     particle.velocity.set(
-      (Math.random() - 0.5) * 0.15,
-      0.05 + Math.random() * 0.08,
-      (Math.random() - 0.5) * 0.15
+      (Math.random() - 0.5) * 0.14,
+      0.35 + Math.random() * 0.22,
+      (Math.random() - 0.5) * 0.14
     );
-    this.scale.setScalar(0.025 + Math.random() * 0.035);
+    this.scale.setScalar(0.08 + Math.random() * 0.08);
     particle.mesh.scale.copy(this.scale);
-    this.setMaterial(particle, 0xbeb7aa, 0.35);
-    return true;
+    this.setMaterial(particle, 0xd8d4cf, 0.32);
   }
 
   private acquire(): Particle | null {

@@ -7,10 +7,12 @@ import {
   initAudio,
   playClick,
   playCollect,
+  playGearTick,
   playHit,
   playJump,
   playLand,
   playMilestone,
+  playSteamHiss,
   setAudioEnabled,
   setTickRate,
   startAmbientTick,
@@ -85,6 +87,7 @@ export class Game {
   private hudToast!: HTMLElement;
   private hudControls!: HTMLElement;
   private soundToggleBtn!: HTMLElement;
+  private closeCallOverlay!: HTMLElement;
   private titleHeading!: HTMLElement;
   private titleTagline!: HTMLElement;
   private titlePrompt!: HTMLElement;
@@ -97,11 +100,17 @@ export class Game {
   private playerLight!: THREE.PointLight;
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
-  private readonly particles = new ParticleSystem(150);
+  private readonly steamSpawnPosition = new THREE.Vector3();
+  private readonly particles = new ParticleSystem(200);
   private readonly backgroundGroup = new THREE.Group();
   private backgroundDecorations: BackgroundDecoration[] = [];
+  private readonly gearTickNextTimes = new Map<Gear, number>();
   private cameraKick = 0;
-  private cameraShake = 0;
+  private readonly cameraShakeOffset = new THREE.Vector3();
+  private cameraShakeTimer = 0;
+  private readonly cameraShakeDuration = 0.15;
+  private closeCallFlashTimer = 0;
+  private steamSpawnTimer = 0;
   private isDying = false;
   private deathFreezeTimer = 0;
   private deathAnimTimer = 0;
@@ -210,7 +219,8 @@ export class Game {
     const hudToast = document.getElementById("hud-toast");
     const hudControls = document.getElementById("hud-controls");
     const soundToggleBtn = document.getElementById("sound-toggle");
-    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !soundToggleBtn) {
+    const closeCallOverlay = document.getElementById("close-call-overlay");
+    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !soundToggleBtn || !closeCallOverlay) {
       throw new Error("Missing HUD elements");
     }
 
@@ -223,6 +233,7 @@ export class Game {
     this.hudToast = hudToast;
     this.hudControls = hudControls;
     this.soundToggleBtn = soundToggleBtn;
+    this.closeCallOverlay = closeCallOverlay;
 
     const heading = this.titleOverlay.querySelector("h1");
     const tagline = this.titleOverlay.querySelector(".tagline");
@@ -286,6 +297,7 @@ export class Game {
     this.backgroundDecorations = [];
     this.gears = [];
     this.bolts = [];
+    this.gearTickNextTimes.clear();
     this.particles.reset();
 
     const gearPalette = [0x8c6239, 0xb87333, 0xa67c52, 0x7c5a2c];
@@ -471,11 +483,15 @@ export class Game {
     this.nextMilestone = 25;
     this.toastTimer = 0;
     this.cameraKick = 0;
-    this.cameraShake = 0;
     this.isDying = false;
     this.deathFreezeTimer = 0;
     this.deathAnimTimer = 0;
     this.gameTime = 0;
+    this.closeCallFlashTimer = 0;
+    this.cameraShakeTimer = 0;
+    this.cameraShakeOffset.set(0, 0, 0);
+    this.steamSpawnTimer = 0;
+    this.closeCallOverlay.style.opacity = "0";
     this.player.reset(0, 2);
     this.resetLevel();
     this.updateHud(dtZero());
@@ -530,6 +546,14 @@ export class Game {
           this.particles.spawnLandingDust(this.landingEffectPosition);
           playLand(landingSpeed / 12);
           this.cameraKick = Math.min(this.cameraKick + landingSpeed * 0.015, 0.28);
+          const nearMissDistance = Math.hypot(
+            this.player.mesh.position.x - gear.mesh.position.x,
+            this.player.mesh.position.z - gear.mesh.position.z
+          );
+          if (nearMissDistance > gear.radius * 0.7) {
+            this.triggerCloseCallFlash();
+          }
+          this.triggerLandingShake(gear.variant === "crumbling" ? 0.085 : 0.05);
           if (gear.variant === "speed") {
             this.player.giveSpeedBoost(1.55, 0.9);
             this.showToast("SURGE GEAR");
@@ -561,6 +585,7 @@ export class Game {
     const playerFrame = this.player.update(dt, this.input);
     if (playerFrame.jumped) {
       playJump();
+      this.particles.spawnJumpSparks(this.player.mesh.position);
       this.cameraKick = Math.max(this.cameraKick, 0.12);
     }
 
@@ -578,7 +603,12 @@ export class Game {
   private startDeath() {
     this.isDying = true;
     this.deathFreezeTimer = 0.2;
-    this.cameraShake = 0.5;
+    this.cameraShakeOffset.set(
+      randomRange(-0.08, 0.08),
+      randomRange(-0.05, 0.05),
+      randomRange(-0.08, 0.08)
+    );
+    this.cameraShakeTimer = this.cameraShakeDuration;
     this.particles.spawnDeathBurst(this.player.mesh.position);
     this.player.setDyingVisual();
     playHit();
@@ -591,6 +621,29 @@ export class Game {
       if (nearCamera && gear.isSolid() && Math.random() < dt * 0.45) {
         this.particles.spawnGearSpark(gear);
       }
+
+      if (this.state === GameState.Playing && gear.isSolid()) {
+        const gearPosition = gear.getPosition(this.landingEffectPosition);
+        const distance = gearPosition.distanceTo(this.player.mesh.position);
+        if (distance <= 15) {
+          const angularSpeed = Math.abs(gear.getAngularVelocity());
+          if (angularSpeed < 0.05) {
+            this.gearTickNextTimes.delete(gear);
+            continue;
+          }
+          const teethInterval = (Math.PI * 2) / Math.max(angularSpeed * Math.max(6, Math.floor(gear.radius * 10)), 0.001);
+          const interval = THREE.MathUtils.clamp(teethInterval, 0.25, 1.25);
+          const nextTickAt = this.gearTickNextTimes.get(gear) ?? this.elapsedTime + interval;
+          if (this.elapsedTime >= nextTickAt) {
+            playGearTick(distance, angularSpeed);
+            this.gearTickNextTimes.set(gear, this.elapsedTime + interval);
+          } else if (!this.gearTickNextTimes.has(gear)) {
+            this.gearTickNextTimes.set(gear, nextTickAt);
+          }
+        } else {
+          this.gearTickNextTimes.delete(gear);
+        }
+      }
     }
 
     for (const bolt of this.bolts) {
@@ -601,6 +654,7 @@ export class Game {
       decoration.mesh.rotation.z += decoration.rotationSpeed * dt;
     }
 
+    this.updateSteam(dt);
     this.particles.update(dt, this.player.mesh.position);
   }
 
@@ -647,12 +701,14 @@ export class Game {
     this.camera.updateProjectionMatrix();
     this.cameraKick = THREE.MathUtils.lerp(this.cameraKick, 0, 1 - Math.exp(-dt * 7));
 
-    if (this.cameraShake > 0) {
-      const amplitude = this.cameraShake * 0.3;
-      const t = performance.now() * 0.02;
-      this.camera.position.x += Math.sin(t * 23) * amplitude;
-      this.camera.position.y += Math.sin(t * 17) * amplitude;
-      this.cameraShake = Math.max(0, this.cameraShake - dt * 2);
+    if (this.cameraShakeTimer > 0) {
+      const shakeProgress = this.cameraShakeTimer / this.cameraShakeDuration;
+      const shakeEnvelope = shakeProgress * shakeProgress;
+      this.camera.position.addScaledVector(this.cameraShakeOffset, shakeEnvelope);
+      this.cameraShakeTimer = Math.max(0, this.cameraShakeTimer - dt);
+      if (this.cameraShakeTimer === 0) {
+        this.cameraShakeOffset.set(0, 0, 0);
+      }
     }
 
     this.updatePlayerLight(dt);
@@ -678,6 +734,8 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     stopAmbientTick();
     this.deathAnimTimer = 0.4;
+    this.closeCallFlashTimer = 0;
+    this.closeCallOverlay.style.opacity = "0";
 
     void submitScore(this.score).catch((error: unknown) => {
       console.error("Failed to submit score", error);
@@ -784,6 +842,50 @@ export class Game {
     this.playerLight.position.x = THREE.MathUtils.lerp(this.playerLight.position.x, this.player.mesh.position.x, lightLerp);
     this.playerLight.position.y = THREE.MathUtils.lerp(this.playerLight.position.y, this.player.mesh.position.y + 3.2, lightLerp);
     this.playerLight.position.z = THREE.MathUtils.lerp(this.playerLight.position.z, this.player.mesh.position.z + 2.6, lightLerp);
+  }
+
+  private triggerLandingShake(strength: number) {
+    this.cameraShakeOffset.set(
+      randomRange(-strength, strength),
+      randomRange(-strength * 0.65, strength * 0.65),
+      randomRange(-strength, strength)
+    );
+    this.cameraShakeTimer = this.cameraShakeDuration;
+  }
+
+  private triggerCloseCallFlash() {
+    this.closeCallFlashTimer = 0.2;
+    this.closeCallOverlay.style.opacity = "1";
+  }
+
+  private updateSteam(dt: number) {
+    this.steamSpawnTimer -= dt;
+    while (this.steamSpawnTimer <= 0) {
+      this.spawnSteamPuff();
+      this.steamSpawnTimer += randomRange(0.5, 1.0);
+    }
+
+    if (this.closeCallFlashTimer > 0) {
+      this.closeCallFlashTimer = Math.max(0, this.closeCallFlashTimer - dt);
+      const opacity = THREE.MathUtils.clamp(this.closeCallFlashTimer / 0.2, 0, 1);
+      this.closeCallOverlay.style.opacity = String(opacity);
+    } else {
+      this.closeCallOverlay.style.opacity = "0";
+    }
+  }
+
+  private spawnSteamPuff() {
+    this.steamSpawnPosition.set(
+      this.camera.position.x + randomRange(-12, 12),
+      this.camera.position.y - randomRange(9, 14),
+      this.camera.position.z + randomRange(-12, 12)
+    );
+    this.particles.spawnSteamPuff(this.steamSpawnPosition);
+
+    if (Math.random() < 0.3) {
+      const distance = this.steamSpawnPosition.distanceTo(this.player.mesh.position);
+      playSteamHiss(distance);
+    }
   }
 }
 
