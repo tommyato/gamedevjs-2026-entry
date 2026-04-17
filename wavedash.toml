@@ -1,6 +1,5 @@
-game_id = "REPLACE_ME"
+game_id = "j97cp44d8dbag57y8c168mhxyx850tg6"
 upload_dir = "./dist"
 
 [custom]
-version = "0.1.0"
-entrypoint = "index.html"
+version = "1.0.0"
