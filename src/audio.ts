@@ -400,3 +400,225 @@ export function stopAudio() {
   masterGain = null;
   initialized = false;
 }
+
+// ── Background music system ─────────────────────────────────────────────────
+
+let musicGeneration = 0;
+let musicBus: GainNode | null = null;
+let bassDroneOsc: OscillatorNode | null = null;
+let bassDroneGain: GainNode | null = null;
+let tensionSource: AudioBufferSourceNode | null = null;
+let tensionGain: GainNode | null = null;
+let nextGearPingTime = 0;
+let nextChimeTime = 0;
+let currentMusicHeight = 0;
+
+// D minor pentatonic — two registers for height progression
+const CHIME_LOW = [293.7, 349.2, 440.0, 523.3];   // D4, F4, A4, C5
+const CHIME_HIGH = [587.3, 698.5, 880.0, 1046.5]; // D5, F5, A5, C6
+
+export function startMusic() {
+  const c = ensureContext();
+  if (!masterGain) {
+    return;
+  }
+  musicGeneration++;
+  const gen = musicGeneration;
+  currentMusicHeight = 0;
+
+  // All music flows through this bus into masterGain — keeps music below SFX level
+  musicBus = c.createGain();
+  musicBus.gain.setValueAtTime(0.4, c.currentTime);
+  musicBus.connect(masterGain);
+
+  startBassDrone(c);
+  startTensionLayer(c);
+
+  nextGearPingTime = c.currentTime + 0.5;
+  nextChimeTime = c.currentTime + 2.5;
+  scheduleMusicLoop(gen);
+}
+
+export function stopMusic() {
+  musicGeneration++;
+  if (!ctx) {
+    return;
+  }
+  const now = ctx.currentTime;
+
+  // Save refs before nulling so we can schedule the stop
+  const droneOsc = bassDroneOsc;
+  const droneGain = bassDroneGain;
+  bassDroneOsc = null;
+  bassDroneGain = null;
+  if (droneGain && droneOsc) {
+    droneGain.gain.setTargetAtTime(0, now, 0.3);
+    droneOsc.stop(now + 1.8);
+  }
+
+  const noiseSrc = tensionSource;
+  const noiseGain = tensionGain;
+  tensionSource = null;
+  tensionGain = null;
+  if (noiseGain && noiseSrc) {
+    noiseGain.gain.setTargetAtTime(0, now, 0.3);
+    noiseSrc.stop(now + 1.8);
+  }
+
+  // Null the bus — short scheduled notes (pings, chimes) will still complete through
+  // the old bus node, which remains connected until it's GC'd
+  musicBus = null;
+}
+
+/** Call each frame with the player's height score to drive music intensity. */
+export function setMusicIntensity(height: number) {
+  currentMusicHeight = height;
+  if (!tensionGain || !ctx) {
+    return;
+  }
+  // Tension layer fades in above 50 m, reaches full strength at 100 m+
+  const t = Math.max(0, (height - 50) / 50);
+  tensionGain.gain.setTargetAtTime(t * 0.06, ctx.currentTime, 0.8);
+}
+
+function startBassDrone(c: AudioContext) {
+  if (!musicBus) {
+    return;
+  }
+  const osc = c.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(55, c.currentTime); // A1 — felt more than heard
+
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0, c.currentTime);
+  gain.gain.linearRampToValueAtTime(0.10, c.currentTime + 3.0); // slow fade-in
+
+  osc.connect(gain);
+  gain.connect(musicBus);
+  osc.start(c.currentTime);
+
+  bassDroneOsc = osc;
+  bassDroneGain = gain;
+}
+
+function startTensionLayer(c: AudioContext) {
+  if (!musicBus) {
+    return;
+  }
+  // ~2s noise buffer (odd length discourages obvious loop artifacts)
+  const bufLen = Math.ceil(c.sampleRate * 1.97);
+  const buffer = c.createBuffer(1, bufLen, c.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let index = 0; index < bufLen; index++) {
+    data[index] = Math.random() * 2 - 1;
+  }
+
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  src.loop = true;
+
+  const filter = c.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(300, c.currentTime);
+  filter.Q.setValueAtTime(0.7, c.currentTime);
+
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0, c.currentTime); // starts silent; setMusicIntensity raises it
+
+  src.connect(filter);
+  filter.connect(gain);
+  gain.connect(musicBus);
+  src.start(c.currentTime);
+
+  tensionSource = src;
+  tensionGain = gain;
+}
+
+function scheduleMusicLoop(gen: number) {
+  if (gen !== musicGeneration || !ctx || !musicBus) {
+    return;
+  }
+  const now = ctx.currentTime;
+
+  // Gear ping rhythm — interval shrinks from 1.15 s at ground to 0.65 s at 100 m
+  const pingInterval = 1.15 - Math.min(currentMusicHeight / 100, 1) * 0.5;
+  while (nextGearPingTime < now + 0.25) {
+    scheduleGearPing(nextGearPingTime);
+    nextGearPingTime += pingInterval;
+  }
+
+  // Chime phrase — sparse melodic fragment every 5–9 s
+  if (nextChimeTime < now + 0.25) {
+    scheduleChimePhrase(nextChimeTime);
+    nextChimeTime += 5.5 + Math.random() * 3.5;
+  }
+
+  // Slowly drift bass drone pitch for organic movement
+  if (bassDroneOsc) {
+    const target = 55 + (Math.random() * 6 - 3);
+    bassDroneOsc.frequency.setTargetAtTime(target, now, 2.5);
+  }
+
+  setTimeout(() => scheduleMusicLoop(gen), 50);
+}
+
+function scheduleGearPing(time: number) {
+  if (!ctx || !musicBus) {
+    return;
+  }
+  const dur = 0.4;
+  const base = 1108.7; // C#6 — bright metallic
+
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(base, time);
+  osc.frequency.exponentialRampToValueAtTime(base * 0.88, time + dur);
+
+  // Inharmonic partial for bell/gear character
+  const osc2 = ctx.createOscillator();
+  osc2.type = "sine";
+  osc2.frequency.setValueAtTime(base * 2.756, time);
+  osc2.frequency.exponentialRampToValueAtTime(base * 2.3, time + dur * 0.6);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, time);
+  gain.gain.linearRampToValueAtTime(0.055, time + 0.006);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+
+  osc.connect(gain);
+  osc2.connect(gain);
+  gain.connect(musicBus);
+  osc.start(time);
+  osc2.start(time);
+  osc.stop(time + dur + 0.02);
+  osc2.stop(time + dur + 0.02);
+}
+
+function scheduleChimePhrase(startTime: number) {
+  if (!ctx || !musicBus) {
+    return;
+  }
+  const scale = currentMusicHeight >= 50 ? CHIME_HIGH : CHIME_LOW;
+  const noteCount = Math.random() < 0.4 ? 4 : 3;
+  const spacing = 0.30;
+  const noteDur = 0.55;
+
+  for (let i = 0; i < noteCount; i++) {
+    const t = startTime + i * spacing;
+    const freq = scale[i % scale.length];
+
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(freq, t);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.065, t + 0.018);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + noteDur);
+
+    osc.connect(gain);
+    gain.connect(musicBus);
+    osc.start(t);
+    osc.stop(t + noteDur + 0.02);
+  }
+}

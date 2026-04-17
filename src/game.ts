@@ -14,9 +14,12 @@ import {
   playMilestone,
   playSteamHiss,
   setAudioEnabled,
+  setMusicIntensity,
   setTickRate,
   startAmbientTick,
+  startMusic,
   stopAmbientTick,
+  stopMusic,
   toggleAudio,
 } from "./audio";
 import { BoltCollectible } from "./bolt";
@@ -501,6 +504,7 @@ export class Game {
     this.titleTagline.classList.remove("new-best");
     this.input.setTouchControlsVisible(this.input.isTouchDevice());
     startAmbientTick();
+    startMusic();
   }
 
   private updatePlaying(dt: number) {
@@ -518,6 +522,7 @@ export class Game {
 
     this.gameTime += dt;
     setTickRate(this.heightScore);
+    setMusicIntensity(this.heightScore);
     this.updateWorld(dt);
 
     let foundGround = false;
@@ -733,6 +738,7 @@ export class Game {
     this.state = GameState.GameOver;
     this.input.setTouchControlsVisible(false);
     stopAmbientTick();
+    stopMusic();
     this.deathAnimTimer = 0.4;
     this.closeCallFlashTimer = 0;
     this.closeCallOverlay.style.opacity = "0";
