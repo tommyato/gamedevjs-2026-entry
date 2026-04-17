@@ -41,6 +41,7 @@ export class Gear {
   private crumbleArmed = false;
   private crumbleTimer = 0;
   private crumbleFallVelocity = 0;
+  private crumbleFallDistance = 0;
   private reverseTimer = 0;
   private readonly reverseInterval = 3;
   private readonly reversePause = 0.35;
@@ -204,7 +205,7 @@ export class Gear {
   }
 
   getTopY(): number {
-    return this.mesh.position.y + this.height / 2;
+    return this.mesh.position.y + this.height / 2 + 0.12;
   }
 
   isSolid(): boolean {
@@ -251,9 +252,10 @@ export class Gear {
     this.crumbleTimer += dt;
     if (this.crumbleTimer >= 1.5) {
       this.active = false;
-      this.crumbleFallVelocity += 16 * dt;
+      this.crumbleFallVelocity += 25 * dt;
+      this.crumbleFallDistance += this.crumbleFallVelocity * dt;
       this.mesh.position.copy(this.restPosition);
-      this.mesh.position.y -= this.crumbleFallVelocity * dt;
+      this.mesh.position.y -= this.crumbleFallDistance;
       this.mesh.rotation.z += dt * 2.4;
       this.mesh.rotation.x += dt * 1.8;
       return;

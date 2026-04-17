@@ -101,6 +101,7 @@ export class Game {
   private bolts: BoltCollectible[] = [];
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
+  private playerShadow!: THREE.Mesh;
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
@@ -212,6 +213,19 @@ export class Game {
 
     this.scene.add(this.player.mesh);
     this.player.reset(0, 2);
+
+    const shadowGeo = new THREE.CircleGeometry(0.35, 16);
+    const shadowMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.playerShadow = new THREE.Mesh(shadowGeo, shadowMat);
+    this.playerShadow.rotation.x = -Math.PI / 2;
+    this.playerShadow.visible = false;
+    this.scene.add(this.playerShadow);
 
     const hud = document.getElementById("hud");
     const titleOverlay = document.getElementById("title-overlay");
@@ -597,6 +611,7 @@ export class Game {
     this.handlePoleCollision();
     this.handleBoltCollection();
     this.updateCamera(dt);
+    this.updatePlayerShadow();
     this.updateScores();
     this.updateHud(dt);
 
@@ -737,6 +752,7 @@ export class Game {
     this.isDying = false;
     this.state = GameState.GameOver;
     this.input.setTouchControlsVisible(false);
+    this.playerShadow.visible = false;
     stopAmbientTick();
     stopMusic();
     this.deathAnimTimer = 0.4;
@@ -848,6 +864,40 @@ export class Game {
     this.playerLight.position.x = THREE.MathUtils.lerp(this.playerLight.position.x, this.player.mesh.position.x, lightLerp);
     this.playerLight.position.y = THREE.MathUtils.lerp(this.playerLight.position.y, this.player.mesh.position.y + 3.2, lightLerp);
     this.playerLight.position.z = THREE.MathUtils.lerp(this.playerLight.position.z, this.player.mesh.position.z + 2.6, lightLerp);
+  }
+
+  private updatePlayerShadow() {
+    let bestY = -Infinity;
+    let foundSurface = false;
+
+    for (const gear of this.gears) {
+      if (!gear.isSolid()) continue;
+      const dx = this.player.mesh.position.x - gear.mesh.position.x;
+      const dz = this.player.mesh.position.z - gear.mesh.position.z;
+      const distSq = dx * dx + dz * dz;
+      const gearTop = gear.getTopY();
+
+      if (distSq < (gear.radius + 0.3) ** 2 && gearTop <= this.player.mesh.position.y + 0.1 && gearTop > bestY) {
+        bestY = gearTop;
+        foundSurface = true;
+      }
+    }
+
+    if (foundSurface) {
+      this.playerShadow.visible = true;
+      this.playerShadow.position.set(
+        this.player.mesh.position.x,
+        bestY + 0.02,
+        this.player.mesh.position.z
+      );
+      const distance = Math.max(0, this.player.mesh.position.y - bestY);
+      const opacity = THREE.MathUtils.clamp(0.35 - distance * 0.035, 0.06, 0.35);
+      const scale = THREE.MathUtils.clamp(1 + distance * 0.04, 0.6, 1.5);
+      (this.playerShadow.material as THREE.MeshBasicMaterial).opacity = opacity;
+      this.playerShadow.scale.setScalar(scale);
+    } else {
+      this.playerShadow.visible = false;
+    }
   }
 
   private triggerLandingShake(strength: number) {
