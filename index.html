@@ -3,6 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Clockwork Climb — a timing-based 3D platformer for the Gamedev.js Jam 2026. Climb a massive clockwork tower as a tiny bronze robot. Theme: MACHINES.">
+  <meta name="author" content="tommyato">
+  <meta property="og:title" content="Clockwork Climb — Gamedev.js Jam 2026">
+  <meta property="og:description" content="Timing-based 3D platformer. Climb a massive clockwork tower as a tiny bronze robot. Theme: MACHINES.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://tommyato.github.io/gamedevjs-2026-entry/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Clockwork Climb — Gamedev.js Jam 2026">
+  <meta name="twitter:description" content="Timing-based 3D platformer. Climb a massive clockwork tower as a tiny bronze robot.">
   <title>CLOCKWORK CLIMB — GAMEDEV.JS JAM 2026</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -174,6 +183,44 @@
       animation: pulse 1.5s ease-in-out infinite; text-align: center;
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes glow {
+      0%, 100% { text-shadow: 0 0 8px rgba(255, 200, 50, 0.6), 0 0 20px rgba(255, 180, 0, 0.4); }
+      50% { text-shadow: 0 0 18px rgba(255, 220, 80, 1), 0 0 40px rgba(255, 200, 0, 0.7); }
+    }
+    .tagline.new-best {
+      color: #ffd040;
+      animation: glow 1.2s ease-in-out infinite;
+    }
+    .game-over-stats {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 13px;
+      letter-spacing: 3px;
+      color: #c7a271;
+      margin-top: -24px;
+      margin-bottom: 24px;
+    }
+    #sound-toggle {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 196, 120, 0.18);
+      background: linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62));
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08);
+      backdrop-filter: blur(10px);
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    #sound-toggle:hover { background: linear-gradient(180deg, rgba(40, 28, 20, 0.85), rgba(20, 15, 12, 0.72)); }
     .hidden { display: none !important; }
     @media (max-width: 720px) {
       .hud-panel {
@@ -189,6 +236,10 @@
         left: 14px;
         bottom: 14px;
         max-width: 220px;
+      }
+      #sound-toggle {
+        bottom: 14px;
+        right: 14px;
       }
       #title-overlay h1 {
         font-size: 42px;
@@ -226,6 +277,7 @@
       </div>
       <div id="hud-toast"></div>
       <div id="hud-controls">WASD / ARROWS TO MOVE · SPACE OR TAP TO JUMP</div>
+      <button id="sound-toggle" type="button" aria-label="Toggle sound">🔊</button>
     </div>
     <div id="touch-controls" class="hidden">
       <div id="touch-left-zone">
@@ -238,6 +290,7 @@
     <div id="title-overlay">
       <h1>CLOCKWORK CLIMB</h1>
       <div class="tagline">GAMEDEV.JS JAM 2026 — Theme: MACHINES</div>
+      <div class="game-over-stats hidden"></div>
       <div class="prompt">PRESS SPACE OR CLICK TO CLIMB</div>
     </div>
   </div>

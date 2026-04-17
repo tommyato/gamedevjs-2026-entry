@@ -8,6 +8,11 @@ export type GearCollision = {
   momentum: THREE.Vector3;
 };
 
+export type GearBlockResult = {
+  blocked: boolean;
+  capY: number;
+};
+
 export type GearOptions = {
   color?: number;
   danger?: number;
@@ -289,6 +294,27 @@ export class Gear {
     }
 
     return { onGear: false, y: 0, momentum: new THREE.Vector3() };
+  }
+
+  checkBlockFromBelow(playerPos: THREE.Vector3, playerHeight: number, playerRadius: number): GearBlockResult {
+    if (!this.active) {
+      return { blocked: false, capY: 0 };
+    }
+
+    const distSq = (playerPos.x - this.mesh.position.x) ** 2 + (playerPos.z - this.mesh.position.z) ** 2;
+    const combinedRadius = this.radius + playerRadius;
+    if (distSq >= combinedRadius * combinedRadius) {
+      return { blocked: false, capY: 0 };
+    }
+
+    const gearBottom = this.mesh.position.y - this.height / 2;
+    const playerTop = playerPos.y + playerHeight;
+
+    if (playerPos.y < gearBottom && playerTop > gearBottom) {
+      return { blocked: true, capY: gearBottom - playerHeight };
+    }
+
+    return { blocked: false, capY: 0 };
   }
 }
 

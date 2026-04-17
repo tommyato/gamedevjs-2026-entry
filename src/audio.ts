@@ -8,13 +8,41 @@ let masterGain: GainNode | null = null;
 let initialized = false;
 const DEFAULT_MASTER_VOLUME = 0.5;
 let audioEnabled = true;
+let userMuted = false;
+
+// Read user mute preference from localStorage
+try {
+  userMuted = localStorage.getItem("audioMuted") === "1";
+} catch {
+  // localStorage unavailable
+}
 
 function applyMasterVolume() {
   if (!masterGain) {
     return;
   }
 
-  masterGain.gain.value = audioEnabled ? DEFAULT_MASTER_VOLUME : 0;
+  masterGain.gain.value = (audioEnabled && !userMuted) ? DEFAULT_MASTER_VOLUME : 0;
+}
+
+/** Toggle user mute preference, persist to localStorage, return new "unmuted" state */
+export function toggleAudio(): boolean {
+  userMuted = !userMuted;
+  try {
+    if (userMuted) {
+      localStorage.setItem("audioMuted", "1");
+    } else {
+      localStorage.removeItem("audioMuted");
+    }
+  } catch {
+    // localStorage unavailable
+  }
+  applyMasterVolume();
+  return !userMuted;
+}
+
+export function getAudioEnabled(): boolean {
+  return !userMuted;
 }
 
 function ensureContext(): AudioContext {
@@ -223,6 +251,61 @@ export function playHit() {
 export function setAudioEnabled(enabled: boolean) {
   audioEnabled = enabled;
   applyMasterVolume();
+}
+
+// ── Ambient clockwork tick ──────────────────────────────────────────────────
+
+let tickGeneration = 0;
+let nextTickTime = 0;
+let currentTickIntervalMs = 500;
+
+export function startAmbientTick() {
+  const c = ensureContext();
+  tickGeneration++;
+  const gen = tickGeneration;
+  nextTickTime = c.currentTime + 0.05;
+  scheduleTicks(gen);
+}
+
+export function stopAmbientTick() {
+  tickGeneration++;
+}
+
+/** Call each frame with current height; adjusts tick speed. */
+export function setTickRate(height: number) {
+  const t = Math.min(height / 100, 1);
+  // 500ms at height 0 → 333ms at height 100 (~3 ticks/s max)
+  currentTickIntervalMs = 500 - t * 167;
+}
+
+function scheduleTicks(gen: number) {
+  if (gen !== tickGeneration || !ctx || !masterGain) {
+    return;
+  }
+  const now = ctx.currentTime;
+  while (nextTickTime < now + 0.2) {
+    scheduleOneTick(nextTickTime);
+    nextTickTime += currentTickIntervalMs / 1000;
+  }
+  setTimeout(() => scheduleTicks(gen), 50);
+}
+
+function scheduleOneTick(time: number) {
+  if (!ctx || !masterGain) {
+    return;
+  }
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.setValueAtTime(400, time);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.015, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.02);
+
+  osc.connect(gain);
+  gain.connect(masterGain);
+  osc.start(time);
+  osc.stop(time + 0.025);
 }
 
 export function stopAudio() {

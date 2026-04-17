@@ -18,6 +18,7 @@ export class Player {
   private scaleYImpulse = 0;
   private speedBoostTimer = 0;
   private speedBoostStrength = 1;
+  public readonly bodyMaterial: THREE.MeshStandardMaterial;
 
   constructor() {
     this.mesh.add(this.visualRoot);
@@ -29,6 +30,7 @@ export class Player {
       metalness: 0.9,
       roughness: 0.22
     });
+    this.bodyMaterial = bodyMat;
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.position.y = this.height / 2;
     body.castShadow = true;
@@ -119,6 +121,23 @@ export class Player {
     return { jumped };
   }
 
+  setDyingVisual() {
+    this.bodyMaterial.emissive.setHex(0xff3333);
+    this.bodyMaterial.emissiveIntensity = 1.5;
+  }
+
+  setBodyOpacity(opacity: number) {
+    this.bodyMaterial.transparent = opacity < 1;
+    this.bodyMaterial.opacity = opacity;
+  }
+
+  resetVisuals() {
+    this.bodyMaterial.emissive.setHex(0x000000);
+    this.bodyMaterial.emissiveIntensity = 0;
+    this.bodyMaterial.transparent = false;
+    this.bodyMaterial.opacity = 1;
+  }
+
   land(impactSpeed: number) {
     this.scaleYImpulse = -THREE.MathUtils.clamp(impactSpeed * 0.028, 0.08, 0.22);
   }
@@ -139,5 +158,6 @@ export class Player {
     this.speedBoostStrength = 1;
     this.visualRoot.scale.setScalar(1);
     this.visualRoot.rotation.set(0, 0, 0);
+    this.resetVisuals();
   }
 }

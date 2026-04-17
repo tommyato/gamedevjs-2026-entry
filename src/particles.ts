@@ -118,6 +118,40 @@ export class ParticleSystem {
     }
   }
 
+  spawnDeathBurst(position: THREE.Vector3) {
+    const count = 12 + Math.floor(Math.random() * 5); // 12–16
+    const colors = [0xcd7f32, 0xb87333, 0xa67c52];
+    for (let index = 0; index < count; index += 1) {
+      const particle = this.acquire();
+      if (!particle) {
+        return;
+      }
+
+      particle.kind = "dust";
+      particle.life = 0;
+      particle.maxLife = 0.6 + Math.random() * 0.3;
+      particle.drag = 1.5;
+      particle.gravity = 8;
+      particle.mesh.visible = true;
+      particle.mesh.position.copy(position);
+      particle.mesh.position.y += 0.3;
+
+      // Spread outward in a sphere
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const speed = 3 + Math.random() * 2;
+      particle.velocity.set(
+        Math.sin(phi) * Math.cos(theta) * speed,
+        Math.abs(Math.cos(phi)) * speed + 1,
+        Math.sin(phi) * Math.sin(theta) * speed
+      );
+
+      this.scale.setScalar(0.06 + Math.random() * 0.06);
+      particle.mesh.scale.copy(this.scale);
+      this.setMaterial(particle, colors[Math.floor(Math.random() * colors.length)], 0.9);
+    }
+  }
+
   spawnGearSpark(gear: Gear) {
     const particle = this.acquire();
     if (!particle) {

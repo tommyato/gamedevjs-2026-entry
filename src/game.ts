@@ -3,6 +3,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import {
+  getAudioEnabled,
   initAudio,
   playClick,
   playCollect,
@@ -11,6 +12,10 @@ import {
   playLand,
   playMilestone,
   setAudioEnabled,
+  setTickRate,
+  startAmbientTick,
+  stopAmbientTick,
+  toggleAudio,
 } from "./audio";
 import { BoltCollectible } from "./bolt";
 import { Gear, type GearVariant } from "./gear";
@@ -79,9 +84,11 @@ export class Game {
   private hudStatus!: HTMLElement;
   private hudToast!: HTMLElement;
   private hudControls!: HTMLElement;
+  private soundToggleBtn!: HTMLElement;
   private titleHeading!: HTMLElement;
   private titleTagline!: HTMLElement;
   private titlePrompt!: HTMLElement;
+  private gameOverStatsEl!: HTMLElement;
 
   private readonly player = new Player();
   private gears: Gear[] = [];
@@ -90,10 +97,15 @@ export class Game {
   private playerLight!: THREE.PointLight;
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
-  private readonly particles = new ParticleSystem(100);
+  private readonly particles = new ParticleSystem(150);
   private readonly backgroundGroup = new THREE.Group();
   private backgroundDecorations: BackgroundDecoration[] = [];
   private cameraKick = 0;
+  private cameraShake = 0;
+  private isDying = false;
+  private deathFreezeTimer = 0;
+  private deathAnimTimer = 0;
+  private gameTime = 0;
   private nextMilestone = 25;
   private toastTimer = 0;
 
@@ -197,7 +209,8 @@ export class Game {
     const hudStatus = document.getElementById("hud-status");
     const hudToast = document.getElementById("hud-toast");
     const hudControls = document.getElementById("hud-controls");
-    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls) {
+    const soundToggleBtn = document.getElementById("sound-toggle");
+    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !soundToggleBtn) {
       throw new Error("Missing HUD elements");
     }
 
@@ -209,17 +222,31 @@ export class Game {
     this.hudStatus = hudStatus;
     this.hudToast = hudToast;
     this.hudControls = hudControls;
+    this.soundToggleBtn = soundToggleBtn;
 
     const heading = this.titleOverlay.querySelector("h1");
     const tagline = this.titleOverlay.querySelector(".tagline");
     const prompt = this.titleOverlay.querySelector(".prompt");
-    if (!heading || !tagline || !prompt) {
+    const gameOverStats = this.titleOverlay.querySelector(".game-over-stats");
+    if (!heading || !tagline || !prompt || !gameOverStats) {
       throw new Error("Missing title overlay elements");
     }
 
     this.titleHeading = heading as HTMLElement;
     this.titleTagline = tagline as HTMLElement;
     this.titlePrompt = prompt as HTMLElement;
+    this.gameOverStatsEl = gameOverStats as HTMLElement;
+
+    // Sound toggle
+    const updateSoundBtn = () => {
+      this.soundToggleBtn.textContent = getAudioEnabled() ? "🔊" : "🔇";
+    };
+    updateSoundBtn();
+    this.soundToggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleAudio();
+      updateSoundBtn();
+    });
 
     const handleOverlayActivate = (event: Event) => {
       if (this.state !== GameState.Title && this.state !== GameState.GameOver) {
@@ -444,15 +471,37 @@ export class Game {
     this.nextMilestone = 25;
     this.toastTimer = 0;
     this.cameraKick = 0;
+    this.cameraShake = 0;
+    this.isDying = false;
+    this.deathFreezeTimer = 0;
+    this.deathAnimTimer = 0;
+    this.gameTime = 0;
     this.player.reset(0, 2);
     this.resetLevel();
     this.updateHud(dtZero());
     this.hud.classList.remove("hidden");
     this.titleOverlay.classList.add("hidden");
+    this.gameOverStatsEl.classList.add("hidden");
+    this.titleTagline.classList.remove("new-best");
     this.input.setTouchControlsVisible(this.input.isTouchDevice());
+    startAmbientTick();
   }
 
   private updatePlaying(dt: number) {
+    // Handle death freeze frame
+    if (this.isDying) {
+      this.deathFreezeTimer -= dt;
+      this.updateWorld(dt);
+      this.updateCamera(dt);
+      this.updatePlayerLight(dt);
+      if (this.deathFreezeTimer <= 0) {
+        this.die();
+      }
+      return;
+    }
+
+    this.gameTime += dt;
+    setTickRate(this.heightScore);
     this.updateWorld(dt);
 
     let foundGround = false;
@@ -522,8 +571,17 @@ export class Game {
     this.updateHud(dt);
 
     if (this.player.mesh.position.y < this.camera.position.y - 12) {
-      this.die();
+      this.startDeath();
     }
+  }
+
+  private startDeath() {
+    this.isDying = true;
+    this.deathFreezeTimer = 0.2;
+    this.cameraShake = 0.5;
+    this.particles.spawnDeathBurst(this.player.mesh.position);
+    this.player.setDyingVisual();
+    playHit();
   }
 
   private updateWorld(dt: number) {
@@ -588,6 +646,15 @@ export class Game {
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, followLerp);
     this.camera.updateProjectionMatrix();
     this.cameraKick = THREE.MathUtils.lerp(this.cameraKick, 0, 1 - Math.exp(-dt * 7));
+
+    if (this.cameraShake > 0) {
+      const amplitude = this.cameraShake * 0.3;
+      const t = performance.now() * 0.02;
+      this.camera.position.x += Math.sin(t * 23) * amplitude;
+      this.camera.position.y += Math.sin(t * 17) * amplitude;
+      this.cameraShake = Math.max(0, this.cameraShake - dt * 2);
+    }
+
     this.updatePlayerLight(dt);
   }
 
@@ -606,14 +673,18 @@ export class Game {
   }
 
   private die() {
+    this.isDying = false;
     this.state = GameState.GameOver;
     this.input.setTouchControlsVisible(false);
-    playHit();
+    stopAmbientTick();
+    this.deathAnimTimer = 0.4;
+
     void submitScore(this.score).catch((error: unknown) => {
       console.error("Failed to submit score", error);
     });
 
-    if (this.score > this.highScore) {
+    const isNewBest = this.score > this.highScore;
+    if (isNewBest) {
       this.highScore = this.score;
       localStorage.setItem("gameHighScore", String(this.highScore));
     }
@@ -621,13 +692,28 @@ export class Game {
     this.updateHud(dtZero());
     this.titleOverlay.classList.remove("hidden");
     this.titleHeading.textContent = "GAME OVER";
-    this.titleTagline.textContent = `SCORE ${this.score} · HEIGHT ${this.heightScore}m · BEST ${this.highScore}`;
+    if (isNewBest) {
+      this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightScore}m`;
+      this.titleTagline.classList.add("new-best");
+    } else {
+      this.titleTagline.textContent = `SCORE ${this.score} · HEIGHT ${this.heightScore}m · BEST ${this.highScore}`;
+      this.titleTagline.classList.remove("new-best");
+    }
     this.titlePrompt.textContent = this.input.isTouchDevice() ? "TAP TO RESTART" : "PRESS SPACE TO RESTART";
+
+    const gameSeconds = Math.floor(this.gameTime);
+    this.gameOverStatsEl.textContent = `BOLTS: ${this.boltCount} · TIME: ${gameSeconds}s`;
+    this.gameOverStatsEl.classList.remove("hidden");
   }
 
   private updateGameOver(dt: number) {
     this.updateWorld(dt);
     this.updatePlayerLight(dt);
+
+    if (this.deathAnimTimer > 0) {
+      this.deathAnimTimer -= dt;
+      this.player.setBodyOpacity(Math.max(0, this.deathAnimTimer / 0.4));
+    }
 
     if (this.input.justPressed("space") || this.input.justPressed("click")) {
       this.startGame();
