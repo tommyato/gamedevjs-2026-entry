@@ -7,10 +7,20 @@ type WavedashUser = {
   username?: string;
 };
 
+interface WavedashLeaderboardResponse {
+  success: boolean;
+  data: { id: string };
+}
+
 interface WavedashSdk {
   init(options: WavedashInitOptions): void;
   readyForEvents(): void;
   getUser(): WavedashUser | null | undefined;
+  getOrCreateLeaderboard(
+    id: string,
+    sortOrder: number,
+    displayType: number
+  ): Promise<WavedashLeaderboardResponse>;
   uploadLeaderboardScore(
     leaderboardId: string,
     score: number,
@@ -50,7 +60,8 @@ declare global {
 
 const DEFAULT_USERNAME = "Player";
 const DEFAULT_SAVE_KEY = "gameSave";
-const LEADERBOARD_ID = "LEADERBOARD_ID";
+const LEADERBOARD_SLUG = "high-score";
+let resolvedLeaderboardId: string | null = null;
 
 function hasWavedash(): boolean {
   return typeof WavedashJS !== "undefined";
@@ -84,7 +95,7 @@ function getStorage(): Storage | null {
   return window.localStorage;
 }
 
-export function platformInit() {
+export async function platformInit() {
   const wavedash = getWavedashSdk();
   if (!wavedash) {
     return;
@@ -92,6 +103,16 @@ export function platformInit() {
 
   wavedash.init({ debug: false, deferEvents: true });
   wavedash.readyForEvents();
+
+  // Create or fetch leaderboard (descending = highest score wins, numeric display)
+  try {
+    const lb = await wavedash.getOrCreateLeaderboard(LEADERBOARD_SLUG, 1, 0);
+    if (lb.success) {
+      resolvedLeaderboardId = lb.data.id;
+    }
+  } catch {
+    // Leaderboard setup failed — scores won't submit but game still works
+  }
 }
 
 export function getUsername(): string {
@@ -106,11 +127,11 @@ export function getUsername(): string {
 
 export async function submitScore(score: number) {
   const wavedash = getWavedashSdk();
-  if (!wavedash) {
+  if (!wavedash || !resolvedLeaderboardId) {
     return;
   }
 
-  await wavedash.uploadLeaderboardScore(LEADERBOARD_ID, score, true);
+  await wavedash.uploadLeaderboardScore(resolvedLeaderboardId, score, true);
 }
 
 export function signalLoadComplete() {
