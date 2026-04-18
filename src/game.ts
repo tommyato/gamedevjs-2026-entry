@@ -110,6 +110,7 @@ export class Game {
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
   private playerShadow!: THREE.Mesh;
+  private readonly gearShadowMap = new Map<Gear, { mesh: THREE.Mesh; lowerGear: Gear }>();
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
@@ -172,8 +173,7 @@ export class Game {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.5;
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.enabled = false;
     container.insertBefore(this.renderer.domElement, container.firstChild);
 
     this.scene = new THREE.Scene();
@@ -193,15 +193,7 @@ export class Game {
 
     const keyLight = new THREE.DirectionalLight(0xffd6a3, 2.8);
     keyLight.position.set(8, 18, 10);
-    keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(2048, 2048);
-    keyLight.shadow.camera.near = 1;
-    keyLight.shadow.camera.far = 80;
-    keyLight.shadow.camera.left = -16;
-    keyLight.shadow.camera.right = 16;
-    keyLight.shadow.camera.top = 16;
-    keyLight.shadow.camera.bottom = -16;
-    keyLight.shadow.bias = -0.0008;
+    keyLight.castShadow = false;
     keyLight.target.position.set(0, 10, 0);
     this.scene.add(keyLight);
     this.scene.add(keyLight.target);
@@ -235,8 +227,6 @@ export class Game {
     });
     this.towerBase = new THREE.Mesh(towerGeo, towerMat);
     this.towerBase.position.y = 190;
-    this.towerBase.castShadow = true;
-    this.towerBase.receiveShadow = true;
     this.scene.add(this.towerBase);
     this.scene.add(this.backgroundGroup);
     this.scene.add(this.particles.group);
@@ -348,6 +338,10 @@ export class Game {
     for (const bolt of this.bolts) {
       this.scene.remove(bolt.mesh);
     }
+    for (const { mesh } of this.gearShadowMap.values()) {
+      this.scene.remove(mesh);
+    }
+    this.gearShadowMap.clear();
     this.backgroundGroup.clear();
     this.backgroundDecorations = [];
     this.gears = [];
@@ -401,7 +395,55 @@ export class Game {
       }
     }
 
+    this.buildGearDropShadows();
     this.buildBackgroundAtmosphere(height + 24);
+  }
+
+  private buildGearDropShadows() {
+    for (const upperGear of this.gears) {
+      // Find the nearest gear directly below whose XZ footprint overlaps
+      let bestLower: Gear | null = null;
+      let bestTopY = -Infinity;
+
+      for (const lowerGear of this.gears) {
+        if (lowerGear === upperGear) continue;
+        const lowerTopY = lowerGear.getTopY();
+        if (lowerTopY >= upperGear.mesh.position.y) continue;
+
+        const dx = upperGear.mesh.position.x - lowerGear.mesh.position.x;
+        const dz = upperGear.mesh.position.z - lowerGear.mesh.position.z;
+        if (dx * dx + dz * dz > lowerGear.radius * lowerGear.radius) continue;
+
+        if (lowerTopY > bestTopY) {
+          bestTopY = lowerTopY;
+          bestLower = lowerGear;
+        }
+      }
+
+      if (bestLower === null) continue;
+
+      const verticalDist = upperGear.mesh.position.y - bestLower.getTopY();
+      const opacity = THREE.MathUtils.clamp(0.4 - verticalDist * 0.03, 0.05, 0.4);
+
+      const shadowGeo = new THREE.CircleGeometry(upperGear.radius * 0.8, 16);
+      const shadowMat = new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
+      shadowMesh.rotation.x = -Math.PI / 2;
+      shadowMesh.position.set(
+        upperGear.mesh.position.x,
+        bestLower.getTopY() + 0.02,
+        upperGear.mesh.position.z
+      );
+
+      this.scene.add(shadowMesh);
+      this.gearShadowMap.set(upperGear, { mesh: shadowMesh, lowerGear: bestLower });
+    }
   }
 
   private buildBackgroundAtmosphere(maxHeight: number) {
@@ -739,8 +781,23 @@ export class Game {
       decoration.mesh.rotation.z += decoration.rotationSpeed * dt;
     }
 
+    this.updateGearDropShadows();
     this.updateSteam(dt);
     this.particles.update(dt, this.player.mesh.position);
+  }
+
+  private updateGearDropShadows() {
+    for (const [upperGear, { mesh: shadowMesh, lowerGear }] of this.gearShadowMap) {
+      if (!upperGear.isSolid() || !lowerGear.isSolid()) {
+        shadowMesh.visible = false;
+        continue;
+      }
+      shadowMesh.visible = true;
+      if (upperGear.variant === "piston") {
+        // Update Y in case the gear surface moves
+        shadowMesh.position.y = lowerGear.getTopY() + 0.02;
+      }
+    }
   }
 
   private handlePoleCollision() {

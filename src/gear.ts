@@ -76,8 +76,6 @@ export class Gear {
       roughness: this.variant === "crumbling" ? 0.48 : 0.34,
     });
     const body = new THREE.Mesh(bodyGeo, this.bodyMaterial);
-    body.castShadow = true;
-    body.receiveShadow = true;
     this.mesh.add(body);
 
     const topSurfaceGeo = new THREE.CylinderGeometry(this.radius * 0.92, this.radius * 0.92, 0.05, 32);
@@ -90,8 +88,6 @@ export class Gear {
     });
     const topSurface = new THREE.Mesh(topSurfaceGeo, this.topSurfaceMaterial);
     topSurface.position.y = this.height / 2 + 0.03;
-    topSurface.castShadow = true;
-    topSurface.receiveShadow = true;
     this.mesh.add(topSurface);
 
     const landingRingGeo = new THREE.TorusGeometry(Math.max(this.radius * 0.72, 0.6), Math.max(this.radius * 0.06, 0.08), 10, 40);
@@ -105,8 +101,6 @@ export class Gear {
     const landingRing = new THREE.Mesh(landingRingGeo, landingRingMat);
     landingRing.rotation.x = Math.PI / 2;
     landingRing.position.y = this.height / 2 + 0.05;
-    landingRing.castShadow = true;
-    landingRing.receiveShadow = true;
     this.mesh.add(landingRing);
 
     const hubGeo = new THREE.CylinderGeometry(this.radius * 0.22, this.radius * 0.22, this.height + 0.04, 16);
@@ -119,8 +113,6 @@ export class Gear {
     });
     const hub = new THREE.Mesh(hubGeo, this.detailMaterial);
     hub.position.y = 0.01;
-    hub.castShadow = true;
-    hub.receiveShadow = true;
     this.mesh.add(hub);
 
     const spokeGeo = new THREE.BoxGeometry(this.radius * 1.15, 0.08, Math.max(this.radius * 0.1, 0.16));
@@ -136,8 +128,6 @@ export class Gear {
       const spoke = new THREE.Mesh(spokeGeo, this.accentMaterial);
       spoke.position.y = this.height / 2 + 0.065;
       spoke.rotation.y = (index / spokeCount) * Math.PI * 2 + Math.PI / 8;
-      spoke.castShadow = true;
-      spoke.receiveShadow = true;
       this.mesh.add(spoke);
     }
 
@@ -151,7 +141,6 @@ export class Gear {
     });
     const marker = new THREE.Mesh(markerGeo, markerMat);
     marker.position.set(this.radius * 0.55, this.height / 2 + 0.08, 0);
-    marker.castShadow = true;
     this.mesh.add(marker);
 
     const toothGeo = new THREE.BoxGeometry(0.2, this.height, 0.4);
@@ -168,8 +157,6 @@ export class Gear {
       const tooth = new THREE.Mesh(toothGeo, this.toothMaterial);
       tooth.position.set(Math.cos(angle) * this.radius, 0, Math.sin(angle) * this.radius);
       tooth.rotation.y = -angle;
-      tooth.castShadow = true;
-      tooth.receiveShadow = true;
       this.mesh.add(tooth);
     }
 
@@ -194,8 +181,6 @@ export class Gear {
     const shaft = new THREE.Mesh(shaftGeo, shaftMat);
     this.pistonBaseY = this.height / 2 + 0.32;
     shaft.position.y = this.pistonBaseY;
-    shaft.castShadow = true;
-    shaft.receiveShadow = true;
     this.mesh.add(shaft);
     this.pistonMesh = shaft;
 
@@ -209,7 +194,6 @@ export class Gear {
     });
     const cap = new THREE.Mesh(capGeo, capMat);
     cap.position.y = 0.34;
-    cap.castShadow = true;
     shaft.add(cap);
   }
 
@@ -228,7 +212,6 @@ export class Gear {
       crack.rotation.y = this.shakePhase + index * 0.9;
       crack.position.x = Math.cos(index * 2.1) * this.radius * 0.12;
       crack.position.z = Math.sin(index * 1.7) * this.radius * 0.12;
-      crack.castShadow = true;
       this.mesh.add(crack);
     }
   }
