@@ -7,11 +7,13 @@ import {
   initAudio,
   playClick,
   playCollect,
+  playComboLand,
   playGearTick,
   playHit,
   playJump,
   playLand,
   playMilestone,
+  playPistonLaunch,
   playSteamHiss,
   setAudioEnabled,
   setMusicIntensity,
@@ -77,6 +79,7 @@ export class Game {
   private state = GameState.Title;
   private score = 0;
   private heightScore = 0;
+  private heightMaxReached = 0;
   private boltCount = 0;
   private boltScore = 0;
   private highScore = 0;
@@ -90,6 +93,7 @@ export class Game {
   private hudStatus!: HTMLElement;
   private hudToast!: HTMLElement;
   private hudControls!: HTMLElement;
+  private hudCombo!: HTMLElement;
   private soundToggleBtn!: HTMLElement;
   private closeCallOverlay!: HTMLElement;
   private titleHeading!: HTMLElement;
@@ -123,6 +127,23 @@ export class Game {
   private nextMilestone = 25;
   private toastTimer = 0;
   private readonly unlockedThisRun = new Set<string>();
+
+  // Combo system
+  private comboLandings = 0;
+  private comboMultiplier = 1;
+  private timeSinceLastLanding = Infinity;
+  private readonly comboWindow = 2.5;
+  private readonly lastComboGears = new WeakSet<Gear>();
+
+  // Environment transitions
+  private readonly sceneBackgroundColor = new THREE.Color(0x140d0a);
+  private readonly currentFogColor = new THREE.Color(0x140d0a);
+  private readonly currentAmbientColor = new THREE.Color(0xc7aa7a);
+  private ambientLight!: THREE.AmbientLight;
+  private readonly zoneBgColor = new THREE.Color();
+  private readonly zoneNextBgColor = new THREE.Color();
+  private readonly zoneAmbientColor = new THREE.Color();
+  private readonly zoneNextAmbientColor = new THREE.Color();
 
   async start() {
     await this.init();
@@ -159,6 +180,7 @@ export class Game {
 
     const ambient = new THREE.AmbientLight(0xc7aa7a, 1.35);
     this.scene.add(ambient);
+    this.ambientLight = ambient;
 
     const hemisphere = new THREE.HemisphereLight(0xf2dcc2, 0x2b1a10, 1.1);
     this.scene.add(hemisphere);
@@ -237,9 +259,10 @@ export class Game {
     const hudStatus = document.getElementById("hud-status");
     const hudToast = document.getElementById("hud-toast");
     const hudControls = document.getElementById("hud-controls");
+    const hudCombo = document.getElementById("hud-combo");
     const soundToggleBtn = document.getElementById("sound-toggle");
     const closeCallOverlay = document.getElementById("close-call-overlay");
-    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !soundToggleBtn || !closeCallOverlay) {
+    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !soundToggleBtn || !closeCallOverlay) {
       throw new Error("Missing HUD elements");
     }
 
@@ -251,6 +274,7 @@ export class Game {
     this.hudStatus = hudStatus;
     this.hudToast = hudToast;
     this.hudControls = hudControls;
+    this.hudCombo = hudCombo;
     this.soundToggleBtn = soundToggleBtn;
     this.closeCallOverlay = closeCallOverlay;
 
@@ -440,6 +464,9 @@ export class Game {
   }
 
   private pickGearVariant(height: number): GearVariant {
+    if (height >= 55 && Math.random() < 0.15) {
+      return "piston";
+    }
     const roll = Math.random();
     if (height >= 75 && roll < 0.22) {
       return "reverse";
@@ -512,6 +539,11 @@ export class Game {
     this.cameraShakeOffset.set(0, 0, 0);
     this.steamSpawnTimer = 0;
     this.closeCallOverlay.style.opacity = "0";
+    this.comboLandings = 0;
+    this.comboMultiplier = 1;
+    this.timeSinceLastLanding = Infinity;
+    this.heightMaxReached = 0;
+    this.updateComboHud();
     this.player.reset(0, 2);
     this.resetLevel();
     this.updateHud(dtZero());
@@ -538,8 +570,13 @@ export class Game {
     }
 
     this.gameTime += dt;
-    setTickRate(this.heightScore);
-    setMusicIntensity(this.heightScore);
+    this.timeSinceLastLanding += dt;
+    if (this.comboLandings > 0 && this.timeSinceLastLanding > this.comboWindow) {
+      this.breakCombo();
+    }
+    setTickRate(this.heightMaxReached);
+    setMusicIntensity(this.heightMaxReached);
+    this.updateEnvironment(this.player.mesh.position.y);
     this.updateWorld(dt);
 
     let foundGround = false;
@@ -579,6 +616,10 @@ export class Game {
           if (gear.variant === "speed") {
             this.player.giveSpeedBoost(1.55, 0.9);
             this.showToast("SURGE GEAR");
+          }
+          this.handleComboLanding(gear);
+          if (gear.variant === "piston") {
+            this.triggerPistonLaunch();
           }
         }
 
@@ -627,6 +668,13 @@ export class Game {
   private startDeath() {
     this.isDying = true;
     this.deathFreezeTimer = 0.2;
+    if (this.comboMultiplier > 1) {
+      this.breakCombo();
+    } else {
+      this.comboLandings = 0;
+      this.comboMultiplier = 1;
+      this.updateComboHud();
+    }
     this.cameraShakeOffset.set(
       randomRange(-0.08, 0.08),
       randomRange(-0.05, 0.05),
@@ -739,12 +787,17 @@ export class Game {
   }
 
   private updateScores() {
-    const previousHeight = this.heightScore;
-    this.heightScore = Math.max(this.heightScore, Math.floor(this.player.mesh.position.y));
+    const currentHeight = Math.max(0, Math.floor(this.player.mesh.position.y));
+    const previousReached = this.heightMaxReached;
+    if (currentHeight > this.heightMaxReached) {
+      const delta = currentHeight - this.heightMaxReached;
+      this.heightMaxReached = currentHeight;
+      this.heightScore += delta * this.comboMultiplier;
+    }
     this.score = this.heightScore + this.boltScore;
 
-    if (this.heightScore > previousHeight && this.heightScore >= this.nextMilestone) {
-      while (this.heightScore >= this.nextMilestone) {
+    if (this.heightMaxReached > previousReached && this.heightMaxReached >= this.nextMilestone) {
+      while (this.heightMaxReached >= this.nextMilestone) {
         this.showToast(`CHECKPOINT ${this.nextMilestone}m`);
         playMilestone(1 + this.nextMilestone / 220);
         this.nextMilestone += 25;
@@ -759,8 +812,8 @@ export class Game {
         unlockAchievement(id);
       }
     };
-    if (this.heightScore >= 50) unlock('SKY_HIGH');
-    if (this.heightScore >= 100) unlock('CLOUD_WALKER');
+    if (this.heightMaxReached >= 50) unlock('SKY_HIGH');
+    if (this.heightMaxReached >= 100) unlock('CLOUD_WALKER');
     if (this.boltCount >= 10) unlock('BOLT_COLLECTOR');
     if (this.boltCount >= 25) unlock('BOLT_HOARDER');
     if (this.gameTime >= 60) unlock('ENDURANCE');
@@ -795,10 +848,10 @@ export class Game {
     this.titleOverlay.classList.remove("hidden");
     this.titleHeading.textContent = "GAME OVER";
     if (isNewBest) {
-      this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightScore}m`;
+      this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
       this.titleTagline.classList.add("new-best");
     } else {
-      this.titleTagline.textContent = `SCORE ${this.score} · HEIGHT ${this.heightScore}m · BEST ${this.highScore}`;
+      this.titleTagline.textContent = `SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m · BEST ${this.highScore}`;
       this.titleTagline.classList.remove("new-best");
     }
     this.titlePrompt.textContent = this.input.isTouchDevice() ? "TAP TO RESTART" : "PRESS SPACE TO RESTART";
@@ -865,7 +918,7 @@ export class Game {
     this.hudScore.textContent = String(this.score);
     this.hudBest.textContent = String(Math.max(this.highScore, this.score));
     this.hudBolts.textContent = String(this.boltCount);
-    this.hudStatus.textContent = `HEIGHT ${this.heightScore}m · NEXT ${this.nextMilestone}m`;
+    this.hudStatus.textContent = `HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`;
 
     this.toastTimer = Math.max(0, this.toastTimer - dt);
     const toastVisible = this.toastTimer > 0;
@@ -965,6 +1018,157 @@ export class Game {
       playSteamHiss(distance);
     }
   }
+
+  private handleComboLanding(gear: Gear) {
+    // Only count combo if this is a different gear from last landing (chaining),
+    // and within the combo window.
+    const withinWindow = this.timeSinceLastLanding <= this.comboWindow;
+    const sameGear = this.lastComboGears.has(gear);
+
+    let progressed = false;
+    if (!sameGear) {
+      if (withinWindow || this.comboLandings === 0) {
+        this.comboLandings += 1;
+      } else {
+        // Window expired: reset to start this as first landing of a new combo
+        this.comboLandings = 1;
+      }
+      progressed = true;
+    }
+
+    // Track most recent gear so re-bounces on same gear don't inflate combo
+    this.lastComboGears.add(gear);
+
+    this.timeSinceLastLanding = 0;
+    const newMultiplier = comboLandingsToMultiplier(this.comboLandings);
+
+    if (newMultiplier > 1 && newMultiplier !== this.comboMultiplier) {
+      this.showToast(`COMBO x${newMultiplier}!`);
+    }
+    this.comboMultiplier = newMultiplier;
+
+    if (progressed && this.comboMultiplier > 1) {
+      playComboLand(this.comboMultiplier);
+    }
+
+    this.updateComboHud();
+  }
+
+  private breakCombo() {
+    if (this.comboMultiplier > 1) {
+      this.showToast("COMBO LOST");
+    }
+    this.comboLandings = 0;
+    this.comboMultiplier = 1;
+    this.timeSinceLastLanding = Infinity;
+    this.updateComboHud();
+  }
+
+  private updateComboHud() {
+    if (this.comboMultiplier > 1) {
+      this.hudCombo.textContent = `COMBO x${this.comboMultiplier}`;
+      this.hudCombo.classList.add("active");
+    } else {
+      this.hudCombo.textContent = "";
+      this.hudCombo.classList.remove("active");
+    }
+  }
+
+  private triggerPistonLaunch() {
+    this.player.velocity.y = 18;
+    this.player.onGround = false;
+    this.particles.spawnJumpSparks(this.player.mesh.position);
+    this.particles.spawnJumpSparks(this.player.mesh.position);
+    this.particles.spawnJumpSparks(this.player.mesh.position);
+    playPistonLaunch();
+    this.showToast("PISTON LAUNCH!");
+    this.cameraKick = Math.min(this.cameraKick + 0.18, 0.34);
+  }
+
+  private updateEnvironment(height: number) {
+    // Zone waypoints — (heightAtZoneCenter, bg, fogDensity, ambientHex, ambientIntensity, bloomStrength)
+    type Zone = {
+      height: number;
+      bg: number;
+      fogDensity: number;
+      ambient: number;
+      ambientIntensity: number;
+      bloom: number;
+    };
+    const zones: Zone[] = [
+      { height: 0, bg: 0x140d0a, fogDensity: 0.014, ambient: 0xc7aa7a, ambientIntensity: 1.35, bloom: 0.18 },
+      { height: 25, bg: 0x0f1318, fogDensity: 0.012, ambient: 0x8899bb, ambientIntensity: 1.5, bloom: 0.22 },
+      { height: 50, bg: 0x181b22, fogDensity: 0.010, ambient: 0xb8c4dd, ambientIntensity: 1.7, bloom: 0.26 },
+      { height: 75, bg: 0x1a1408, fogDensity: 0.008, ambient: 0xffd6a3, ambientIntensity: 2.0, bloom: 0.32 },
+    ];
+
+    // Find the two zones to interpolate between, with a ~5m transition band.
+    let from = zones[0];
+    let to = zones[0];
+    let t = 0;
+    for (let i = 0; i < zones.length - 1; i += 1) {
+      const a = zones[i];
+      const b = zones[i + 1];
+      if (height <= a.height) {
+        from = a;
+        to = a;
+        t = 0;
+        break;
+      }
+      // Transition band is [b.height - 5, b.height]
+      const bandStart = b.height - 5;
+      if (height < bandStart) {
+        from = a;
+        to = a;
+        t = 0;
+        break;
+      }
+      if (height <= b.height) {
+        from = a;
+        to = b;
+        t = (height - bandStart) / 5;
+        break;
+      }
+      if (i === zones.length - 2) {
+        from = b;
+        to = b;
+        t = 0;
+      }
+    }
+
+    t = THREE.MathUtils.clamp(t, 0, 1);
+
+    this.zoneBgColor.setHex(from.bg);
+    this.zoneNextBgColor.setHex(to.bg);
+    this.currentFogColor.copy(this.zoneBgColor).lerp(this.zoneNextBgColor, t);
+    this.sceneBackgroundColor.copy(this.currentFogColor);
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.copy(this.sceneBackgroundColor);
+    } else {
+      this.scene.background = this.sceneBackgroundColor.clone();
+    }
+
+    if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.copy(this.currentFogColor);
+      this.scene.fog.density = THREE.MathUtils.lerp(from.fogDensity, to.fogDensity, t);
+    }
+
+    this.zoneAmbientColor.setHex(from.ambient);
+    this.zoneNextAmbientColor.setHex(to.ambient);
+    this.currentAmbientColor.copy(this.zoneAmbientColor).lerp(this.zoneNextAmbientColor, t);
+    this.ambientLight.color.copy(this.currentAmbientColor);
+    this.ambientLight.intensity = THREE.MathUtils.lerp(from.ambientIntensity, to.ambientIntensity, t);
+
+    this.bloomPass.strength = THREE.MathUtils.lerp(from.bloom, to.bloom, t);
+  }
+}
+
+function comboLandingsToMultiplier(landings: number): number {
+  if (landings >= 8) return 5;
+  if (landings >= 6) return 4;
+  if (landings >= 4) return 3;
+  if (landings >= 2) return 2;
+  return 1;
 }
 
 function getDifficultyBand(height: number): DifficultyBand {

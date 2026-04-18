@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export type GearVariant = "normal" | "crumbling" | "speed" | "reverse";
+export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston";
 
 export type GearCollision = {
   onGear: boolean;
@@ -47,6 +47,9 @@ export class Gear {
   private readonly reversePause = 0.35;
   private readonly shakePhase = Math.random() * Math.PI * 2;
   private readonly angularVelocityVector = new THREE.Vector3();
+  private pistonMesh: THREE.Mesh | null = null;
+  private pistonBaseY = 0;
+  private pistonTime = Math.random() * Math.PI * 2;
 
   constructor(options: GearOptions = {}) {
     this.radius = options.radius ?? 1.5;
@@ -173,6 +176,41 @@ export class Gear {
     if (this.variant === "crumbling") {
       this.addCrackDetails();
     }
+
+    if (this.variant === "piston") {
+      this.addPistonDetail();
+    }
+  }
+
+  private addPistonDetail() {
+    const shaftGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.6, 16);
+    const shaftMat = new THREE.MeshStandardMaterial({
+      color: 0x88ddaa,
+      emissive: 0x2a6b45,
+      emissiveIntensity: 0.55,
+      metalness: 0.88,
+      roughness: 0.24,
+    });
+    const shaft = new THREE.Mesh(shaftGeo, shaftMat);
+    this.pistonBaseY = this.height / 2 + 0.32;
+    shaft.position.y = this.pistonBaseY;
+    shaft.castShadow = true;
+    shaft.receiveShadow = true;
+    this.mesh.add(shaft);
+    this.pistonMesh = shaft;
+
+    const capGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.08, 16);
+    const capMat = new THREE.MeshStandardMaterial({
+      color: 0xc8ffd4,
+      emissive: 0x66cc66,
+      emissiveIntensity: 0.7,
+      metalness: 0.7,
+      roughness: 0.18,
+    });
+    const cap = new THREE.Mesh(capGeo, capMat);
+    cap.position.y = 0.34;
+    cap.castShadow = true;
+    shaft.add(cap);
   }
 
   private addCrackDetails() {
@@ -236,6 +274,12 @@ export class Gear {
   }
 
   update(dt: number) {
+    if (this.pistonMesh) {
+      this.pistonTime += dt;
+      const oscillation = Math.sin((this.pistonTime / 1.5) * Math.PI * 2) * 0.15;
+      this.pistonMesh.position.y = this.pistonBaseY + oscillation;
+    }
+
     this.reverseTimer += dt;
     if (this.variant === "reverse" && this.reverseTimer >= this.reverseInterval) {
       this.reverseTimer -= this.reverseInterval;
@@ -330,6 +374,9 @@ function applyVariantTint(baseColor: THREE.Color, variant: GearVariant): THREE.C
   }
   if (variant === "reverse") {
     return color.lerp(new THREE.Color(0xff6852), 0.5);
+  }
+  if (variant === "piston") {
+    return color.lerp(new THREE.Color(0x66cc66), 0.3);
   }
   return color;
 }

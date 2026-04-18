@@ -331,6 +331,105 @@ export function playHit() {
   osc.stop(t + 0.26);
 }
 
+/** Escalating pitch combo sound — call with combo multiplier (1..5). */
+export function playComboLand(comboMultiplier: number) {
+  if (!ctx || !masterGain) {
+    return;
+  }
+  const t = ctx.currentTime;
+  const level = Math.max(1, Math.min(5, comboMultiplier));
+  const baseFreq = 420 + (level - 1) * 140;
+
+  const osc = ctx.createOscillator();
+  osc.type = "triangle";
+  osc.frequency.setValueAtTime(baseFreq, t);
+  osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.7, t + 0.14);
+
+  const harmonic = ctx.createOscillator();
+  harmonic.type = "sine";
+  harmonic.frequency.setValueAtTime(baseFreq * 1.5, t);
+  harmonic.frequency.exponentialRampToValueAtTime(baseFreq * 2.2, t + 0.14);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.001, t);
+  gain.gain.exponentialRampToValueAtTime(0.09, t + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+
+  osc.connect(gain);
+  harmonic.connect(gain);
+  gain.connect(masterGain);
+  osc.start(t);
+  harmonic.start(t);
+  osc.stop(t + 0.22);
+  harmonic.stop(t + 0.22);
+}
+
+/** Hydraulic piston release — noise burst then rising tone */
+export function playPistonLaunch() {
+  if (!ctx || !masterGain) {
+    return;
+  }
+  const t = ctx.currentTime;
+
+  // Compressed-air hiss (short noise burst)
+  const hissDur = 0.09;
+  const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * hissDur), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let index = 0; index < data.length; index += 1) {
+    const falloff = 1 - index / data.length;
+    data[index] = (Math.random() * 2 - 1) * falloff;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  const hissFilter = ctx.createBiquadFilter();
+  hissFilter.type = "bandpass";
+  hissFilter.frequency.setValueAtTime(2200, t);
+  hissFilter.Q.setValueAtTime(1.4, t);
+  const hissGain = ctx.createGain();
+  hissGain.gain.setValueAtTime(0.18, t);
+  hissGain.gain.exponentialRampToValueAtTime(0.001, t + hissDur);
+  src.connect(hissFilter);
+  hissFilter.connect(hissGain);
+  hissGain.connect(masterGain);
+  src.start(t);
+  src.stop(t + hissDur + 0.01);
+
+  // Rising tone (the launch)
+  const osc = ctx.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(180, t + 0.02);
+  osc.frequency.exponentialRampToValueAtTime(720, t + 0.32);
+
+  const toneFilter = ctx.createBiquadFilter();
+  toneFilter.type = "lowpass";
+  toneFilter.frequency.setValueAtTime(1600, t);
+  toneFilter.Q.setValueAtTime(4, t);
+
+  const oscGain = ctx.createGain();
+  oscGain.gain.setValueAtTime(0.001, t + 0.02);
+  oscGain.gain.exponentialRampToValueAtTime(0.14, t + 0.05);
+  oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.36);
+
+  osc.connect(toneFilter);
+  toneFilter.connect(oscGain);
+  oscGain.connect(masterGain);
+  osc.start(t + 0.02);
+  osc.stop(t + 0.38);
+
+  // Low thump for body
+  const thump = ctx.createOscillator();
+  thump.type = "sine";
+  thump.frequency.setValueAtTime(110, t);
+  thump.frequency.exponentialRampToValueAtTime(50, t + 0.18);
+  const thumpGain = ctx.createGain();
+  thumpGain.gain.setValueAtTime(0.16, t);
+  thumpGain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+  thump.connect(thumpGain);
+  thumpGain.connect(masterGain);
+  thump.start(t);
+  thump.stop(t + 0.24);
+}
+
 export function setAudioEnabled(enabled: boolean) {
   audioEnabled = enabled;
   applyMasterVolume();
