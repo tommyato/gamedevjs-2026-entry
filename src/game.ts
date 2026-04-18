@@ -103,7 +103,13 @@ export class Game {
   private titleHeading!: HTMLElement;
   private titleTagline!: HTMLElement;
   private titlePrompt!: HTMLElement;
-  private gameOverStatsEl!: HTMLElement;
+  private gameOverCard!: HTMLElement;
+  private gameOverHeightEl!: HTMLElement;
+  private gameOverBoltsEl!: HTMLElement;
+  private gameOverBoltCountEl!: HTMLElement;
+  private gameOverComboEl!: HTMLElement;
+  private gameOverTimeEl!: HTMLElement;
+  private gameOverTotalEl!: HTMLElement;
   private pauseOverlay!: HTMLElement;
   private pauseBtn!: HTMLElement;
 
@@ -138,6 +144,7 @@ export class Game {
   // Combo system
   private comboLandings = 0;
   private comboMultiplier = 1;
+  private bestCombo = 1;
   private timeSinceLastLanding = Infinity;
   private readonly comboWindow = 2.5;
   private readonly lastComboGears = new WeakSet<Gear>();
@@ -286,15 +293,38 @@ export class Game {
     const heading = this.titleOverlay.querySelector("h1");
     const tagline = this.titleOverlay.querySelector(".tagline");
     const prompt = this.titleOverlay.querySelector(".prompt");
-    const gameOverStats = this.titleOverlay.querySelector(".game-over-stats");
-    if (!heading || !tagline || !prompt || !gameOverStats) {
+    const gameOverCard = this.titleOverlay.querySelector(".game-over-card");
+    const gameOverHeight = document.getElementById("go-height");
+    const gameOverBolts = document.getElementById("go-bolts");
+    const gameOverBoltCount = document.getElementById("go-bolt-count");
+    const gameOverCombo = document.getElementById("go-combo");
+    const gameOverTime = document.getElementById("go-time");
+    const gameOverTotal = document.getElementById("go-total");
+    if (
+      !heading ||
+      !tagline ||
+      !prompt ||
+      !gameOverCard ||
+      !gameOverHeight ||
+      !gameOverBolts ||
+      !gameOverBoltCount ||
+      !gameOverCombo ||
+      !gameOverTime ||
+      !gameOverTotal
+    ) {
       throw new Error("Missing title overlay elements");
     }
 
     this.titleHeading = heading as HTMLElement;
     this.titleTagline = tagline as HTMLElement;
     this.titlePrompt = prompt as HTMLElement;
-    this.gameOverStatsEl = gameOverStats as HTMLElement;
+    this.gameOverCard = gameOverCard as HTMLElement;
+    this.gameOverHeightEl = gameOverHeight;
+    this.gameOverBoltsEl = gameOverBolts;
+    this.gameOverBoltCountEl = gameOverBoltCount;
+    this.gameOverComboEl = gameOverCombo;
+    this.gameOverTimeEl = gameOverTime;
+    this.gameOverTotalEl = gameOverTotal;
 
     const pauseOverlay = document.getElementById("pause-overlay");
     const pauseBtn = document.getElementById("pause-btn");
@@ -647,6 +677,7 @@ export class Game {
     this.closeCallOverlay.style.opacity = "0";
     this.comboLandings = 0;
     this.comboMultiplier = 1;
+    this.bestCombo = 1;
     this.timeSinceLastLanding = Infinity;
     this.heightMaxReached = 0;
     this.updateComboHud();
@@ -655,8 +686,9 @@ export class Game {
     this.updateHud(dtZero());
     this.hud.classList.remove("hidden");
     this.titleOverlay.classList.add("hidden");
+    this.titleOverlay.classList.remove("game-over");
     this.pauseOverlay.classList.add("hidden");
-    this.gameOverStatsEl.classList.add("hidden");
+    this.gameOverCard.classList.add("hidden");
     this.titleTagline.classList.remove("new-best");
     this.input.setTouchControlsVisible(this.input.isTouchDevice());
     this.showTutorialOverlay();
@@ -986,6 +1018,7 @@ export class Game {
 
     this.updateHud(dtZero());
     this.titleOverlay.classList.remove("hidden");
+    this.titleOverlay.classList.add("game-over");
     this.titleHeading.textContent = "GAME OVER";
     if (isNewBest) {
       this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
@@ -997,8 +1030,13 @@ export class Game {
     this.titlePrompt.textContent = this.input.isTouchDevice() ? "TAP TO RESTART" : "PRESS SPACE TO RESTART";
 
     const gameSeconds = Math.floor(this.gameTime);
-    this.gameOverStatsEl.textContent = `BOLTS: ${this.boltCount} · TIME: ${gameSeconds}s`;
-    this.gameOverStatsEl.classList.remove("hidden");
+    this.gameOverHeightEl.textContent = String(this.heightScore);
+    this.gameOverBoltsEl.textContent = String(this.boltScore);
+    this.gameOverBoltCountEl.textContent = String(this.boltCount);
+    this.gameOverComboEl.textContent = `x${this.bestCombo}`;
+    this.gameOverTimeEl.textContent = `${gameSeconds}s`;
+    this.gameOverTotalEl.textContent = String(this.score);
+    this.gameOverCard.classList.remove("hidden");
   }
 
   private updateGameOver(dt: number) {
@@ -1016,6 +1054,7 @@ export class Game {
   }
 
   private updateOverlayText() {
+    this.titleOverlay.classList.remove("game-over");
     this.titleHeading.textContent = "CLOCKWORK CLIMB";
     this.titleTagline.textContent = "GAMEDEV.JS JAM 2026 — Theme: MACHINES";
     this.titlePrompt.textContent = this.input.isTouchDevice() ? "TAP TO CLIMB" : "PRESS SPACE OR CLICK TO CLIMB";
@@ -1225,6 +1264,7 @@ export class Game {
       this.showToast(`COMBO x${newMultiplier}!`);
     }
     this.comboMultiplier = newMultiplier;
+    this.bestCombo = Math.max(this.bestCombo, this.comboMultiplier);
 
     if (progressed && this.comboMultiplier > 1) {
       playComboLand(this.comboMultiplier);

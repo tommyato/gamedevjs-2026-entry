@@ -238,6 +238,10 @@
       z-index: 20; pointer-events: auto;
       background: radial-gradient(circle at center, rgba(0,0,0,0.18), rgba(0,0,0,0.58));
     }
+    #title-overlay.game-over {
+      background: radial-gradient(circle at center, rgba(0,0,0,0.22), rgba(0,0,0,0.70));
+      backdrop-filter: blur(6px);
+    }
     #title-overlay h1 {
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 56px; font-weight: 900;
       color: #ffaa44; text-shadow: 0 0 60px rgba(255,170,68,0.4);
@@ -260,13 +264,50 @@
       color: #ffd040;
       animation: glow 1.2s ease-in-out infinite;
     }
-    .game-over-stats {
-      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
-      font-size: 13px;
-      letter-spacing: 3px;
-      color: #c7a271;
-      margin-top: -24px;
+    .game-over-card {
+      width: min(400px, calc(100vw - 40px));
+      max-width: min(400px, calc(100vw - 40px));
+      margin-top: 8px;
       margin-bottom: 24px;
+      padding: 18px 24px;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 196, 120, 0.18);
+      background: linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62));
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08);
+      backdrop-filter: blur(10px);
+      text-align: left;
+    }
+    .stat-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .stat-row + .stat-row {
+      margin-top: 12px;
+    }
+    .stat-label {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: #c7a271;
+    }
+    .stat-value {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 22px;
+      font-weight: 800;
+      color: #f3d7b1;
+      text-shadow: 0 0 18px rgba(255, 214, 163, 0.12);
+    }
+    .stat-total {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255, 196, 120, 0.18);
+    }
+    .stat-total .stat-value {
+      font-size: 28px;
+      color: #ffaa44;
+      text-shadow: 0 0 24px rgba(255,170,68,0.28);
     }
     #sound-toggle {
       position: absolute;
@@ -376,6 +417,24 @@
         letter-spacing: 3px;
         padding: 0 24px;
       }
+      .game-over-card {
+        width: min(100vw - 32px, 400px);
+        margin-bottom: 20px;
+        padding: 16px 18px;
+      }
+      .stat-row {
+        gap: 12px;
+      }
+      .stat-label {
+        font-size: 10px;
+        letter-spacing: 1.5px;
+      }
+      .stat-value {
+        font-size: 18px;
+      }
+      .stat-total .stat-value {
+        font-size: 24px;
+      }
       #pause-btn {
         top: 14px;
         left: 14px;
@@ -442,7 +501,14 @@
     <div id="title-overlay">
       <h1>CLOCKWORK CLIMB</h1>
       <div class="tagline">GAMEDEV.JS JAM 2026 — Theme: MACHINES</div>
-      <div class="game-over-stats hidden"></div>
+      <div class="game-over-card hidden">
+        <div class="stat-row"><span class="stat-label">HEIGHT SCORE</span><span class="stat-value" id="go-height"></span></div>
+        <div class="stat-row"><span class="stat-label">BOLT SCORE</span><span class="stat-value" id="go-bolts"></span></div>
+        <div class="stat-row"><span class="stat-label">BOLTS COLLECTED</span><span class="stat-value" id="go-bolt-count"></span></div>
+        <div class="stat-row"><span class="stat-label">BEST COMBO</span><span class="stat-value" id="go-combo"></span></div>
+        <div class="stat-row"><span class="stat-label">TIME</span><span class="stat-value" id="go-time"></span></div>
+        <div class="stat-row stat-total"><span class="stat-label">TOTAL SCORE</span><span class="stat-value" id="go-total"></span></div>
+      </div>
       <div class="prompt">PRESS SPACE OR CLICK TO CLIMB</div>
     </div>
   </div>
