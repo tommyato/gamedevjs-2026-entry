@@ -45,6 +45,7 @@ enum GameState {
   Title,
   Playing,
   GameOver,
+  Paused,
 }
 
 type DifficultyBand = {
@@ -103,6 +104,8 @@ export class Game {
   private titleTagline!: HTMLElement;
   private titlePrompt!: HTMLElement;
   private gameOverStatsEl!: HTMLElement;
+  private pauseOverlay!: HTMLElement;
+  private pauseBtn!: HTMLElement;
 
   private readonly player = new Player();
   private gears: Gear[] = [];
@@ -293,6 +296,14 @@ export class Game {
     this.titlePrompt = prompt as HTMLElement;
     this.gameOverStatsEl = gameOverStats as HTMLElement;
 
+    const pauseOverlay = document.getElementById("pause-overlay");
+    const pauseBtn = document.getElementById("pause-btn");
+    if (!pauseOverlay || !pauseBtn) {
+      throw new Error("Missing pause elements");
+    }
+    this.pauseOverlay = pauseOverlay;
+    this.pauseBtn = pauseBtn;
+
     // Sound toggle
     const updateSoundBtn = () => {
       this.soundToggleBtn.textContent = getAudioEnabled() ? "🔊" : "🔇";
@@ -302,6 +313,46 @@ export class Game {
       e.stopPropagation();
       toggleAudio();
       updateSoundBtn();
+    });
+
+    // Escape key: pause during Playing, resume during Paused
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (this.state === GameState.Playing) {
+          this.pauseGame();
+        } else if (this.state === GameState.Paused) {
+          this.resumeGame();
+        }
+      }
+    });
+
+    // Pause overlay: tap/click anywhere to resume (except restart button)
+    this.pauseOverlay.addEventListener("click", (e) => {
+      if (!(e.target as HTMLElement).closest("#pause-restart")) {
+        this.resumeGame();
+      }
+    });
+    this.pauseOverlay.addEventListener("touchend", (e) => {
+      if (!(e.target as HTMLElement).closest("#pause-restart")) {
+        e.preventDefault();
+        this.resumeGame();
+      }
+    }, { passive: false });
+
+    // Restart button inside pause overlay
+    const pauseRestartBtn = document.getElementById("pause-restart");
+    pauseRestartBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.startGame();
+    });
+
+    // Mobile pause button in HUD
+    this.pauseBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (this.state === GameState.Playing) {
+        this.pauseGame();
+      }
     });
 
     const handleOverlayActivate = (event: Event) => {
@@ -575,6 +626,7 @@ export class Game {
   private startGame() {
     initAudio();
     playClick();
+    this.resumeAnimationLoop();
     this.state = GameState.Playing;
     this.score = 0;
     this.heightScore = 0;
@@ -603,12 +655,29 @@ export class Game {
     this.updateHud(dtZero());
     this.hud.classList.remove("hidden");
     this.titleOverlay.classList.add("hidden");
+    this.pauseOverlay.classList.add("hidden");
     this.gameOverStatsEl.classList.add("hidden");
     this.titleTagline.classList.remove("new-best");
     this.input.setTouchControlsVisible(this.input.isTouchDevice());
     this.showTutorialOverlay();
     startAmbientTick();
     startMusic();
+  }
+
+  private pauseGame() {
+    this.state = GameState.Paused;
+    this.pauseOverlay.classList.remove("hidden");
+    this.pauseAnimationLoop();
+    stopMusic();
+    stopAmbientTick();
+  }
+
+  private resumeGame() {
+    this.state = GameState.Playing;
+    this.pauseOverlay.classList.add("hidden");
+    this.resumeAnimationLoop();
+    startMusic();
+    startAmbientTick();
   }
 
   private updatePlaying(dt: number) {

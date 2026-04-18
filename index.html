@@ -290,6 +290,63 @@
       line-height: 1;
     }
     #sound-toggle:hover { background: linear-gradient(180deg, rgba(40, 28, 20, 0.85), rgba(20, 15, 12, 0.72)); }
+    #pause-btn {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 196, 120, 0.18);
+      background: linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62));
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08);
+      backdrop-filter: blur(10px);
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    #pause-btn:hover { background: linear-gradient(180deg, rgba(40, 28, 20, 0.85), rgba(20, 15, 12, 0.72)); }
+    #pause-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 22; pointer-events: auto;
+      background: radial-gradient(circle at center, rgba(0,0,0,0.22), rgba(0,0,0,0.70));
+      backdrop-filter: blur(4px);
+    }
+    #pause-overlay h2 {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 56px; font-weight: 900;
+      color: #ffaa44; text-shadow: 0 0 60px rgba(255,170,68,0.4);
+      letter-spacing: 6px; margin-bottom: 20px; text-align: center;
+    }
+    #pause-overlay .prompt {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 18px; color: #ffcc00;
+      animation: pulse 1.5s ease-in-out infinite; text-align: center;
+      margin-bottom: 32px;
+    }
+    #pause-restart {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 14px; font-weight: 700; letter-spacing: 3px;
+      color: #ffe1a9;
+      padding: 12px 32px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 196, 120, 0.36);
+      background: linear-gradient(180deg, rgba(40, 28, 18, 0.92), rgba(18, 12, 8, 0.82));
+      box-shadow: 0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 226, 176, 0.12);
+      cursor: pointer;
+      transition: background 120ms ease-out, border-color 120ms ease-out;
+    }
+    #pause-restart:hover {
+      background: linear-gradient(180deg, rgba(60, 42, 26, 0.95), rgba(28, 18, 10, 0.88));
+      border-color: rgba(255, 196, 120, 0.55);
+    }
     .hidden { display: none !important; }
     @media (max-width: 720px) {
       .hud-panel {
@@ -319,6 +376,18 @@
         letter-spacing: 3px;
         padding: 0 24px;
       }
+      #pause-btn {
+        top: 14px;
+        left: 14px;
+      }
+      #pause-overlay h2 {
+        font-size: 42px;
+        letter-spacing: 4px;
+      }
+      #pause-overlay .prompt {
+        font-size: 14px;
+        padding: 0 24px;
+      }
     }
   </style>
 </head>
@@ -330,6 +399,11 @@
         <div id="tutorial-controls"></div>
         <div id="tutorial-objective">Land on gears to climb higher!</div>
       </div>
+    </div>
+    <div id="pause-overlay" class="hidden">
+      <h2>PAUSED</h2>
+      <div class="prompt">PRESS ESC OR TAP TO RESUME</div>
+      <button id="pause-restart" type="button">RESTART</button>
     </div>
     <div id="hud" class="hidden">
       <div class="hud-panel">
@@ -354,6 +428,7 @@
       </div>
       <div id="hud-toast"></div>
       <div id="hud-controls">WASD / ARROWS TO MOVE · SPACE OR TAP TO JUMP</div>
+      <button id="pause-btn" type="button" aria-label="Pause">⏸</button>
       <button id="sound-toggle" type="button" aria-label="Toggle sound">🔊</button>
     </div>
     <div id="touch-controls" class="hidden">
