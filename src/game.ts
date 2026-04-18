@@ -96,6 +96,9 @@ export class Game {
   private hudCombo!: HTMLElement;
   private soundToggleBtn!: HTMLElement;
   private closeCallOverlay!: HTMLElement;
+  private tutorialOverlay!: HTMLElement;
+  private tutorialControls!: HTMLElement;
+  private tutorialObjective!: HTMLElement;
   private titleHeading!: HTMLElement;
   private titleTagline!: HTMLElement;
   private titlePrompt!: HTMLElement;
@@ -134,6 +137,9 @@ export class Game {
   private timeSinceLastLanding = Infinity;
   private readonly comboWindow = 2.5;
   private readonly lastComboGears = new WeakSet<Gear>();
+  private tutorialShown = false;
+  private tutorialFadeTimer: number | null = null;
+  private tutorialHideTimer: number | null = null;
 
   // Environment transitions
   private readonly sceneBackgroundColor = new THREE.Color(0x140d0a);
@@ -262,7 +268,10 @@ export class Game {
     const hudCombo = document.getElementById("hud-combo");
     const soundToggleBtn = document.getElementById("sound-toggle");
     const closeCallOverlay = document.getElementById("close-call-overlay");
-    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !soundToggleBtn || !closeCallOverlay) {
+    const tutorialOverlay = document.getElementById("tutorial-overlay");
+    const tutorialControls = document.getElementById("tutorial-controls");
+    const tutorialObjective = document.getElementById("tutorial-objective");
+    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !soundToggleBtn || !closeCallOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective) {
       throw new Error("Missing HUD elements");
     }
 
@@ -277,6 +286,9 @@ export class Game {
     this.hudCombo = hudCombo;
     this.soundToggleBtn = soundToggleBtn;
     this.closeCallOverlay = closeCallOverlay;
+    this.tutorialOverlay = tutorialOverlay;
+    this.tutorialControls = tutorialControls;
+    this.tutorialObjective = tutorialObjective;
 
     const heading = this.titleOverlay.querySelector("h1");
     const tagline = this.titleOverlay.querySelector(".tagline");
@@ -552,6 +564,7 @@ export class Game {
     this.gameOverStatsEl.classList.add("hidden");
     this.titleTagline.classList.remove("new-best");
     this.input.setTouchControlsVisible(this.input.isTouchDevice());
+    this.showTutorialOverlay();
     startAmbientTick();
     startMusic();
   }
@@ -823,6 +836,7 @@ export class Game {
     this.isDying = false;
     this.state = GameState.GameOver;
     this.input.setTouchControlsVisible(false);
+    this.hideTutorialOverlay(true);
     this.playerShadow.visible = false;
     stopAmbientTick();
     stopMusic();
@@ -882,6 +896,45 @@ export class Game {
     this.hudControls.textContent = this.input.isTouchDevice()
       ? "LEFT JOYSTICK TO MOVE · JUMP TO LEAP"
       : "WASD / ARROWS TO MOVE · SPACE OR TAP TO JUMP";
+  }
+
+  private showTutorialOverlay() {
+    if (this.tutorialShown) {
+      return;
+    }
+
+    this.tutorialShown = true;
+    this.hideTutorialOverlay(true);
+    this.tutorialControls.textContent = this.input.isTouchDevice()
+      ? "JOYSTICK TO MOVE · JUMP BUTTON TO LEAP"
+      : "WASD / ARROWS TO MOVE · SPACE TO JUMP";
+    this.tutorialObjective.textContent = "LAND ON GEARS TO CLIMB HIGHER!";
+    this.tutorialOverlay.classList.remove("hidden");
+    this.tutorialOverlay.style.opacity = "1";
+    this.tutorialFadeTimer = window.setTimeout(() => {
+      this.tutorialOverlay.style.opacity = "0";
+      this.tutorialHideTimer = window.setTimeout(() => {
+        this.tutorialOverlay.classList.add("hidden");
+        this.tutorialHideTimer = null;
+      }, 500);
+      this.tutorialFadeTimer = null;
+    }, 3000);
+  }
+
+  private hideTutorialOverlay(immediate = false) {
+    if (this.tutorialFadeTimer !== null) {
+      clearTimeout(this.tutorialFadeTimer);
+      this.tutorialFadeTimer = null;
+    }
+    if (this.tutorialHideTimer !== null) {
+      clearTimeout(this.tutorialHideTimer);
+      this.tutorialHideTimer = null;
+    }
+
+    if (immediate) {
+      this.tutorialOverlay.style.opacity = "0";
+      this.tutorialOverlay.classList.add("hidden");
+    }
   }
 
   private onResize() {

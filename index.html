@@ -28,6 +28,49 @@
       transition: opacity 140ms ease-out;
       mix-blend-mode: screen;
     }
+    #tutorial-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 18;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      opacity: 1;
+      transition: opacity 500ms ease;
+      background: radial-gradient(circle at center, rgba(16, 11, 8, 0.42), rgba(5, 5, 8, 0.72));
+    }
+    #tutorial-overlay.hidden {
+      opacity: 0;
+    }
+    #tutorial-card {
+      max-width: min(760px, calc(100vw - 40px));
+      padding: 22px 28px 20px;
+      border-radius: 24px;
+      border: 1px solid rgba(255, 196, 120, 0.24);
+      background: linear-gradient(180deg, rgba(28, 20, 15, 0.82), rgba(12, 9, 8, 0.72));
+      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 226, 176, 0.08);
+      backdrop-filter: blur(10px);
+      text-align: center;
+      text-transform: uppercase;
+    }
+    #tutorial-controls {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: clamp(18px, 2.8vw, 30px);
+      font-weight: 900;
+      line-height: 1.35;
+      letter-spacing: 2px;
+      color: #ffe1a9;
+      text-shadow: 0 0 26px rgba(255, 199, 107, 0.34);
+    }
+    #tutorial-objective {
+      margin-top: 14px;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: clamp(13px, 1.8vw, 18px);
+      letter-spacing: 3px;
+      color: #ffd35e;
+      text-shadow: 0 0 18px rgba(255, 211, 94, 0.22);
+    }
 
     #hud {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -282,6 +325,12 @@
 <body>
   <div id="game-container">
     <div id="close-call-overlay" aria-hidden="true"></div>
+    <div id="tutorial-overlay" class="hidden" aria-hidden="true">
+      <div id="tutorial-card">
+        <div id="tutorial-controls"></div>
+        <div id="tutorial-objective">Land on gears to climb higher!</div>
+      </div>
+    </div>
     <div id="hud" class="hidden">
       <div class="hud-panel">
         <div class="hud-row">
