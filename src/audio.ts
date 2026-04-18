@@ -456,8 +456,8 @@ export function stopAmbientTick() {
 /** Call each frame with current height; adjusts tick speed. */
 export function setTickRate(height: number) {
   const t = Math.min(height / 100, 1);
-  // 500ms at height 0 → 333ms at height 100 (~3 ticks/s max)
-  currentTickIntervalMs = 500 - t * 167;
+  // 750ms at height 0 → 500ms at height 100 (~2 ticks/s max)
+  currentTickIntervalMs = 750 - t * 250;
 }
 
 function scheduleTicks(gen: number) {
@@ -477,17 +477,17 @@ function scheduleOneTick(time: number) {
     return;
   }
   const osc = ctx.createOscillator();
-  osc.type = "square";
-  osc.frequency.setValueAtTime(400, time);
+  osc.type = "triangle";
+  osc.frequency.setValueAtTime(340, time);
 
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.015, time);
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.02);
+  gain.gain.setValueAtTime(0.008, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.025);
 
   osc.connect(gain);
   gain.connect(masterGain);
   osc.start(time);
-  osc.stop(time + 0.025);
+  osc.stop(time + 0.03);
 }
 
 export function stopAudio() {
@@ -639,8 +639,8 @@ function scheduleMusicLoop(gen: number) {
   }
   const now = ctx.currentTime;
 
-  // Gear ping rhythm — interval shrinks from 1.15 s at ground to 0.65 s at 100 m
-  const pingInterval = 1.15 - Math.min(currentMusicHeight / 100, 1) * 0.5;
+  // Gear ping rhythm — interval shrinks from 2.2 s at ground to 1.4 s at 100 m
+  const pingInterval = 2.2 - Math.min(currentMusicHeight / 100, 1) * 0.8;
   while (nextGearPingTime < now + 0.25) {
     scheduleGearPing(nextGearPingTime);
     nextGearPingTime += pingInterval;
@@ -666,7 +666,7 @@ function scheduleGearPing(time: number) {
     return;
   }
   const dur = 0.4;
-  const base = 1108.7; // C#6 — bright metallic
+  const base = 880 + Math.random() * 120; // A5-ish with variation — less piercing than C#6
 
   const osc = ctx.createOscillator();
   osc.type = "sine";
@@ -681,7 +681,7 @@ function scheduleGearPing(time: number) {
 
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0, time);
-  gain.gain.linearRampToValueAtTime(0.055, time + 0.006);
+  gain.gain.linearRampToValueAtTime(0.025, time + 0.006);
   gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
 
   osc.connect(gain);

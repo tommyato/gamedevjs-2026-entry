@@ -51,6 +51,10 @@ export class Gear {
   private pistonBaseY = 0;
   private pistonTime = Math.random() * Math.PI * 2;
 
+  // Camera occlusion — fade gear when it blocks the player
+  private occlusionTarget = 1;
+  private occlusionCurrent = 1;
+
   constructor(options: GearOptions = {}) {
     this.radius = options.radius ?? 1.5;
     this.height = options.height ?? 0.3;
@@ -298,6 +302,34 @@ export class Gear {
     }
 
     this.mesh.position.copy(this.restPosition);
+
+    // Smooth occlusion fade
+    if (Math.abs(this.occlusionCurrent - this.occlusionTarget) > 0.01) {
+      this.occlusionCurrent = THREE.MathUtils.lerp(
+        this.occlusionCurrent,
+        this.occlusionTarget,
+        1 - Math.exp(-dt * 12)
+      );
+      this.applyOcclusionMaterials();
+    } else if (this.occlusionCurrent !== this.occlusionTarget) {
+      this.occlusionCurrent = this.occlusionTarget;
+      this.applyOcclusionMaterials();
+    }
+  }
+
+  setOcclusionOpacity(target: number) {
+    this.occlusionTarget = target;
+  }
+
+  private applyOcclusionMaterials() {
+    const transparent = this.occlusionCurrent < 0.99;
+    this.mesh.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.transparent = transparent;
+        mat.opacity = this.occlusionCurrent;
+      }
+    });
   }
 
   checkCollision(playerPos: THREE.Vector3, playerRadius: number): GearCollision {
