@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "puppeteer-core": "^24.41.0",
     "three": "^0.183.0"
   },
   "devDependencies": {
