@@ -251,6 +251,15 @@
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 14px; color: #668899;
       letter-spacing: 4px; margin-bottom: 40px; text-align: center;
     }
+    #title-best {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 12px;
+      color: #c7a271;
+      letter-spacing: 3px;
+      margin-top: -26px;
+      margin-bottom: 28px;
+      text-align: center;
+    }
     #title-overlay .prompt {
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 18px; color: #ffcc00;
       animation: pulse 1.5s ease-in-out infinite; text-align: center;
@@ -308,6 +317,49 @@
       font-size: 28px;
       color: #ffaa44;
       text-shadow: 0 0 24px rgba(255,170,68,0.28);
+    }
+    #share-score-btn {
+      margin-bottom: 24px;
+      padding: 12px 28px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 196, 120, 0.36);
+      background: linear-gradient(180deg, rgba(40, 28, 18, 0.92), rgba(18, 12, 8, 0.82));
+      box-shadow: 0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 226, 176, 0.12);
+      color: #ffe1a9;
+      cursor: pointer;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      transition: background 120ms ease-out, border-color 120ms ease-out, transform 120ms ease-out;
+    }
+    #share-score-btn:hover {
+      background: linear-gradient(180deg, rgba(60, 42, 26, 0.95), rgba(28, 18, 10, 0.88));
+      border-color: rgba(255, 196, 120, 0.55);
+      transform: translateY(-1px);
+    }
+    #share-score-btn:active {
+      transform: translateY(0);
+    }
+    #zone-announcement {
+      position: fixed;
+      left: 50%;
+      top: 18%;
+      z-index: 19;
+      pointer-events: none;
+      color: #ffcc00;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: clamp(32px, 4vw, 40px);
+      font-weight: 900;
+      letter-spacing: 6px;
+      opacity: 0;
+      text-align: center;
+      text-shadow: 0 0 24px rgba(255, 204, 0, 0.55), 0 0 42px rgba(255, 170, 68, 0.28);
+      text-transform: uppercase;
+      transform: translate(-50%, 12px);
+      transition: opacity 120ms ease-out, transform 120ms ease-out;
+      white-space: nowrap;
     }
     #sound-toggle {
       position: absolute;
@@ -417,6 +469,13 @@
         letter-spacing: 3px;
         padding: 0 24px;
       }
+      #title-best {
+        font-size: 11px;
+        letter-spacing: 2px;
+        margin-top: -24px;
+        margin-bottom: 24px;
+        padding: 0 24px;
+      }
       .game-over-card {
         width: min(100vw - 32px, 400px);
         margin-bottom: 20px;
@@ -434,6 +493,18 @@
       }
       .stat-total .stat-value {
         font-size: 24px;
+      }
+      #share-score-btn {
+        margin-bottom: 20px;
+        padding: 11px 24px;
+        font-size: 12px;
+        letter-spacing: 2px;
+      }
+      #zone-announcement {
+        top: 16%;
+        letter-spacing: 4px;
+        white-space: normal;
+        width: min(90vw, 540px);
       }
       #pause-btn {
         top: 14px;
@@ -453,6 +524,7 @@
 <body>
   <div id="game-container">
     <div id="close-call-overlay" aria-hidden="true"></div>
+    <div id="zone-announcement" aria-hidden="true"></div>
     <div id="tutorial-overlay" class="hidden" aria-hidden="true">
       <div id="tutorial-card">
         <div id="tutorial-controls"></div>
@@ -501,6 +573,7 @@
     <div id="title-overlay">
       <h1>CLOCKWORK CLIMB</h1>
       <div class="tagline">GAMEDEV.JS JAM 2026 — Theme: MACHINES</div>
+      <div id="title-best" class="hidden"></div>
       <div class="game-over-card hidden">
         <div class="stat-row"><span class="stat-label">HEIGHT SCORE</span><span class="stat-value" id="go-height"></span></div>
         <div class="stat-row"><span class="stat-label">BOLT SCORE</span><span class="stat-value" id="go-bolts"></span></div>
@@ -509,6 +582,7 @@
         <div class="stat-row"><span class="stat-label">TIME</span><span class="stat-value" id="go-time"></span></div>
         <div class="stat-row stat-total"><span class="stat-label">TOTAL SCORE</span><span class="stat-value" id="go-total"></span></div>
       </div>
+      <button id="share-score-btn" class="hidden" type="button">SHARE ON X</button>
       <div class="prompt">PRESS SPACE OR CLICK TO CLIMB</div>
     </div>
   </div>

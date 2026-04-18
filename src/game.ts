@@ -102,14 +102,17 @@ export class Game {
   private tutorialObjective!: HTMLElement;
   private titleHeading!: HTMLElement;
   private titleTagline!: HTMLElement;
+  private titleBest!: HTMLElement;
   private titlePrompt!: HTMLElement;
   private gameOverCard!: HTMLElement;
+  private shareScoreBtn!: HTMLButtonElement;
   private gameOverHeightEl!: HTMLElement;
   private gameOverBoltsEl!: HTMLElement;
   private gameOverBoltCountEl!: HTMLElement;
   private gameOverComboEl!: HTMLElement;
   private gameOverTimeEl!: HTMLElement;
   private gameOverTotalEl!: HTMLElement;
+  private zoneAnnouncement!: HTMLElement;
   private pauseOverlay!: HTMLElement;
   private pauseBtn!: HTMLElement;
 
@@ -139,7 +142,16 @@ export class Game {
   private gameTime = 0;
   private nextMilestone = 25;
   private toastTimer = 0;
+  private zoneAnnouncementTimer = 0;
+  private readonly zoneAnnouncementDuration = 2;
   private readonly unlockedThisRun = new Set<string>();
+  private currentZoneIndex = 0;
+  private readonly zoneNames = [
+    "BRONZE DEPTHS",
+    "IRON WORKS",
+    "SILVER SPIRES",
+    "GOLDEN HEIGHTS",
+  ] as const;
 
   // Combo system
   private comboLandings = 0;
@@ -271,7 +283,8 @@ export class Game {
     const tutorialOverlay = document.getElementById("tutorial-overlay");
     const tutorialControls = document.getElementById("tutorial-controls");
     const tutorialObjective = document.getElementById("tutorial-objective");
-    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !soundToggleBtn || !closeCallOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective) {
+    const zoneAnnouncement = document.getElementById("zone-announcement");
+    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !soundToggleBtn || !closeCallOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective || !zoneAnnouncement) {
       throw new Error("Missing HUD elements");
     }
 
@@ -289,11 +302,14 @@ export class Game {
     this.tutorialOverlay = tutorialOverlay;
     this.tutorialControls = tutorialControls;
     this.tutorialObjective = tutorialObjective;
+    this.zoneAnnouncement = zoneAnnouncement;
 
     const heading = this.titleOverlay.querySelector("h1");
     const tagline = this.titleOverlay.querySelector(".tagline");
+    const titleBest = document.getElementById("title-best");
     const prompt = this.titleOverlay.querySelector(".prompt");
     const gameOverCard = this.titleOverlay.querySelector(".game-over-card");
+    const shareScoreBtn = document.getElementById("share-score-btn");
     const gameOverHeight = document.getElementById("go-height");
     const gameOverBolts = document.getElementById("go-bolts");
     const gameOverBoltCount = document.getElementById("go-bolt-count");
@@ -303,8 +319,10 @@ export class Game {
     if (
       !heading ||
       !tagline ||
+      !titleBest ||
       !prompt ||
       !gameOverCard ||
+      !shareScoreBtn ||
       !gameOverHeight ||
       !gameOverBolts ||
       !gameOverBoltCount ||
@@ -317,8 +335,10 @@ export class Game {
 
     this.titleHeading = heading as HTMLElement;
     this.titleTagline = tagline as HTMLElement;
+    this.titleBest = titleBest;
     this.titlePrompt = prompt as HTMLElement;
     this.gameOverCard = gameOverCard as HTMLElement;
+    this.shareScoreBtn = shareScoreBtn as HTMLButtonElement;
     this.gameOverHeightEl = gameOverHeight;
     this.gameOverBoltsEl = gameOverBolts;
     this.gameOverBoltCountEl = gameOverBoltCount;
@@ -343,6 +363,14 @@ export class Game {
       e.stopPropagation();
       toggleAudio();
       updateSoundBtn();
+    });
+
+    this.shareScoreBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const text = `I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️\nCan you beat my score?\n#gamedevjs #gamedev`;
+      const shareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://tommyato.github.io/gamedevjs-2026-entry/")}`;
+      window.open(shareUrl, "_blank", "noopener,noreferrer");
     });
 
     // Escape key: pause during Playing, resume during Paused
@@ -664,6 +692,8 @@ export class Game {
     this.boltScore = 0;
     this.nextMilestone = 25;
     this.toastTimer = 0;
+    this.zoneAnnouncementTimer = 0;
+    this.currentZoneIndex = 0;
     this.unlockedThisRun.clear();
     this.cameraKick = 0;
     this.isDying = false;
@@ -689,7 +719,11 @@ export class Game {
     this.titleOverlay.classList.remove("game-over");
     this.pauseOverlay.classList.add("hidden");
     this.gameOverCard.classList.add("hidden");
+    this.shareScoreBtn.classList.add("hidden");
     this.titleTagline.classList.remove("new-best");
+    this.titleBest.classList.add("hidden");
+    this.zoneAnnouncement.style.opacity = "0";
+    this.zoneAnnouncement.style.transform = "translate(-50%, 12px)";
     this.input.setTouchControlsVisible(this.input.isTouchDevice());
     this.showTutorialOverlay();
     startAmbientTick();
@@ -1037,6 +1071,7 @@ export class Game {
     this.gameOverTimeEl.textContent = `${gameSeconds}s`;
     this.gameOverTotalEl.textContent = String(this.score);
     this.gameOverCard.classList.remove("hidden");
+    this.shareScoreBtn.classList.remove("hidden");
   }
 
   private updateGameOver(dt: number) {
@@ -1057,7 +1092,15 @@ export class Game {
     this.titleOverlay.classList.remove("game-over");
     this.titleHeading.textContent = "CLOCKWORK CLIMB";
     this.titleTagline.textContent = "GAMEDEV.JS JAM 2026 — Theme: MACHINES";
+    if (this.highScore > 0) {
+      this.titleBest.textContent = `YOUR BEST: ${this.highScore}`;
+      this.titleBest.classList.remove("hidden");
+    } else {
+      this.titleBest.textContent = "";
+      this.titleBest.classList.add("hidden");
+    }
     this.titlePrompt.textContent = this.input.isTouchDevice() ? "TAP TO CLIMB" : "PRESS SPACE OR CLICK TO CLIMB";
+    this.shareScoreBtn.classList.add("hidden");
     this.hudControls.textContent = this.input.isTouchDevice()
       ? "LEFT JOYSTICK TO MOVE · JUMP TO LEAP"
       : "WASD / ARROWS TO MOVE · SPACE OR TAP TO JUMP";
@@ -1143,6 +1186,15 @@ export class Game {
     const visibility = Math.min(this.toastTimer / 0.9, 1);
     this.hudToast.style.opacity = toastVisible ? String(visibility) : "0";
     this.hudToast.style.transform = `translate(-50%, ${toastVisible ? (1 - visibility) * 10 : 12}px)`;
+
+    this.zoneAnnouncementTimer = Math.max(0, this.zoneAnnouncementTimer - dt);
+    const zoneVisible = this.zoneAnnouncementTimer > 0;
+    const fadeDuration = 0.35;
+    const fadeIn = Math.min((this.zoneAnnouncementDuration - this.zoneAnnouncementTimer) / fadeDuration, 1);
+    const fadeOut = Math.min(this.zoneAnnouncementTimer / fadeDuration, 1);
+    const zoneOpacity = zoneVisible ? Math.min(fadeIn, fadeOut) : 0;
+    this.zoneAnnouncement.style.opacity = String(zoneOpacity);
+    this.zoneAnnouncement.style.transform = `translate(-50%, ${zoneVisible ? (1 - zoneOpacity) * 12 : 12}px)`;
   }
 
   private showToast(message: string) {
@@ -1150,6 +1202,13 @@ export class Game {
     this.toastTimer = 1.3;
     this.hudToast.style.opacity = "1";
     this.hudToast.style.transform = "translate(-50%, 0)";
+  }
+
+  private showZoneAnnouncement(zoneIndex: number) {
+    this.zoneAnnouncement.textContent = this.zoneNames[zoneIndex];
+    this.zoneAnnouncementTimer = this.zoneAnnouncementDuration;
+    this.zoneAnnouncement.style.opacity = "1";
+    this.zoneAnnouncement.style.transform = "translate(-50%, 0)";
   }
 
   private updatePlayerLight(dt: number) {
@@ -1320,6 +1379,14 @@ export class Game {
       { height: 50, bg: 0x181b22, fogDensity: 0.010, ambient: 0xb8c4dd, ambientIntensity: 1.7, bloom: 0.26 },
       { height: 75, bg: 0x1a1408, fogDensity: 0.008, ambient: 0xffd6a3, ambientIntensity: 2.0, bloom: 0.32 },
     ];
+    const zoneIndex = zones.reduce((index, zone, candidateIndex) => (
+      height >= zone.height ? candidateIndex : index
+    ), 0);
+
+    if (this.state === GameState.Playing && zoneIndex > this.currentZoneIndex) {
+      this.showZoneAnnouncement(zoneIndex);
+    }
+    this.currentZoneIndex = zoneIndex;
 
     // Find the two zones to interpolate between, with a ~5m transition band.
     let from = zones[0];
