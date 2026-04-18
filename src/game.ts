@@ -130,6 +130,10 @@ export class Game {
   private readonly backgroundGroup = new THREE.Group();
   private backgroundDecorations: BackgroundDecoration[] = [];
   private readonly gearTickNextTimes = new Map<Gear, number>();
+  private generationHeight = 0;
+  private generationAngle = 0;
+  private generationCount = 0;
+  private cleanupTimer = 0;
   private cameraKick = 0;
   private readonly cameraShakeOffset = new THREE.Vector3();
   private cameraShakeTimer = 0;
@@ -457,6 +461,10 @@ export class Game {
     this.bolts = [];
     this.gearTickNextTimes.clear();
     this.particles.reset();
+    this.generationHeight = 0;
+    this.generationAngle = 0;
+    this.generationCount = 0;
+    this.cleanupTimer = 0;
 
     const gearPalette = [0x8c6239, 0xb87333, 0xa67c52, 0x7c5a2c];
 
@@ -474,7 +482,7 @@ export class Game {
 
     let height = 0;
     let angle = Math.random() * Math.PI * 2;
-    for (let index = 1; index < 64; index += 1) {
+    for (let index = 1; index < 40; index += 1) {
       const band = getDifficultyBand(height);
       height += randomRange(band.verticalMin, band.verticalMax);
       angle += randomRange(0.75, 1.75);
@@ -505,54 +513,61 @@ export class Game {
     }
 
     this.buildGearDropShadows();
+    this.generationHeight = height;
+    this.generationAngle = angle;
+    this.generationCount = 40;
     this.buildBackgroundAtmosphere(height + 24);
   }
 
   private buildGearDropShadows() {
-    for (const upperGear of this.gears) {
-      // Find the nearest gear directly below whose XZ footprint overlaps
-      let bestLower: Gear | null = null;
-      let bestTopY = -Infinity;
-
-      for (const lowerGear of this.gears) {
-        if (lowerGear === upperGear) continue;
-        const lowerTopY = lowerGear.getTopY();
-        if (lowerTopY >= upperGear.mesh.position.y) continue;
-
-        const dx = upperGear.mesh.position.x - lowerGear.mesh.position.x;
-        const dz = upperGear.mesh.position.z - lowerGear.mesh.position.z;
-        if (dx * dx + dz * dz > lowerGear.radius * lowerGear.radius) continue;
-
-        if (lowerTopY > bestTopY) {
-          bestTopY = lowerTopY;
-          bestLower = lowerGear;
-        }
-      }
-
-      if (bestLower === null) continue;
-
-      const verticalDist = upperGear.mesh.position.y - bestLower.getTopY();
-      const opacity = THREE.MathUtils.clamp(0.4 - verticalDist * 0.03, 0.05, 0.4);
-
-      const shadowGeo = new THREE.CircleGeometry(upperGear.radius * 0.8, 16);
-      const shadowMat = new THREE.MeshBasicMaterial({
-        color: 0x000000,
-        transparent: true,
-        opacity,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
-      shadowMesh.rotation.x = -Math.PI / 2;
-      shadowMesh.position.set(
-        upperGear.mesh.position.x,
-        bestLower.getTopY() + 0.02,
-        upperGear.mesh.position.z
-      );
-
-      this.scene.add(shadowMesh);
-      this.gearShadowMap.set(upperGear, { mesh: shadowMesh, lowerGear: bestLower });
+    for (const gear of this.gears) {
+      this.addDropShadowForGear(gear);
     }
+  }
+
+  private addDropShadowForGear(upperGear: Gear) {
+    // Find the nearest gear directly below whose XZ footprint overlaps
+    let bestLower: Gear | null = null;
+    let bestTopY = -Infinity;
+
+    for (const lowerGear of this.gears) {
+      if (lowerGear === upperGear) continue;
+      const lowerTopY = lowerGear.getTopY();
+      if (lowerTopY >= upperGear.mesh.position.y) continue;
+
+      const dx = upperGear.mesh.position.x - lowerGear.mesh.position.x;
+      const dz = upperGear.mesh.position.z - lowerGear.mesh.position.z;
+      if (dx * dx + dz * dz > lowerGear.radius * lowerGear.radius) continue;
+
+      if (lowerTopY > bestTopY) {
+        bestTopY = lowerTopY;
+        bestLower = lowerGear;
+      }
+    }
+
+    if (bestLower === null) return;
+
+    const verticalDist = upperGear.mesh.position.y - bestLower.getTopY();
+    const opacity = THREE.MathUtils.clamp(0.4 - verticalDist * 0.03, 0.05, 0.4);
+
+    const shadowGeo = new THREE.CircleGeometry(upperGear.radius * 0.8, 16);
+    const shadowMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
+    shadowMesh.rotation.x = -Math.PI / 2;
+    shadowMesh.position.set(
+      upperGear.mesh.position.x,
+      bestLower.getTopY() + 0.02,
+      upperGear.mesh.position.z
+    );
+
+    this.scene.add(shadowMesh);
+    this.gearShadowMap.set(upperGear, { mesh: shadowMesh, lowerGear: bestLower });
   }
 
   private buildBackgroundAtmosphere(maxHeight: number) {
@@ -621,6 +636,177 @@ export class Game {
       );
       pipe.rotation.z = Math.PI / 2 + randomRange(-0.4, 0.4);
       pipe.rotation.y = orbitAngle;
+      this.backgroundGroup.add(pipe);
+      this.backgroundDecorations.push({ mesh: pipe, rotationSpeed: 0 });
+    }
+  }
+
+  private generateAhead() {
+    const gearPalette = [0x8c6239, 0xb87333, 0xa67c52, 0x7c5a2c];
+    let height = this.generationHeight;
+    let angle = this.generationAngle;
+    let batchesGenerated = 0;
+
+    while (height - this.heightMaxReached <= 40 && batchesGenerated < 5) {
+      for (let i = 0; i < 10; i += 1) {
+        const band = getDifficultyBand(height);
+        height += randomRange(band.verticalMin, band.verticalMax);
+        angle += randomRange(0.75, 1.75);
+
+        const radius = randomRange(band.radiusMin, band.radiusMax);
+        const distance = randomRange(band.distanceMin, band.distanceMax);
+        const color = gearPalette[Math.floor(Math.random() * gearPalette.length)];
+        const variant = this.pickGearVariant(height);
+        const gear = new Gear({
+          color,
+          danger: band.danger,
+          height: 0.3,
+          radius,
+          rotationSpeed: randomRange(band.rotationMin, band.rotationMax),
+          variant,
+        });
+
+        gear.setPosition(Math.cos(angle) * distance, height, Math.sin(angle) * distance);
+        this.gears.push(gear);
+        this.scene.add(gear.mesh);
+
+        if (variant !== "crumbling" && Math.random() < 0.3) {
+          const bolt = new BoltCollectible(gear);
+          bolt.reset();
+          // Set initial position to avoid stale (0,0,0) during cleanup checks
+          bolt.mesh.position.set(gear.mesh.position.x, gear.getTopY() + 0.75, gear.mesh.position.z);
+          this.bolts.push(bolt);
+          this.scene.add(bolt.mesh);
+        }
+
+        this.addDropShadowForGear(gear);
+      }
+
+      this.addBackgroundDecorationsAtHeight(height);
+      batchesGenerated += 1;
+    }
+
+    this.generationHeight = height;
+    this.generationAngle = angle;
+    this.generationCount += batchesGenerated * 10;
+  }
+
+  private cleanupBelow(playerY: number) {
+    const cutoffY = playerY - 40;
+
+    const gearsToRemove: Gear[] = [];
+    for (const gear of this.gears) {
+      if (gear.mesh.position.y < cutoffY) {
+        gearsToRemove.push(gear);
+      }
+    }
+
+    const removedGearSet = new Set(gearsToRemove);
+    for (const gear of gearsToRemove) {
+      this.scene.remove(gear.mesh);
+      const idx = this.gears.indexOf(gear);
+      if (idx !== -1) this.gears.splice(idx, 1);
+      this.gearTickNextTimes.delete(gear);
+
+      const shadow = this.gearShadowMap.get(gear);
+      if (shadow) {
+        this.scene.remove(shadow.mesh);
+        this.gearShadowMap.delete(gear);
+      }
+    }
+
+    // For shadows whose lowerGear was removed, recompute against remaining gears
+    const orphanedUpperGears: Gear[] = [];
+    for (const [upperGear, shadowData] of this.gearShadowMap) {
+      if (removedGearSet.has(shadowData.lowerGear)) {
+        this.scene.remove(shadowData.mesh);
+        this.gearShadowMap.delete(upperGear);
+        orphanedUpperGears.push(upperGear);
+      }
+    }
+    for (const upperGear of orphanedUpperGears) {
+      this.addDropShadowForGear(upperGear);
+    }
+
+    const boltsToRemove = this.bolts.filter((b) => b.mesh.position.y < cutoffY);
+    for (const bolt of boltsToRemove) {
+      this.scene.remove(bolt.mesh);
+      const idx = this.bolts.indexOf(bolt);
+      if (idx !== -1) this.bolts.splice(idx, 1);
+    }
+
+    const decsToRemove = this.backgroundDecorations.filter((d) => d.mesh.position.y < cutoffY);
+    for (const dec of decsToRemove) {
+      this.backgroundGroup.remove(dec.mesh);
+      const idx = this.backgroundDecorations.indexOf(dec);
+      if (idx !== -1) this.backgroundDecorations.splice(idx, 1);
+    }
+  }
+
+  private addBackgroundDecorationsAtHeight(baseHeight: number) {
+    const fogColor = new THREE.Color(0x2d2018);
+
+    const radius = randomRange(2.8, 6.4);
+    const bgGear = new THREE.Group();
+    const material = new THREE.MeshStandardMaterial({
+      color: fogColor.clone().offsetHSL(0.02, 0.06, randomRange(-0.08, 0.1)),
+      emissive: 0x1b130f,
+      emissiveIntensity: 0.35,
+      metalness: 0.8,
+      opacity: randomRange(0.12, 0.18),
+      roughness: 0.45,
+      transparent: true,
+    });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.18, 28), material);
+    body.rotation.x = Math.PI / 2;
+    bgGear.add(body);
+
+    const toothMaterial = material.clone();
+    toothMaterial.opacity *= 0.9;
+    const toothGeo = new THREE.BoxGeometry(0.28, 0.18, 0.52);
+    const toothCount = Math.floor(radius * 8);
+    for (let i = 0; i < toothCount; i += 1) {
+      const tooth = new THREE.Mesh(toothGeo, toothMaterial);
+      const toothAngle = (i / toothCount) * Math.PI * 2;
+      tooth.position.set(Math.cos(toothAngle) * radius, 0, Math.sin(toothAngle) * radius);
+      tooth.rotation.y = -toothAngle;
+      bgGear.add(tooth);
+    }
+
+    const orbitAngle = Math.random() * Math.PI * 2;
+    const orbitDist = randomRange(8.5, 16);
+    bgGear.position.set(
+      Math.cos(orbitAngle) * orbitDist,
+      randomRange(baseHeight - 8, baseHeight + 12),
+      -7 - Math.sin(orbitAngle) * orbitDist
+    );
+    this.backgroundGroup.add(bgGear);
+    this.backgroundDecorations.push({
+      mesh: bgGear,
+      rotationSpeed: randomRange(0.04, 0.14) * (Math.random() > 0.5 ? 1 : -1),
+    });
+
+    if (Math.random() < 0.5) {
+      const pipeMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4a372a,
+        emissive: 0x130d09,
+        emissiveIntensity: 0.2,
+        metalness: 0.68,
+        opacity: 0.16,
+        roughness: 0.48,
+        transparent: true,
+      });
+      const length = randomRange(4.5, 8.5);
+      const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, length, 10), pipeMaterial);
+      const pipeAngle = Math.random() * Math.PI * 2;
+      const pipeDist = randomRange(6.2, 8.8);
+      pipe.position.set(
+        Math.cos(pipeAngle) * pipeDist,
+        randomRange(baseHeight - 5, baseHeight + 18),
+        -6 - Math.sin(pipeAngle) * pipeDist
+      );
+      pipe.rotation.z = Math.PI / 2 + randomRange(-0.4, 0.4);
+      pipe.rotation.y = pipeAngle;
       this.backgroundGroup.add(pipe);
       this.backgroundDecorations.push({ mesh: pipe, rotationSpeed: 0 });
     }
@@ -759,6 +945,9 @@ export class Game {
       return;
     }
 
+    // Ensure gears are always generated ahead of the player
+    this.generateAhead();
+
     this.gameTime += dt;
     this.timeSinceLastLanding += dt;
     if (this.comboLandings > 0 && this.timeSinceLastLanding > this.comboWindow) {
@@ -849,6 +1038,13 @@ export class Game {
     this.updateScores();
     this.updateHud(dt);
     this.checkMilestoneAchievements();
+
+    // Periodically remove gears/bolts/decorations far below the player
+    this.cleanupTimer += dt;
+    if (this.cleanupTimer >= 2) {
+      this.cleanupTimer = 0;
+      this.cleanupBelow(this.player.mesh.position.y);
+    }
 
     if (this.player.mesh.position.y < this.camera.position.y - 12) {
       this.startDeath();
