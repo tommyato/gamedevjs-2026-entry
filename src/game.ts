@@ -759,11 +759,11 @@ export class Game {
         unlockAchievement(id);
       }
     };
-    if (this.heightScore >= 50) unlock('sky_high');
-    if (this.heightScore >= 100) unlock('cloud_walker');
-    if (this.boltCount >= 10) unlock('bolt_collector');
-    if (this.boltCount >= 25) unlock('bolt_hoarder');
-    if (this.gameTime >= 60) unlock('endurance');
+    if (this.heightScore >= 50) unlock('SKY_HIGH');
+    if (this.heightScore >= 100) unlock('CLOUD_WALKER');
+    if (this.boltCount >= 10) unlock('BOLT_COLLECTOR');
+    if (this.boltCount >= 25) unlock('BOLT_HOARDER');
+    if (this.gameTime >= 60) unlock('ENDURANCE');
   }
 
   private die() {
@@ -781,9 +781,9 @@ export class Game {
       console.error("Failed to submit score", error);
     });
 
-    if (this.score > 0) unlockAchievement('first_climb');
-    if (this.score >= 500) unlockAchievement('rising_star');
-    if (this.score >= 2000) unlockAchievement('gear_master');
+    if (this.score > 0) unlockAchievement('FIRST_CLIMB');
+    if (this.score >= 500) unlockAchievement('RISING_STAR');
+    if (this.score >= 2000) unlockAchievement('GEAR_MASTER');
 
     const isNewBest = this.score > this.highScore;
     if (isNewBest) {
