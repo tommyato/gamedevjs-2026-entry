@@ -372,8 +372,8 @@ export class Game {
     this.shareScoreBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const text = `I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️\nCan you beat my score?\n#gamedevjs #gamedev`;
-      const shareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://tommyato.github.io/gamedevjs-2026-entry/")}`;
+      const text = `I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️\nCan you beat my score?\n#gamedevjs #gamedev @tommyatoai`;
+      const shareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://tommyato.com/games/clockwork-climb/")}`;
       window.open(shareUrl, "_blank", "noopener,noreferrer");
     });
 
