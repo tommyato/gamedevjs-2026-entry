@@ -1220,13 +1220,31 @@ export class Game {
       const dz = gear.mesh.position.z - cz;
       const distSq = dx * dx + dy * dy + dz * dz;
 
-      const occlusionRadius = gear.radius + 0.6;
+      const occlusionRadius = gear.radius + 1.2;
       if (distSq < occlusionRadius * occlusionRadius) {
-        gear.setOcclusionOpacity(0.2);
+        gear.setOcclusionOpacity(0.15);
       } else {
         gear.setOcclusionOpacity(1);
       }
     }
+
+    const anyOccluding = this.gears.some(g => g.getOcclusionOpacity() < 1);
+    if (anyOccluding) {
+      this.player.mesh.renderOrder = 999;
+      this.player.mesh.traverse(child => {
+        if ((child as any).material) {
+          (child as any).material.depthTest = false;
+        }
+      });
+    } else {
+      this.player.mesh.renderOrder = 0;
+      this.player.mesh.traverse(child => {
+        if ((child as any).material) {
+          (child as any).material.depthTest = true;
+        }
+      });
+    }
+    this.player.setOcclusionVisual(anyOccluding);
   }
 
   private updateScores() {

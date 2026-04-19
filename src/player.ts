@@ -121,6 +121,16 @@ export class Player {
     return { jumped };
   }
 
+  setOcclusionVisual(occluded: boolean) {
+    if (occluded) {
+      this.bodyMaterial.emissive.setHex(0xcd7f32);
+      this.bodyMaterial.emissiveIntensity = 2.0;
+    } else {
+      this.bodyMaterial.emissive.setHex(0x000000);
+      this.bodyMaterial.emissiveIntensity = 0;
+    }
+  }
+
   setDyingVisual() {
     this.bodyMaterial.emissive.setHex(0xff3333);
     this.bodyMaterial.emissiveIntensity = 1.5;

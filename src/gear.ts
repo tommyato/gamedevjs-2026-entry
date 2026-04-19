@@ -321,6 +321,10 @@ export class Gear {
     this.occlusionTarget = target;
   }
 
+  getOcclusionOpacity(): number {
+    return this.occlusionCurrent;
+  }
+
   private applyOcclusionMaterials() {
     const transparent = this.occlusionCurrent < 0.99;
     this.mesh.traverse((child) => {
