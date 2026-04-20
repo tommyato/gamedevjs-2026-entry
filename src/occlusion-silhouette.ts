@@ -8,7 +8,6 @@ import type { WebGLRenderer, Scene, PerspectiveCamera } from 'three';
 // ── Layer constants ────────────────────────────────────────────────
 export const OCCLUDER_LAYER = 10;
 export const SILHOUETTE_PLAYER_LAYER = 11;
-export const SILHOUETTE_GEAR_LAYER = 12;
 
 export function createOcclusionSilhouette(
 	renderer: WebGLRenderer,
@@ -27,22 +26,12 @@ export function createOcclusionSilhouette(
 		depthWrite: false, // don't corrupt depth buffer with silhouette depth
 	});
 
-	const gearSilhouetteMaterial = new MeshBasicMaterial({
-		color: 0x2e2e50, // dark grey-blue — subtle gear-behind-gear indicator
-		depthTest: true,
-		depthFunc: GreaterDepth,
-		depthWrite: false,
-	});
-
 	// Cached layer masks — avoid allocating Layers objects per frame
 	const occluderLayers = new Layers();
 	occluderLayers.set(OCCLUDER_LAYER);
 
 	const playerSilhouetteLayers = new Layers();
 	playerSilhouetteLayers.set(SILHOUETTE_PLAYER_LAYER);
-
-	const gearSilhouetteLayers = new Layers();
-	gearSilhouetteLayers.set(SILHOUETTE_GEAR_LAYER);
 
 	function render() {
 		const savedLayers = camera.layers.mask;
@@ -70,15 +59,9 @@ export function createOcclusionSilhouette(
 		scene.overrideMaterial = depthOnlyMaterial;
 		renderer.render(scene, camera);
 
-		// Pass B1: player silhouette — draws where player depth > gear depth in buffer
+		// Pass B: player silhouette — draws where player depth > gear depth in buffer
 		camera.layers.mask = playerSilhouetteLayers.mask;
 		scene.overrideMaterial = playerSilhouetteMaterial;
-		renderer.render(scene, camera);
-
-		// Pass B2: gear silhouettes — front gears self-exclude (own depth = buffer),
-		// back gears draw through front gears
-		camera.layers.mask = gearSilhouetteLayers.mask;
-		scene.overrideMaterial = gearSilhouetteMaterial;
 		renderer.render(scene, camera);
 
 		// Restore all state
@@ -92,7 +75,6 @@ export function createOcclusionSilhouette(
 	function dispose() {
 		depthOnlyMaterial.dispose();
 		playerSilhouetteMaterial.dispose();
-		gearSilhouetteMaterial.dispose();
 	}
 
 	return { render, dispose };

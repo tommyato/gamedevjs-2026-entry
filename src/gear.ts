@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { OCCLUDER_LAYER, SILHOUETTE_GEAR_LAYER } from "./occlusion-silhouette";
+import { OCCLUDER_LAYER } from "./occlusion-silhouette";
 
 export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston";
 
@@ -169,11 +169,10 @@ export class Gear {
       this.addPistonDetail();
     }
 
-    // Enable silhouette layers on all mesh children
+    // Enable occluder layer on all mesh children (for player silhouette depth test)
     this.mesh.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         child.layers.enable(OCCLUDER_LAYER);
-        child.layers.enable(SILHOUETTE_GEAR_LAYER);
       }
     });
   }
