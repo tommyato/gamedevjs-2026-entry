@@ -145,6 +145,7 @@ export class Game {
   private deathAnimTimer = 0;
   private activeGear: Gear | null = null;
   private orbitAngle = 0;
+  private orbitAngleTarget = Math.PI / 2; // frozen while airborne
   private readonly orbitRadius = 12;
   private gameTime = 0;
   private nextMilestone = 25;
@@ -886,6 +887,7 @@ export class Game {
     this.unlockedThisRun.clear();
     this.cameraKick = 0;
     this.orbitAngle = Math.PI / 2 + 2 * (0.45 / 2.5);
+    this.orbitAngleTarget = this.orbitAngle;
     this.isDying = false;
     this.deathFreezeTimer = 0;
     this.deathAnimTimer = 0;
@@ -1172,59 +1174,65 @@ export class Game {
     const followLerp = 1 - Math.exp(-dt * (this.player.onGround ? 5.5 : 4));
     const orbitLerp = 1 - Math.exp(-dt * 5);
 
-    // Base angle — counterclockwise (increasing) with height. Baseline orientation
-    // at height 0 points the camera down +Z looking toward the origin, matching the
-    // previous camera's framing. We rotate counterclockwise as the player climbs.
-    const radiansPerUnit = 0.45 / 2.5; // ~0.45 rad per ~2.5m of height
-    const baseAngle = Math.PI / 2 + playerY * radiansPerUnit;
+    // Only recompute orbit target when grounded — camera holds steady during jumps
+    // so the player can judge trajectories without the world rotating under them.
+    if (this.player.onGround) {
+      // Base angle — counterclockwise (increasing) with height. Baseline orientation
+      // at height 0 points the camera down +Z looking toward the origin, matching the
+      // previous camera's framing. We rotate counterclockwise as the player climbs.
+      const radiansPerUnit = 0.45 / 2.5; // ~0.45 rad per ~2.5m of height
+      const baseAngle = Math.PI / 2 + playerY * radiansPerUnit;
 
-    // Gear-avoidance nudge — if any nearby gear sits between the camera and the
-    // player (in XZ projection), push the target angle further counterclockwise.
-    let nudge = 0;
-    const maxNudge = 0.3;
-    const nudgeStep = 0.05;
-    const angleTolerance = 0.18; // ~10° — how close a gear must be to the cam→player line to count as occluding
-    const verticalWindow = 3;
+      // Gear-avoidance nudge — if any nearby gear sits between the camera and the
+      // player (in XZ projection), push the target angle further counterclockwise.
+      let nudge = 0;
+      const maxNudge = 0.3;
+      const nudgeStep = 0.05;
+      const angleTolerance = 0.18; // ~10° — how close a gear must be to the cam→player line to count as occluding
+      const verticalWindow = 3;
 
-    // Iteratively search for a clear angle, up to maxNudge
-    for (let step = 0; step <= maxNudge / nudgeStep; step += 1) {
-      const testAngle = baseAngle + nudge;
-      const camX = Math.cos(testAngle) * this.orbitRadius;
-      const camZ = Math.sin(testAngle) * this.orbitRadius;
-      const toPlayerX = playerX - camX;
-      const toPlayerZ = playerZ - camZ;
-      const toPlayerLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
-      const camToPlayerAngle = Math.atan2(toPlayerZ, toPlayerX);
+      // Iteratively search for a clear angle, up to maxNudge
+      for (let step = 0; step <= maxNudge / nudgeStep; step += 1) {
+        const testAngle = baseAngle + nudge;
+        const camX = Math.cos(testAngle) * this.orbitRadius;
+        const camZ = Math.sin(testAngle) * this.orbitRadius;
+        const toPlayerX = playerX - camX;
+        const toPlayerZ = playerZ - camZ;
+        const toPlayerLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
+        const camToPlayerAngle = Math.atan2(toPlayerZ, toPlayerX);
 
-      let clear = true;
-      for (const gear of this.gears) {
-        if (gear === this.activeGear) continue;
-        const gy = gear.mesh.position.y;
-        if (Math.abs(gy - playerY) > verticalWindow) continue;
-        const gx = gear.mesh.position.x;
-        const gz = gear.mesh.position.z;
-        const toGearX = gx - camX;
-        const toGearZ = gz - camZ;
-        const toGearLen = Math.hypot(toGearX, toGearZ) || 1;
-        // Gear must be between camera and player (closer to camera than player is)
-        if (toGearLen >= toPlayerLen) continue;
-        const camToGearAngle = Math.atan2(toGearZ, toGearX);
-        let angleDelta = camToGearAngle - camToPlayerAngle;
-        while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
-        while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
-        // Widen the tolerance by the gear's angular half-width as seen from camera
-        const gearAngularHalf = Math.atan2(gear.radius, toGearLen);
-        if (Math.abs(angleDelta) < angleTolerance + gearAngularHalf) {
-          clear = false;
-          break;
+        let clear = true;
+        for (const gear of this.gears) {
+          if (gear === this.activeGear) continue;
+          const gy = gear.mesh.position.y;
+          if (Math.abs(gy - playerY) > verticalWindow) continue;
+          const gx = gear.mesh.position.x;
+          const gz = gear.mesh.position.z;
+          const toGearX = gx - camX;
+          const toGearZ = gz - camZ;
+          const toGearLen = Math.hypot(toGearX, toGearZ) || 1;
+          // Gear must be between camera and player (closer to camera than player is)
+          if (toGearLen >= toPlayerLen) continue;
+          const camToGearAngle = Math.atan2(toGearZ, toGearX);
+          let angleDelta = camToGearAngle - camToPlayerAngle;
+          while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
+          while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
+          // Widen the tolerance by the gear's angular half-width as seen from camera
+          const gearAngularHalf = Math.atan2(gear.radius, toGearLen);
+          if (Math.abs(angleDelta) < angleTolerance + gearAngularHalf) {
+            clear = false;
+            break;
+          }
         }
+
+        if (clear) break;
+        nudge = Math.min(nudge + nudgeStep, maxNudge);
       }
 
-      if (clear) break;
-      nudge = Math.min(nudge + nudgeStep, maxNudge);
+      this.orbitAngleTarget = baseAngle + nudge;
     }
 
-    const targetAngle = baseAngle + nudge;
+    const targetAngle = this.orbitAngleTarget;
 
     // Smoothly interpolate orbit angle toward target, handling wrap-around
     let angleDiff = targetAngle - this.orbitAngle;
