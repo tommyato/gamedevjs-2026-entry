@@ -346,16 +346,6 @@ export class Gear {
 
     return { blocked: false, capY: 0 };
   }
-
-  /** Set gear opacity (1 = fully opaque, 0 = invisible). Used for fade-through when occluding player. */
-  setOpacity(opacity: number) {
-    const clamped = Math.max(0, Math.min(1, opacity));
-    const materials = [this.bodyMaterial, this.topSurfaceMaterial, this.toothMaterial, this.accentMaterial, this.detailMaterial];
-    for (const mat of materials) {
-      mat.transparent = clamped < 1;
-      mat.opacity = clamped;
-    }
-  }
 }
 
 function applyVariantTint(baseColor: THREE.Color, variant: GearVariant): THREE.Color {

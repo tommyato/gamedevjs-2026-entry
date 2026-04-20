@@ -27,7 +27,6 @@ import {
 import { BoltCollectible } from "./bolt";
 import { Gear, type GearVariant } from "./gear";
 import { Input } from "./input";
-import { createOcclusionSilhouette, OCCLUDER_LAYER } from "./occlusion-silhouette";
 import { ParticleSystem } from "./particles";
 import {
   isAudioEnabled,
@@ -72,7 +71,6 @@ export class Game {
   private camera!: THREE.PerspectiveCamera;
   private composer!: EffectComposer;
   private bloomPass!: UnrealBloomPass;
-  private occlusionSilhouette!: ReturnType<typeof createOcclusionSilhouette>;
   private clock = new THREE.Clock();
   private readonly animationLoop = () => this.loop();
   private animationLoopRunning = false;
@@ -146,8 +144,8 @@ export class Game {
   private deathFreezeTimer = 0;
   private deathAnimTimer = 0;
   private activeGear: Gear | null = null;
-  private readonly _projGear = new THREE.Vector3();
-  private readonly _projPlayer = new THREE.Vector3();
+  private orbitAngle = 0;
+  private readonly orbitRadius = 12;
   private gameTime = 0;
   private nextMilestone = 25;
   private toastTimer = 0;
@@ -248,8 +246,6 @@ export class Game {
     this.composer.addPass(renderPass);
     this.composer.addPass(this.bloomPass);
 
-    this.occlusionSilhouette = createOcclusionSilhouette(this.renderer, this.scene, this.camera);
-
     this.input.init(this.renderer.domElement);
 
     const towerGeo = new THREE.CylinderGeometry(0.8, 0.8, 400, 12);
@@ -260,7 +256,6 @@ export class Game {
     });
     this.towerBase = new THREE.Mesh(towerGeo, towerMat);
     this.towerBase.position.y = 190;
-    this.towerBase.layers.enable(OCCLUDER_LAYER);
     this.scene.add(this.towerBase);
     this.scene.add(this.backgroundGroup);
     this.scene.add(this.particles.group);
@@ -855,8 +850,6 @@ export class Game {
     }
 
     this.composer.render();
-    this.updateGearFade(dt);
-    this.occlusionSilhouette.render();
     if (!this.hasRenderedFirstFrame) {
       this.hasRenderedFirstFrame = true;
       signalFirstFrame();
@@ -892,6 +885,7 @@ export class Game {
     this.currentZoneIndex = 0;
     this.unlockedThisRun.clear();
     this.cameraKick = 0;
+    this.orbitAngle = Math.PI / 2 + 2 * (0.45 / 2.5);
     this.isDying = false;
     this.deathFreezeTimer = 0;
     this.deathAnimTimer = 0;
@@ -1170,20 +1164,92 @@ export class Game {
   }
 
   private updateCamera(dt: number) {
+    const playerX = this.player.mesh.position.x;
+    const playerY = this.player.mesh.position.y;
+    const playerZ = this.player.mesh.position.z;
+
     const verticalLead = THREE.MathUtils.clamp(this.player.velocity.y * 0.12, -1.2, 1.6);
     const followLerp = 1 - Math.exp(-dt * (this.player.onGround ? 5.5 : 4));
-    const targetCamX = this.player.mesh.position.x * 0.42;
-    const targetCamY = this.player.mesh.position.y + 6.1 + verticalLead + this.cameraKick;
-    const targetCamZ = this.player.mesh.position.z + 10.2 + Math.max(-this.player.velocity.y * 0.08, 0);
+    const orbitLerp = 1 - Math.exp(-dt * 5);
+
+    // Base angle — counterclockwise (increasing) with height. Baseline orientation
+    // at height 0 points the camera down +Z looking toward the origin, matching the
+    // previous camera's framing. We rotate counterclockwise as the player climbs.
+    const radiansPerUnit = 0.45 / 2.5; // ~0.45 rad per ~2.5m of height
+    const baseAngle = Math.PI / 2 + playerY * radiansPerUnit;
+
+    // Gear-avoidance nudge — if any nearby gear sits between the camera and the
+    // player (in XZ projection), push the target angle further counterclockwise.
+    let nudge = 0;
+    const maxNudge = 0.3;
+    const nudgeStep = 0.05;
+    const angleTolerance = 0.18; // ~10° — how close a gear must be to the cam→player line to count as occluding
+    const verticalWindow = 3;
+
+    // Iteratively search for a clear angle, up to maxNudge
+    for (let step = 0; step <= maxNudge / nudgeStep; step += 1) {
+      const testAngle = baseAngle + nudge;
+      const camX = Math.cos(testAngle) * this.orbitRadius;
+      const camZ = Math.sin(testAngle) * this.orbitRadius;
+      const toPlayerX = playerX - camX;
+      const toPlayerZ = playerZ - camZ;
+      const toPlayerLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
+      const camToPlayerAngle = Math.atan2(toPlayerZ, toPlayerX);
+
+      let clear = true;
+      for (const gear of this.gears) {
+        if (gear === this.activeGear) continue;
+        const gy = gear.mesh.position.y;
+        if (Math.abs(gy - playerY) > verticalWindow) continue;
+        const gx = gear.mesh.position.x;
+        const gz = gear.mesh.position.z;
+        const toGearX = gx - camX;
+        const toGearZ = gz - camZ;
+        const toGearLen = Math.hypot(toGearX, toGearZ) || 1;
+        // Gear must be between camera and player (closer to camera than player is)
+        if (toGearLen >= toPlayerLen) continue;
+        const camToGearAngle = Math.atan2(toGearZ, toGearX);
+        let angleDelta = camToGearAngle - camToPlayerAngle;
+        while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
+        while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
+        // Widen the tolerance by the gear's angular half-width as seen from camera
+        const gearAngularHalf = Math.atan2(gear.radius, toGearLen);
+        if (Math.abs(angleDelta) < angleTolerance + gearAngularHalf) {
+          clear = false;
+          break;
+        }
+      }
+
+      if (clear) break;
+      nudge = Math.min(nudge + nudgeStep, maxNudge);
+    }
+
+    const targetAngle = baseAngle + nudge;
+
+    // Smoothly interpolate orbit angle toward target, handling wrap-around
+    let angleDiff = targetAngle - this.orbitAngle;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    this.orbitAngle += angleDiff * orbitLerp;
+
+    // Fallback zoom — pull camera back when falling fast
+    const radius = this.orbitRadius + Math.max(-this.player.velocity.y * 0.08, 0);
+
+    const targetCamX = Math.cos(this.orbitAngle) * radius;
+    const targetCamZ = Math.sin(this.orbitAngle) * radius;
+    const targetCamY = playerY + 6.1 + verticalLead + this.cameraKick;
+
     this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, targetCamX, followLerp);
     this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, targetCamY, followLerp);
     this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetCamZ, followLerp);
+
     this.cameraLookTarget.set(
-      this.player.mesh.position.x * 0.2,
-      this.player.mesh.position.y + 1.3 + verticalLead * 0.35,
-      this.player.mesh.position.z - 0.6
+      playerX,
+      playerY + 1.3 + verticalLead * 0.35,
+      playerZ
     );
     this.camera.lookAt(this.cameraLookTarget);
+
     const targetFov = THREE.MathUtils.clamp(58 + Math.max(-this.player.velocity.y - 5, 0) * 0.45, 58, 64);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, followLerp);
     this.camera.updateProjectionMatrix();
@@ -1200,41 +1266,6 @@ export class Game {
     }
 
     this.updatePlayerLight(dt);
-  }
-
-  /**
-   * Fade gears that occlude the player to semi-transparent.
-   * Projects gear + player to NDC; if a gear is closer to camera and overlaps
-   * the player's screen region, lerp its opacity toward 0.3.
-   */
-  private updateGearFade(dt: number) {
-    const fadeSpeed = 8; // opacity lerp rate
-    const targetOccluded = 0.3;
-    const playerNDC = this._projPlayer.copy(this.player.mesh.position).project(this.camera);
-
-    for (const gear of this.gears) {
-      if (gear === this.activeGear) {
-        // Active gear should never fade — the player is standing on it
-        gear.setOpacity(Math.min(1, gear['bodyMaterial'].opacity + dt * fadeSpeed));
-        continue;
-      }
-
-      const gearNDC = this._projGear.copy(gear.mesh.position).project(this.camera);
-
-      // Gear must be closer to camera (smaller NDC z) than player
-      const inFront = gearNDC.z < playerNDC.z;
-
-      // Check screen-space overlap — use gear radius scaled roughly to NDC
-      // (NDC is -1..1, so a radius of 1.5 world units at typical distance maps to ~0.15-0.25 NDC)
-      const screenDist = Math.hypot(gearNDC.x - playerNDC.x, gearNDC.y - playerNDC.y);
-      const overlapThreshold = 0.15 + gear.radius * 0.08;
-      const occluding = inFront && screenDist < overlapThreshold;
-
-      const currentOpacity = gear['bodyMaterial'].opacity as number;
-      const target = occluding ? targetOccluded : 1;
-      const newOpacity = THREE.MathUtils.lerp(currentOpacity, target, 1 - Math.exp(-dt * fadeSpeed));
-      gear.setOpacity(newOpacity);
-    }
   }
 
   private updateScores() {
