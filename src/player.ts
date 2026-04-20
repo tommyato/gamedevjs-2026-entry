@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { Input } from "./input";
+import { SILHOUETTE_PLAYER_LAYER } from "./occlusion-silhouette";
 
 export type PlayerUpdateResult = {
   jumped: boolean;
@@ -56,6 +57,11 @@ export class Player {
     rightEye.position.set(0.1, 0.45, 0.25);
     rightEye.castShadow = true;
     this.visualRoot.add(rightEye);
+
+    // Enable player silhouette layer on all body/eye meshes
+    body.layers.enable(SILHOUETTE_PLAYER_LAYER);
+    leftEye.layers.enable(SILHOUETTE_PLAYER_LAYER);
+    rightEye.layers.enable(SILHOUETTE_PLAYER_LAYER);
   }
 
   update(dt: number, input: Input): PlayerUpdateResult {
@@ -119,16 +125,6 @@ export class Player {
     );
 
     return { jumped };
-  }
-
-  setOcclusionVisual(occluded: boolean) {
-    if (occluded) {
-      this.bodyMaterial.emissive.setHex(0xcd7f32);
-      this.bodyMaterial.emissiveIntensity = 2.0;
-    } else {
-      this.bodyMaterial.emissive.setHex(0x000000);
-      this.bodyMaterial.emissiveIntensity = 0;
-    }
   }
 
   setDyingVisual() {

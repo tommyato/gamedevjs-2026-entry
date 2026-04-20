@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { OCCLUDER_LAYER, SILHOUETTE_GEAR_LAYER } from "./occlusion-silhouette";
 
 export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston";
 
@@ -50,10 +51,6 @@ export class Gear {
   private pistonMesh: THREE.Mesh | null = null;
   private pistonBaseY = 0;
   private pistonTime = Math.random() * Math.PI * 2;
-
-  // Camera occlusion — fade gear when it blocks the player
-  private occlusionTarget = 1;
-  private occlusionCurrent = 1;
 
   constructor(options: GearOptions = {}) {
     this.radius = options.radius ?? 1.5;
@@ -171,6 +168,14 @@ export class Gear {
     if (this.variant === "piston") {
       this.addPistonDetail();
     }
+
+    // Enable silhouette layers on all mesh children
+    this.mesh.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.layers.enable(OCCLUDER_LAYER);
+        child.layers.enable(SILHOUETTE_GEAR_LAYER);
+      }
+    });
   }
 
   private addPistonDetail() {
@@ -302,38 +307,6 @@ export class Gear {
     }
 
     this.mesh.position.copy(this.restPosition);
-
-    // Smooth occlusion fade
-    if (Math.abs(this.occlusionCurrent - this.occlusionTarget) > 0.01) {
-      this.occlusionCurrent = THREE.MathUtils.lerp(
-        this.occlusionCurrent,
-        this.occlusionTarget,
-        1 - Math.exp(-dt * 12)
-      );
-      this.applyOcclusionMaterials();
-    } else if (this.occlusionCurrent !== this.occlusionTarget) {
-      this.occlusionCurrent = this.occlusionTarget;
-      this.applyOcclusionMaterials();
-    }
-  }
-
-  setOcclusionOpacity(target: number) {
-    this.occlusionTarget = target;
-  }
-
-  getOcclusionOpacity(): number {
-    return this.occlusionCurrent;
-  }
-
-  private applyOcclusionMaterials() {
-    const transparent = this.occlusionCurrent < 0.99;
-    this.mesh.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
-        mat.transparent = transparent;
-        mat.opacity = this.occlusionCurrent;
-      }
-    });
   }
 
   checkCollision(playerPos: THREE.Vector3, playerRadius: number): GearCollision {

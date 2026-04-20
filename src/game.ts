@@ -27,6 +27,7 @@ import {
 import { BoltCollectible } from "./bolt";
 import { Gear, type GearVariant } from "./gear";
 import { Input } from "./input";
+import { createOcclusionSilhouette } from "./occlusion-silhouette";
 import { ParticleSystem } from "./particles";
 import {
   isAudioEnabled,
@@ -71,6 +72,7 @@ export class Game {
   private camera!: THREE.PerspectiveCamera;
   private composer!: EffectComposer;
   private bloomPass!: UnrealBloomPass;
+  private occlusionSilhouette!: ReturnType<typeof createOcclusionSilhouette>;
   private clock = new THREE.Clock();
   private readonly animationLoop = () => this.loop();
   private animationLoopRunning = false;
@@ -130,8 +132,6 @@ export class Game {
   private readonly backgroundGroup = new THREE.Group();
   private backgroundDecorations: BackgroundDecoration[] = [];
   private readonly gearTickNextTimes = new Map<Gear, number>();
-  private readonly occlusionRayDir = new THREE.Vector3();
-  private readonly occlusionGearOffset = new THREE.Vector3();
   private generationHeight = 0;
   private generationAngle = 0;
   private generationCount = 0;
@@ -244,6 +244,8 @@ export class Game {
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(renderPass);
     this.composer.addPass(this.bloomPass);
+
+    this.occlusionSilhouette = createOcclusionSilhouette(this.renderer, this.scene, this.camera);
 
     this.input.init(this.renderer.domElement);
 
@@ -849,6 +851,7 @@ export class Game {
     }
 
     this.composer.render();
+    this.occlusionSilhouette.render();
     if (!this.hasRenderedFirstFrame) {
       this.hasRenderedFirstFrame = true;
       signalFirstFrame();
@@ -1036,7 +1039,6 @@ export class Game {
     this.handlePoleCollision();
     this.handleBoltCollection();
     this.updateCamera(dt);
-    this.updateGearOcclusion();
     this.updatePlayerShadow();
     this.updateScores();
     this.updateHud(dt);
@@ -1190,63 +1192,6 @@ export class Game {
     this.updatePlayerLight(dt);
   }
 
-  private updateGearOcclusion() {
-    const camPos = this.camera.position;
-    const playerPos = this.player.mesh.position;
-    this.occlusionRayDir.subVectors(playerPos, camPos);
-    const rayLenSq = this.occlusionRayDir.lengthSq();
-    if (rayLenSq < 0.01) return;
-
-    for (const gear of this.gears) {
-      if (!gear.isSolid()) {
-        gear.setOcclusionOpacity(1);
-        continue;
-      }
-      this.occlusionGearOffset.subVectors(gear.mesh.position, camPos);
-      const t = this.occlusionGearOffset.dot(this.occlusionRayDir) / rayLenSq;
-
-      // Only fade gears between camera and player, not the one underfoot
-      if (t < 0.08 || t > 0.82) {
-        gear.setOcclusionOpacity(1);
-        continue;
-      }
-
-      // Distance from gear center to the camera→player ray
-      const cx = camPos.x + t * this.occlusionRayDir.x;
-      const cy = camPos.y + t * this.occlusionRayDir.y;
-      const cz = camPos.z + t * this.occlusionRayDir.z;
-      const dx = gear.mesh.position.x - cx;
-      const dy = gear.mesh.position.y - cy;
-      const dz = gear.mesh.position.z - cz;
-      const distSq = dx * dx + dy * dy + dz * dz;
-
-      const occlusionRadius = gear.radius + 1.2;
-      if (distSq < occlusionRadius * occlusionRadius) {
-        gear.setOcclusionOpacity(0.15);
-      } else {
-        gear.setOcclusionOpacity(1);
-      }
-    }
-
-    const anyOccluding = this.gears.some(g => g.getOcclusionOpacity() < 1);
-    if (anyOccluding) {
-      this.player.mesh.renderOrder = 999;
-      this.player.mesh.traverse(child => {
-        if ((child as any).material) {
-          (child as any).material.depthTest = false;
-        }
-      });
-    } else {
-      this.player.mesh.renderOrder = 0;
-      this.player.mesh.traverse(child => {
-        if ((child as any).material) {
-          (child as any).material.depthTest = true;
-        }
-      });
-    }
-    this.player.setOcclusionVisual(anyOccluding);
-  }
-
   private updateScores() {
     const currentHeight = Math.max(0, Math.floor(this.player.mesh.position.y));
     const previousReached = this.heightMaxReached;
@@ -1286,7 +1231,6 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.playerShadow.visible = false;
-    for (const gear of this.gears) gear.setOcclusionOpacity(1);
     stopAmbientTick();
     stopMusic();
     this.deathAnimTimer = 0.4;
