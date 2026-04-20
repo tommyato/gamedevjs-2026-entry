@@ -145,6 +145,7 @@ export class Game {
   private isDying = false;
   private deathFreezeTimer = 0;
   private deathAnimTimer = 0;
+  private activeGear: Gear | null = null;
   private gameTime = 0;
   private nextMilestone = 25;
   private toastTimer = 0;
@@ -851,6 +852,7 @@ export class Game {
     }
 
     this.composer.render();
+    this.occlusionSilhouette.setActiveGear(this.activeGear?.mesh ?? null);
     this.occlusionSilhouette.render();
     if (!this.hasRenderedFirstFrame) {
       this.hasRenderedFirstFrame = true;
@@ -1009,9 +1011,14 @@ export class Game {
 
         this.player.mesh.position.addScaledVector(result.momentum, dt);
         this.player.mesh.rotation.y += gear.getAngularVelocity() * dt;
+        this.activeGear = gear;
         foundGround = true;
         break;
       }
+    }
+
+    if (!foundGround) {
+      this.activeGear = null;
     }
 
     if (this.player.velocity.y > 0) {
