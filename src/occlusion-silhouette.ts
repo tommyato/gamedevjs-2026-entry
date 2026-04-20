@@ -3,12 +3,12 @@ import {
 	Layers,
 	GreaterDepth,
 } from 'three';
-import type { WebGLRenderer, Scene, PerspectiveCamera, Group, Object3D } from 'three';
+import type { WebGLRenderer, Scene, PerspectiveCamera } from 'three';
 
 // ── Layer constants ────────────────────────────────────────────────
+// Only the center pole uses OCCLUDER_LAYER now (gears use semi-transparency instead)
 export const OCCLUDER_LAYER = 10;
 export const SILHOUETTE_PLAYER_LAYER = 11;
-export const SILHOUETTE_ACTIVE_GEAR_LAYER = 12;
 
 export function createOcclusionSilhouette(
 	renderer: WebGLRenderer,
@@ -27,45 +27,12 @@ export function createOcclusionSilhouette(
 		depthWrite: false,
 	});
 
-	const activeGearSilhouetteMaterial = new MeshBasicMaterial({
-		color: 0x5a8a9a, // muted teal — subtler than player, reads as "gear outline"
-		depthTest: true,
-		depthFunc: GreaterDepth,
-		depthWrite: false,
-	});
-
-	// Cached layer masks — avoid allocating Layers objects per frame
+	// Cached layer masks
 	const occluderLayers = new Layers();
 	occluderLayers.set(OCCLUDER_LAYER);
 
 	const playerSilhouetteLayers = new Layers();
 	playerSilhouetteLayers.set(SILHOUETTE_PLAYER_LAYER);
-
-	const activeGearSilhouetteLayers = new Layers();
-	activeGearSilhouetteLayers.set(SILHOUETTE_ACTIVE_GEAR_LAYER);
-
-	// The gear the player is currently standing on — set each frame by the game
-	let activeGearMesh: Group | null = null;
-
-	function setActiveGear(gearMesh: Group | null) {
-		// Disable silhouette layer on previous gear
-		if (activeGearMesh && activeGearMesh !== gearMesh) {
-			activeGearMesh.traverse((child: Object3D) => {
-				if ((child as any).isMesh) {
-					child.layers.disable(SILHOUETTE_ACTIVE_GEAR_LAYER);
-				}
-			});
-		}
-		// Enable silhouette layer on new gear
-		if (gearMesh && gearMesh !== activeGearMesh) {
-			gearMesh.traverse((child: Object3D) => {
-				if ((child as any).isMesh) {
-					child.layers.enable(SILHOUETTE_ACTIVE_GEAR_LAYER);
-				}
-			});
-		}
-		activeGearMesh = gearMesh;
-	}
 
 	function render() {
 		const savedLayers = camera.layers.mask;
@@ -81,38 +48,15 @@ export function createOcclusionSilhouette(
 		// Clear depth only — preserve color from composer, reset depth to far (1.0)
 		renderer.clearDepth();
 
-		// Temporarily remove active gear from occluder set so its own depth
-		// doesn't block its silhouette pass
-		if (activeGearMesh) {
-			activeGearMesh.traverse((child: Object3D) => {
-				if ((child as any).isMesh) child.layers.disable(OCCLUDER_LAYER);
-			});
-		}
-
-		// Pass A: write occluder depth (all gears EXCEPT the active one)
+		// Pass A: write occluder depth (center pole only)
 		camera.layers.mask = occluderLayers.mask;
 		scene.overrideMaterial = depthOnlyMaterial;
 		renderer.render(scene, camera);
 
-		// Pass B: player silhouette — behind other gears (not the one they're on)
+		// Pass B: player silhouette — bronze where player is behind the pole
 		camera.layers.mask = playerSilhouetteLayers.mask;
 		scene.overrideMaterial = playerSilhouetteMaterial;
 		renderer.render(scene, camera);
-
-		// Pass C: active gear silhouette — shows where the player's gear is
-		// occluded by other gears above/in front
-		if (activeGearMesh) {
-			camera.layers.mask = activeGearSilhouetteLayers.mask;
-			scene.overrideMaterial = activeGearSilhouetteMaterial;
-			renderer.render(scene, camera);
-		}
-
-		// Restore occluder layer on active gear
-		if (activeGearMesh) {
-			activeGearMesh.traverse((child: Object3D) => {
-				if ((child as any).isMesh) child.layers.enable(OCCLUDER_LAYER);
-			});
-		}
 
 		// Restore all state
 		scene.overrideMaterial = savedOverride;
@@ -125,8 +69,7 @@ export function createOcclusionSilhouette(
 	function dispose() {
 		depthOnlyMaterial.dispose();
 		playerSilhouetteMaterial.dispose();
-		activeGearSilhouetteMaterial.dispose();
 	}
 
-	return { render, dispose, setActiveGear };
+	return { render, dispose };
 }

@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { OCCLUDER_LAYER } from "./occlusion-silhouette";
 
 export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston";
 
@@ -169,12 +168,6 @@ export class Gear {
       this.addPistonDetail();
     }
 
-    // Enable occluder layer on all mesh children (for player silhouette depth test)
-    this.mesh.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        child.layers.enable(OCCLUDER_LAYER);
-      }
-    });
   }
 
   private addPistonDetail() {
@@ -352,6 +345,16 @@ export class Gear {
     }
 
     return { blocked: false, capY: 0 };
+  }
+
+  /** Set gear opacity (1 = fully opaque, 0 = invisible). Used for fade-through when occluding player. */
+  setOpacity(opacity: number) {
+    const clamped = Math.max(0, Math.min(1, opacity));
+    const materials = [this.bodyMaterial, this.topSurfaceMaterial, this.toothMaterial, this.accentMaterial, this.detailMaterial];
+    for (const mat of materials) {
+      mat.transparent = clamped < 1;
+      mat.opacity = clamped;
+    }
   }
 }
 

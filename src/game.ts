@@ -27,7 +27,7 @@ import {
 import { BoltCollectible } from "./bolt";
 import { Gear, type GearVariant } from "./gear";
 import { Input } from "./input";
-import { createOcclusionSilhouette } from "./occlusion-silhouette";
+import { createOcclusionSilhouette, OCCLUDER_LAYER } from "./occlusion-silhouette";
 import { ParticleSystem } from "./particles";
 import {
   isAudioEnabled,
@@ -146,6 +146,8 @@ export class Game {
   private deathFreezeTimer = 0;
   private deathAnimTimer = 0;
   private activeGear: Gear | null = null;
+  private readonly _projGear = new THREE.Vector3();
+  private readonly _projPlayer = new THREE.Vector3();
   private gameTime = 0;
   private nextMilestone = 25;
   private toastTimer = 0;
@@ -258,6 +260,7 @@ export class Game {
     });
     this.towerBase = new THREE.Mesh(towerGeo, towerMat);
     this.towerBase.position.y = 190;
+    this.towerBase.layers.enable(OCCLUDER_LAYER);
     this.scene.add(this.towerBase);
     this.scene.add(this.backgroundGroup);
     this.scene.add(this.particles.group);
@@ -852,7 +855,7 @@ export class Game {
     }
 
     this.composer.render();
-    this.occlusionSilhouette.setActiveGear(this.activeGear?.mesh ?? null);
+    this.updateGearFade(dt);
     this.occlusionSilhouette.render();
     if (!this.hasRenderedFirstFrame) {
       this.hasRenderedFirstFrame = true;
@@ -1197,6 +1200,41 @@ export class Game {
     }
 
     this.updatePlayerLight(dt);
+  }
+
+  /**
+   * Fade gears that occlude the player to semi-transparent.
+   * Projects gear + player to NDC; if a gear is closer to camera and overlaps
+   * the player's screen region, lerp its opacity toward 0.3.
+   */
+  private updateGearFade(dt: number) {
+    const fadeSpeed = 8; // opacity lerp rate
+    const targetOccluded = 0.3;
+    const playerNDC = this._projPlayer.copy(this.player.mesh.position).project(this.camera);
+
+    for (const gear of this.gears) {
+      if (gear === this.activeGear) {
+        // Active gear should never fade — the player is standing on it
+        gear.setOpacity(Math.min(1, gear['bodyMaterial'].opacity + dt * fadeSpeed));
+        continue;
+      }
+
+      const gearNDC = this._projGear.copy(gear.mesh.position).project(this.camera);
+
+      // Gear must be closer to camera (smaller NDC z) than player
+      const inFront = gearNDC.z < playerNDC.z;
+
+      // Check screen-space overlap — use gear radius scaled roughly to NDC
+      // (NDC is -1..1, so a radius of 1.5 world units at typical distance maps to ~0.15-0.25 NDC)
+      const screenDist = Math.hypot(gearNDC.x - playerNDC.x, gearNDC.y - playerNDC.y);
+      const overlapThreshold = 0.15 + gear.radius * 0.08;
+      const occluding = inFront && screenDist < overlapThreshold;
+
+      const currentOpacity = gear['bodyMaterial'].opacity as number;
+      const target = occluding ? targetOccluded : 1;
+      const newOpacity = THREE.MathUtils.lerp(currentOpacity, target, 1 - Math.exp(-dt * fadeSpeed));
+      gear.setOpacity(newOpacity);
+    }
   }
 
   private updateScores() {
