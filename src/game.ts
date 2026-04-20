@@ -1035,7 +1035,7 @@ export class Game {
       this.player.onGround = false;
     }
 
-    const playerFrame = this.player.update(dt, this.input);
+    const playerFrame = this.player.update(dt, this.input, this.orbitAngle);
     if (playerFrame.jumped) {
       playJump();
       this.particles.spawnJumpSparks(this.player.mesh.position);

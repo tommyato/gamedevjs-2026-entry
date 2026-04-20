@@ -58,7 +58,7 @@ export class Player {
     this.visualRoot.add(rightEye);
   }
 
-  update(dt: number, input: Input): PlayerUpdateResult {
+  update(dt: number, input: Input, cameraAngle = 0): PlayerUpdateResult {
     this.prevY = this.mesh.position.y;
     const move = input.getMovement();
     let jumped = false;
@@ -68,9 +68,16 @@ export class Player {
       : 1;
     const speed = this.moveSpeed * speedBoost;
 
-    // Movement relative to world
-    this.mesh.position.x += move.x * speed * dt;
-    this.mesh.position.z += move.y * speed * dt; // move.y is -1 for up, so it moves towards -z
+    // Transform input to camera-relative world space.
+    // Camera sits at orbitAngle; its forward direction (into the screen) is orbitAngle + PI.
+    const cameraYaw = cameraAngle + Math.PI;
+    const sinYaw = Math.sin(cameraYaw);
+    const cosYaw = Math.cos(cameraYaw);
+    const worldX = move.x * cosYaw - move.y * sinYaw;
+    const worldZ = move.x * sinYaw + move.y * cosYaw;
+
+    this.mesh.position.x += worldX * speed * dt;
+    this.mesh.position.z += worldZ * speed * dt;
 
     // Gravity
     if (!this.onGround) {
@@ -93,9 +100,9 @@ export class Player {
       this.highestY = this.mesh.position.y;
     }
 
-    // Look in movement direction
+    // Look in movement direction (world space)
     if (Math.abs(move.x) > 0.1 || Math.abs(move.y) > 0.1) {
-      const angle = Math.atan2(move.x, move.y);
+      const angle = Math.atan2(worldX, worldZ);
       this.mesh.rotation.y = angle;
     }
 
