@@ -290,12 +290,29 @@ export class ClockworkClimbSimulation {
       }
 
       const radius = this.randomRange(band.radiusMin, band.radiusMax);
-      const distance = this.randomRange(band.distanceMin, band.distanceMax);
+      let gearX = 0;
+      let gearZ = 0;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.5, 0.5);
+        const distance = this.randomRange(band.distanceMin, band.distanceMax);
+        gearX = Math.cos(tryAngle) * distance;
+        gearZ = Math.sin(tryAngle) * distance;
+        let tooClose = false;
+        for (const existing of this.state.gears) {
+          const dx = gearX - existing.x;
+          const dz = gearZ - existing.z;
+          if (Math.sqrt(dx * dx + dz * dz) < (radius + existing.radius) * 1.1) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (!tooClose) break;
+      }
       const variant = this.pickGearVariant(height);
       const gear = this.createGear({
-        x: Math.cos(angle) * distance,
+        x: gearX,
         y: height,
-        z: Math.sin(angle) * distance,
+        z: gearZ,
         radius,
         height: 0.3,
         rotationSpeed: this.randomRange(band.rotationMin, band.rotationMax),
@@ -413,12 +430,29 @@ export class ClockworkClimbSimulation {
         }
 
         const radius = this.randomRange(band.radiusMin, band.radiusMax);
-        const distance = this.randomRange(band.distanceMin, band.distanceMax);
+        let gearX = 0;
+        let gearZ = 0;
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.5, 0.5);
+          const distance = this.randomRange(band.distanceMin, band.distanceMax);
+          gearX = Math.cos(tryAngle) * distance;
+          gearZ = Math.sin(tryAngle) * distance;
+          let tooClose = false;
+          for (const existing of this.state.gears) {
+            const dx = gearX - existing.x;
+            const dz = gearZ - existing.z;
+            if (Math.sqrt(dx * dx + dz * dz) < (radius + existing.radius) * 1.1) {
+              tooClose = true;
+              break;
+            }
+          }
+          if (!tooClose) break;
+        }
         const variant = this.pickGearVariant(height);
         const gear = this.createGear({
-          x: Math.cos(angle) * distance,
+          x: gearX,
           y: height,
-          z: Math.sin(angle) * distance,
+          z: gearZ,
           radius,
           height: 0.3,
           rotationSpeed: this.randomRange(band.rotationMin, band.rotationMax),

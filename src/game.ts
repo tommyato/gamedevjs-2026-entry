@@ -2199,7 +2199,7 @@ export class Game {
     shadowMesh.rotation.x = -Math.PI / 2;
     shadowMesh.position.set(
       upperGear.mesh.position.x,
-      bestLower.getTopY() + 0.02,
+      upperGear.mesh.position.y - upperGear.height / 2,
       upperGear.mesh.position.z
     );
 
@@ -2218,7 +2218,7 @@ export class Game {
       shadowMesh.visible = true;
       shadowMesh.position.x = upperGear.mesh.position.x;
       shadowMesh.position.z = upperGear.mesh.position.z;
-      shadowMesh.position.y = lowerGear.getTopY() + 0.02;
+      shadowMesh.position.y = upperGear.mesh.position.y - upperGear.height / 2;
     }
   }
 
