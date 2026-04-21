@@ -1171,7 +1171,6 @@ export class ClockworkClimbSimulation {
     });
     this.state.gears.push(gear);
     this.state.bolts.push(this.createBolt(gear));
-    this.events.push({ type: "milestone", height: Math.floor(player.y), nextMilestone: this.state.nextMilestone });
     this.consecutiveCrumble = 0;
   }
 
