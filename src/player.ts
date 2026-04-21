@@ -75,13 +75,13 @@ export class Player {
     this.doubleJumpAura = aura;
     this.visualRoot.add(aura);
 
-    const shieldGeo = new THREE.IcosahedronGeometry(0.55, 1);
+    const shieldGeo = new THREE.SphereGeometry(0.45, 24, 16);
     const shieldMat = new THREE.MeshBasicMaterial({
-      color: 0xff8844,
+      color: 0xffaa44,
       transparent: true,
       opacity: 0,
-      wireframe: true,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
     const shieldAura = new THREE.Mesh(shieldGeo, shieldMat);
     shieldAura.position.y = 0.38;

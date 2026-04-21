@@ -253,9 +253,9 @@ export class Game {
     depthTest: true,
     side: THREE.DoubleSide,
   });
-  private readonly landingCueCore = new THREE.Mesh(new THREE.CircleGeometry(0.34, 10), this.landingCueCoreMaterial);
-  private readonly landingCueRing = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.68, 18), this.landingCueRingMaterial);
-  private readonly landingCueGlow = new THREE.Mesh(new THREE.RingGeometry(0.68, 0.95, 18), this.landingCueGlowMaterial);
+  private readonly landingCueCore = new THREE.Mesh(new THREE.CircleGeometry(0.2, 10), this.landingCueCoreMaterial);
+  private readonly landingCueRing = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.3, 18), this.landingCueRingMaterial);
+  private readonly landingCueGlow = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.34, 18), this.landingCueGlowMaterial);
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
