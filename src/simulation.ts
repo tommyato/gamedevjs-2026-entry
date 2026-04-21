@@ -292,22 +292,18 @@ export class ClockworkClimbSimulation {
       const radius = this.randomRange(band.radiusMin, band.radiusMax);
       let gearX = 0;
       let gearZ = 0;
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.5, 0.5);
+      let placed = false;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.8, 0.8);
         const distance = this.randomRange(band.distanceMin, band.distanceMax);
         gearX = Math.cos(tryAngle) * distance;
         gearZ = Math.sin(tryAngle) * distance;
-        let tooClose = false;
-        for (const existing of this.state.gears) {
-          const dx = gearX - existing.x;
-          const dz = gearZ - existing.z;
-          if (Math.sqrt(dx * dx + dz * dz) < (radius + existing.radius) * 1.1) {
-            tooClose = true;
-            break;
-          }
+        if (!this.isGearOverlapping(gearX, height, gearZ, radius)) {
+          placed = true;
+          break;
         }
-        if (!tooClose) break;
       }
+      if (!placed) continue; // skip this gear entirely rather than overlap
       const variant = this.pickGearVariant(height);
       const gear = this.createGear({
         x: gearX,
@@ -432,22 +428,18 @@ export class ClockworkClimbSimulation {
         const radius = this.randomRange(band.radiusMin, band.radiusMax);
         let gearX = 0;
         let gearZ = 0;
-        for (let attempt = 0; attempt < 5; attempt += 1) {
-          const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.5, 0.5);
+        let placed = false;
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.8, 0.8);
           const distance = this.randomRange(band.distanceMin, band.distanceMax);
           gearX = Math.cos(tryAngle) * distance;
           gearZ = Math.sin(tryAngle) * distance;
-          let tooClose = false;
-          for (const existing of this.state.gears) {
-            const dx = gearX - existing.x;
-            const dz = gearZ - existing.z;
-            if (Math.sqrt(dx * dx + dz * dz) < (radius + existing.radius) * 1.1) {
-              tooClose = true;
-              break;
-            }
+          if (!this.isGearOverlapping(gearX, height, gearZ, radius)) {
+            placed = true;
+            break;
           }
-          if (!tooClose) break;
         }
+        if (!placed) continue; // skip rather than overlap
         const variant = this.pickGearVariant(height);
         const gear = this.createGear({
           x: gearX,
@@ -496,12 +488,29 @@ export class ClockworkClimbSimulation {
       const offsetY = this.randomRange(-7, 8);
       angle += this.randomRange(0.65, 1.55);
       const radius = this.randomRange(1.3, 2.1);
-      const distance = this.randomRange(1.5, 2.8);
+      const gearY = centerY + offsetY;
+
+      // Find a non-overlapping position (challenge zones are dense, so try harder)
+      let gearX = 0;
+      let gearZ = 0;
+      let placed = false;
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.8, 0.8);
+        const distance = this.randomRange(1.5, 2.8);
+        gearX = Math.cos(tryAngle) * distance;
+        gearZ = Math.sin(tryAngle) * distance;
+        if (!this.isGearOverlapping(gearX, gearY, gearZ, radius)) {
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) continue; // skip rather than stack gears
+
       const variant = index < 2 ? "normal" : this.pickGearVariant(centerY);
       const gear = this.createGear({
-        x: Math.cos(angle) * distance,
-        y: centerY + offsetY,
-        z: Math.sin(angle) * distance,
+        x: gearX,
+        y: gearY,
+        z: gearZ,
         radius,
         height: 0.3,
         rotationSpeed: this.randomRange(0.45, 1.1),
@@ -514,6 +523,22 @@ export class ClockworkClimbSimulation {
       // Normal power-up chance applies
       this.trySpawnPowerUp(gear);
     }
+  }
+
+  private isGearOverlapping(x: number, y: number, z: number, radius: number): boolean {
+    for (const existing of this.state.gears) {
+      const dx = x - existing.x;
+      const dz = z - existing.z;
+      const dy = Math.abs(y - existing.y);
+      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+      const minHorizontal = (radius + existing.radius) * 1.1;
+      // Only check horizontal overlap if gears are vertically close enough to visually intersect
+      // Gear height is 0.3; if vertical gap < 1.0, they can look stacked/sandwiched
+      if (dy < 1.0 && horizontalDist < minHorizontal) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private pickGearVariant(height: number): GearVariant {
