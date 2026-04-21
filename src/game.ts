@@ -185,11 +185,15 @@ export class Game {
   private hudControls!: HTMLElement;
   private hudCombo!: HTMLElement;
   private hudDoubleJumpCharges!: HTMLElement;
+  private hudShieldCount!: HTMLElement;
   private doubleJumpFlashTimer = 0;
+  private shieldFlashTimer = 0;
+  private shieldSaveFlashTimer = 0;
   private comboGlowOverlay!: HTMLDivElement;
   private scorePopLayer!: HTMLDivElement;
   private soundToggleBtn!: HTMLElement;
   private closeCallOverlay!: HTMLElement;
+  private shieldSaveOverlay!: HTMLElement;
   private tutorialOverlay!: HTMLElement;
   private tutorialControls!: HTMLElement;
   private tutorialObjective!: HTMLElement;
@@ -234,7 +238,15 @@ export class Game {
     side: THREE.DoubleSide,
   });
   private readonly landingCueRingMaterial = new THREE.MeshBasicMaterial({
-    color: 0x3a2417,
+    color: 0xcc8844,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+  });
+  private readonly landingCueGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xd4983a,
     transparent: true,
     opacity: 0,
     depthWrite: false,
@@ -243,6 +255,7 @@ export class Game {
   });
   private readonly landingCueCore = new THREE.Mesh(new THREE.CircleGeometry(0.34, 10), this.landingCueCoreMaterial);
   private readonly landingCueRing = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.68, 18), this.landingCueRingMaterial);
+  private readonly landingCueGlow = new THREE.Mesh(new THREE.RingGeometry(0.68, 0.95, 18), this.landingCueGlowMaterial);
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
@@ -285,8 +298,14 @@ export class Game {
   private zoneAnnouncementTimer = 0;
   private seenWindGear = false;
   private seenMagnetGear = false;
+  private seenGearFreeze = false;
   private windParticleTimer = 0;
   private magnetParticleTimer = 0;
+  private gearFreezeParticleTimer = 0;
+  private gearFreezeActive = false;
+  private personalBestHeight = 0;
+  private personalBestReachedThisRun = false;
+  private personalBestRing: THREE.Mesh | null = null;
   private readonly scorePops: ScorePop[] = [];
   private readonly zoneAnnouncementDuration = 2;
   private tutorialShown = false;
@@ -322,6 +341,7 @@ export class Game {
     await requestStats();
     this.saveData = await this.readSaveData();
     this.highScore = this.saveData.bestScore;
+    this.personalBestHeight = parseInt(localStorage.getItem("clockwork-personal-best-height") ?? "0") || 0;
     if (!isAudioEnabled()) {
       setAudioEnabled(false);
     } else {
@@ -421,14 +441,28 @@ export class Game {
     applyTopDownShadowToObject(this.towerBase, this.topDownShadow.uniforms);
     this.scene.add(this.towerBase);
 
+    const pbRingGeo = new THREE.TorusGeometry(1.8, 0.06, 12, 64);
+    const pbRingMat = new THREE.MeshBasicMaterial({
+      color: 0xffd700,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    this.personalBestRing = new THREE.Mesh(pbRingGeo, pbRingMat);
+    this.personalBestRing.rotation.x = Math.PI / 2;
+    this.personalBestRing.userData.skipTopDownShadowCaster = true;
+    this.personalBestRing.visible = false;
+    this.scene.add(this.personalBestRing);
+
     this.scene.add(this.backgroundGroup);
     this.scene.add(this.particles.group);
     this.scene.add(this.ghostGroup);
     this.player.enableTopDownShadow(this.topDownShadow.uniforms);
     this.scene.add(this.player.mesh);
-    this.landingCueGroup.add(this.landingCueRing, this.landingCueCore);
+    this.landingCueGroup.add(this.landingCueGlow, this.landingCueRing, this.landingCueCore);
     this.landingCueGroup.rotation.x = -Math.PI / 2;
     this.landingCueGroup.visible = false;
+    this.landingCueGlow.renderOrder = 11;
     this.landingCueRing.renderOrder = 12;
     this.landingCueCore.renderOrder = 13;
     this.scene.add(this.landingCueGroup);
@@ -445,13 +479,15 @@ export class Game {
     const hudControls = document.getElementById("hud-controls");
     const hudCombo = document.getElementById("hud-combo");
     const hudDoubleJumpCharges = document.getElementById("hud-double-jump-charges");
+    const hudShieldCount = document.getElementById("hud-shield-count");
     const soundToggleBtn = document.getElementById("sound-toggle");
     const closeCallOverlay = document.getElementById("close-call-overlay");
+    const shieldSaveOverlay = document.getElementById("shield-save-overlay");
     const tutorialOverlay = document.getElementById("tutorial-overlay");
     const tutorialControls = document.getElementById("tutorial-controls");
     const tutorialObjective = document.getElementById("tutorial-objective");
     const zoneAnnouncement = document.getElementById("zone-announcement");
-    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !hudDoubleJumpCharges || !soundToggleBtn || !closeCallOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective || !zoneAnnouncement) {
+    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !hudDoubleJumpCharges || !hudShieldCount || !soundToggleBtn || !closeCallOverlay || !shieldSaveOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective || !zoneAnnouncement) {
       throw new Error("Missing HUD elements");
     }
 
@@ -465,8 +501,10 @@ export class Game {
     this.hudControls = hudControls;
     this.hudCombo = hudCombo;
     this.hudDoubleJumpCharges = hudDoubleJumpCharges;
+    this.hudShieldCount = hudShieldCount;
     this.soundToggleBtn = soundToggleBtn;
     this.closeCallOverlay = closeCallOverlay;
+    this.shieldSaveOverlay = shieldSaveOverlay;
     this.tutorialOverlay = tutorialOverlay;
     this.tutorialControls = tutorialControls;
     this.tutorialObjective = tutorialObjective;
@@ -1601,10 +1639,13 @@ export class Game {
     this.hideTutorialOverlay(true);
     this.landingCueGroup.visible = false;
     this.player.setDoubleJumpCharges(0);
+    this.player.setShieldCount(0);
     stopAmbientTick();
     stopMusic();
     this.deathAnimTimer = 0.4;
     this.closeCallFlashTimer = 0;
+    this.shieldSaveFlashTimer = 0;
+    this.shieldSaveOverlay.style.opacity = "0";
     this.closeCallOverlay.style.opacity = "0";
 
     const runPlaytime = Math.max(0, this.elapsedTime - this.runStartElapsedTime);
@@ -1909,6 +1950,7 @@ export class Game {
     setPrivate(this.player, "speedBoostTimer", simPlayer.speedBoostTimer);
     setPrivate(this.player, "speedBoostStrength", simPlayer.speedBoostStrength);
     this.player.setDoubleJumpCharges(simPlayer.doubleJumpCharges);
+    this.player.setShieldCount(simPlayer.shieldCount);
     this.player.update(dt, this.input, orbitAngle);
     this.player.mesh.position.set(simPlayer.x, simPlayer.y, simPlayer.z);
     this.player.velocity.set(simPlayer.vx, simPlayer.vy, simPlayer.vz);
@@ -2040,23 +2082,41 @@ export class Game {
             this.particles.spawnJumpSparks(this.landingEffectPosition);
             this.particles.spawnJumpSparks(this.landingEffectPosition);
             this.showToast(`DOUBLE JUMP +3! (×${state.player.doubleJumpCharges} total)`);
+          } else if (event.powerUpType === "shield") {
+            this.showToast(`SHIELD +1! (${state.player.shieldCount} total)`);
+            this.shieldFlashTimer = 0.5;
           } else {
             this.showToast(getPowerUpDisplayName(event.powerUpType));
           }
           playCollect(1.8);
           break;
-        case "shield_save":
+        case "shield_save": {
+          const remaining = event.shieldCountRemaining;
           this.particles.spawnDeathBurst(this.player.mesh.position);
           this.cameraShakeOffset.set(
-            randomRange(-0.14, 0.14),
-            randomRange(-0.08, 0.08),
-            randomRange(-0.14, 0.14)
+            randomRange(-0.2, 0.2),
+            randomRange(-0.12, 0.12),
+            randomRange(-0.2, 0.2)
           );
-          this.cameraShakeTimer = this.cameraShakeDuration;
-          this.showToast("SHIELD SAVED YOU!");
+          this.cameraShakeTimer = this.cameraShakeDuration * 2;
+          const toastMsg = remaining > 0
+            ? `SHIELD SAVED YOU! (${remaining} remaining)`
+            : "SHIELD SAVED YOU!";
+          this.showToast(toastMsg);
+          this.triggerShieldSaveFlash();
           this.triggerCloseCallFlash();
+          // Emissive boost on player body for ~1s
+          this.player.bodyMaterial.emissive.setHex(0xff8844);
+          this.player.bodyMaterial.emissiveIntensity = 2.0;
+          window.setTimeout(() => {
+            this.player.bodyMaterial.emissive.setHex(0x000000);
+            this.player.bodyMaterial.emissiveIntensity = 0;
+          }, 1000);
+          // Louder, higher-pitched collect sound layered with hit
+          playCollect(2.4);
           playHit();
           break;
+        }
         case "challenge_zone_enter":
           this.showZoneAnnouncement("⚙ CHALLENGE ZONE!");
           this.challengeZoneBloomBoost = 0.18;
@@ -2546,6 +2606,19 @@ export class Game {
     } else {
       this.hudDoubleJumpCharges.style.display = "none";
     }
+
+    const shieldCount = this.simState?.player.shieldCount ?? 0;
+    this.shieldFlashTimer = Math.max(0, this.shieldFlashTimer - dt);
+    if (shieldCount > 0) {
+      this.hudShieldCount.textContent = `🛡 ×${shieldCount}`;
+      const flashBoost = this.shieldFlashTimer > 0
+        ? 0.3 * Math.sin(this.shieldFlashTimer * 40)
+        : 0;
+      this.hudShieldCount.style.opacity = String(Math.min(1, 0.9 + flashBoost));
+      this.hudShieldCount.style.display = "block";
+    } else {
+      this.hudShieldCount.style.display = "none";
+    }
     this.updateComboGlow(this.simState?.comboMultiplier ?? 1);
 
     this.toastTimer = Math.max(0, this.toastTimer - dt);
@@ -2801,6 +2874,11 @@ export class Game {
     this.closeCallOverlay.style.opacity = "1";
   }
 
+  private triggerShieldSaveFlash() {
+    this.shieldSaveFlashTimer = 0.8;
+    this.shieldSaveOverlay.style.opacity = "0.5";
+  }
+
   private updateSteam(dt: number) {
     this.steamSpawnTimer -= dt;
     while (this.steamSpawnTimer <= 0) {
@@ -2814,6 +2892,14 @@ export class Game {
       this.closeCallOverlay.style.opacity = String(opacity);
     } else {
       this.closeCallOverlay.style.opacity = "0";
+    }
+
+    if (this.shieldSaveFlashTimer > 0) {
+      this.shieldSaveFlashTimer = Math.max(0, this.shieldSaveFlashTimer - dt);
+      const opacity = THREE.MathUtils.clamp(this.shieldSaveFlashTimer / 0.8, 0, 1) * 0.5;
+      this.shieldSaveOverlay.style.opacity = String(opacity);
+    } else {
+      this.shieldSaveOverlay.style.opacity = "0";
     }
   }
 
@@ -2984,6 +3070,7 @@ function createPowerUpMesh(type: SimPowerUp["type"]): THREE.Mesh {
     slow_mo: 0x4488ff,
     shield: 0xff8844,
     double_jump: 0x6ee7ff,
+    gear_freeze: 0xaaddff,
   };
   const color = colorMap[type];
   const geo = new THREE.OctahedronGeometry(0.35);
@@ -3001,7 +3088,7 @@ function getPowerUpDisplayName(type: SimPowerUp["type"]): string {
   switch (type) {
     case "bolt_magnet": return "BOLT MAGNET! (8s)";
     case "slow_mo": return "SLOW-MO! (3s)";
-    case "shield": return "SHIELD ACTIVE!";
+    case "shield": return "SHIELD +1!";
     case "double_jump": return "DOUBLE JUMP UNLOCKED!";
   }
   return "POWER-UP!";

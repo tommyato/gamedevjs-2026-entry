@@ -149,6 +149,25 @@
       text-shadow: 0 0 12px rgba(110, 231, 255, 0.65), 0 0 24px rgba(110, 231, 255, 0.35);
       transition: opacity 80ms ease-out;
     }
+    #hud-shield-count {
+      margin-top: 6px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #ff9955;
+      text-shadow: 0 0 12px rgba(255, 136, 68, 0.65), 0 0 24px rgba(255, 136, 68, 0.35);
+      transition: opacity 80ms ease-out;
+    }
+    #shield-save-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 9;
+      pointer-events: none;
+      opacity: 0;
+      background: radial-gradient(circle at center, rgba(255, 160, 40, 0.55) 0%, rgba(255, 100, 0, 0.18) 60%, rgba(0,0,0,0) 100%);
+      transition: opacity 100ms ease-out;
+      mix-blend-mode: screen;
+    }
     #hud-toast {
       position: absolute;
       top: 76px;
@@ -607,6 +626,7 @@
 <body>
   <div id="game-container">
     <div id="close-call-overlay" aria-hidden="true"></div>
+    <div id="shield-save-overlay" aria-hidden="true"></div>
     <div id="hud-toast" aria-live="polite" aria-atomic="true"></div>
     <div id="zone-announcement" aria-hidden="true"></div>
     <div id="tutorial-overlay" class="hidden" aria-hidden="true">
@@ -641,6 +661,7 @@
         <div id="hud-status">NEXT 25m</div>
         <div id="hud-combo"></div>
         <div id="hud-double-jump-charges" style="display:none"></div>
+        <div id="hud-shield-count" style="display:none"></div>
       </div>
       <div id="hud-controls">WASD / ARROWS TO MOVE · SPACE OR TAP TO JUMP</div>
       <button id="pause-btn" type="button" aria-label="Pause">⏸</button>

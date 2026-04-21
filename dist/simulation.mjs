@@ -192,7 +192,7 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
       normalizeAngle(this.state.orbitAngle),
       clamp(player.boltMagnetTimer / 8, 0, 1),
       clamp(player.slowMoTimer / 3, 0, 1),
-      player.shieldActive ? 1 : 0,
+      player.shieldCount > 0 ? 1 : 0,
       this.state.inChallengeZone ? 1 : 0
     ]);
   }
@@ -211,8 +211,9 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
       speedBoostStrength: 1,
       boltMagnetTimer: 0,
       slowMoTimer: 0,
-      shieldActive: false,
+      shieldCount: 0,
       doubleJumpCharges: 0,
+      gearFreezeTimer: 0,
       lastLandedGearX: 0,
       lastLandedGearY: 0,
       lastLandedGearZ: 0
@@ -364,18 +365,20 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
   pickPowerUpType(height) {
     if (height >= 100) {
       return this.weightedChoice([
-        ["bolt_magnet", 35],
+        ["bolt_magnet", 27],
         ["slow_mo", 25],
         ["shield", 25],
-        ["double_jump", 15]
+        ["double_jump", 15],
+        ["gear_freeze", 8]
       ]);
     }
     if (height >= 75) {
       return this.weightedChoice([
-        ["bolt_magnet", 38],
+        ["bolt_magnet", 33],
         ["slow_mo", 27],
         ["shield", 25],
-        ["double_jump", 10]
+        ["double_jump", 10],
+        ["gear_freeze", 5]
       ]);
     }
     if (height >= 50) {
@@ -854,7 +857,9 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
         gear.reverseTimer -= gear.reverseInterval;
         gear.rotationDir *= -1;
       }
-      gear.currentRotation += getGearAngularVelocity(gear) * dt;
+      if (this.state.player.gearFreezeTimer <= 0) {
+        gear.currentRotation += getGearAngularVelocity(gear) * dt;
+      }
       if (!gear.crumbleArmed) {
         continue;
       }
@@ -887,8 +892,10 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
         if (!wasOnGround) {
           this.onPlayerLand(gear, landingSpeed);
         }
-        player.x += result.momentumX * dt;
-        player.z += result.momentumZ * dt;
+        if (this.state.player.gearFreezeTimer <= 0) {
+          player.x += result.momentumX * dt;
+          player.z += result.momentumZ * dt;
+        }
         this.state.activeGearId = gear.id;
         foundGround = true;
         break;
@@ -981,6 +988,11 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
     player.speedBoostTimer = Math.max(0, player.speedBoostTimer - dt);
     player.boltMagnetTimer = Math.max(0, player.boltMagnetTimer - dt);
     player.slowMoTimer = Math.max(0, player.slowMoTimer - dt);
+    const wasGearFreezeActive = player.gearFreezeTimer > 0;
+    player.gearFreezeTimer = Math.max(0, player.gearFreezeTimer - dt);
+    if (wasGearFreezeActive && player.gearFreezeTimer === 0) {
+      this.events.push({ type: "gear_freeze_end" });
+    }
     const speedBoost = player.speedBoostTimer > 0 ? lerp(player.speedBoostStrength, 1, 1 - player.speedBoostTimer / 0.9) : 1;
     if (player.speedBoostTimer === 0) {
       player.speedBoostStrength = 1;
@@ -1130,10 +1142,14 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
           player.slowMoTimer = 3;
           break;
         case "shield":
-          player.shieldActive = true;
+          player.shieldCount += 1;
           break;
         case "double_jump":
           player.doubleJumpCharges += 3;
+          break;
+        case "gear_freeze":
+          player.gearFreezeTimer = 6;
+          this.events.push({ type: "gear_freeze_start" });
           break;
       }
       this.events.push({
@@ -1385,8 +1401,8 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
       this.isPlayerStranded();
     }
     if (this.state.player.y < this.cameraY - 12 && this.state.gameState === "playing") {
-      if (this.state.player.shieldActive) {
-        this.state.player.shieldActive = false;
+      if (this.state.player.shieldCount > 0) {
+        this.state.player.shieldCount -= 1;
         this.shieldSaveCount += 1;
         this.state.shieldSaveCount = this.shieldSaveCount;
         this.state.player.x = this.state.player.lastLandedGearX;
@@ -1400,13 +1416,15 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
           type: "shield_save",
           x: this.state.player.x,
           y: this.state.player.y,
-          z: this.state.player.z
+          z: this.state.player.z,
+          shieldCountRemaining: this.state.player.shieldCount
         });
         return;
       }
       this.state.gameState = "dying";
       this.deathFreezeTimer = 0.2;
       this.state.player.doubleJumpCharges = 0;
+      this.state.player.shieldCount = 0;
       if (this.state.comboMultiplier > 1) {
         this.breakCombo();
       } else {

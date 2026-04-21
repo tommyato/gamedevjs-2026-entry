@@ -17,11 +17,14 @@ export class Player {
   public highestY = 0;
   private readonly visualRoot = new THREE.Group();
   private readonly doubleJumpAura: THREE.Mesh;
+  private readonly shieldAura: THREE.Mesh;
   private scaleYImpulse = 0;
   private speedBoostTimer = 0;
   private speedBoostStrength = 1;
   private doubleJumpCharges = 0;
   private doubleJumpPulse = 0;
+  private shieldCount = 0;
+  private shieldPulse = 0;
   public readonly bodyMaterial: THREE.MeshStandardMaterial;
 
   constructor() {
@@ -71,6 +74,21 @@ export class Player {
     aura.userData.skipTopDownShadowCaster = true;
     this.doubleJumpAura = aura;
     this.visualRoot.add(aura);
+
+    const shieldGeo = new THREE.IcosahedronGeometry(0.55, 1);
+    const shieldMat = new THREE.MeshBasicMaterial({
+      color: 0xff8844,
+      transparent: true,
+      opacity: 0,
+      wireframe: true,
+      depthWrite: false,
+    });
+    const shieldAura = new THREE.Mesh(shieldGeo, shieldMat);
+    shieldAura.position.y = 0.38;
+    shieldAura.visible = false;
+    shieldAura.userData.skipTopDownShadowCaster = true;
+    this.shieldAura = shieldAura;
+    this.visualRoot.add(shieldAura);
   }
 
   enableTopDownShadow(uniforms: TopDownShadowUniforms) {
@@ -166,6 +184,26 @@ export class Player {
       }
     }
 
+    const shieldMaterial = this.shieldAura.material as THREE.MeshBasicMaterial;
+    if (this.shieldCount > 0) {
+      this.shieldPulse += dt * 3.8;
+      this.shieldAura.visible = true;
+      const baseOpacity = 0.18 + Math.min(this.shieldCount, 9) * 0.04;
+      const targetOpacity = baseOpacity + Math.sin(this.shieldPulse) * 0.07;
+      shieldMaterial.opacity = THREE.MathUtils.lerp(shieldMaterial.opacity, targetOpacity, 1 - Math.exp(-dt * 6));
+      this.shieldAura.scale.setScalar(1 + Math.sin(this.shieldPulse * 0.9) * 0.05);
+      this.shieldAura.rotation.y += dt * 0.8;
+      this.shieldAura.rotation.z += dt * 0.4;
+    } else {
+      this.shieldPulse = 0;
+      shieldMaterial.opacity = THREE.MathUtils.lerp(shieldMaterial.opacity, 0, 1 - Math.exp(-dt * 5));
+      if (shieldMaterial.opacity < 0.01) {
+        this.shieldAura.visible = false;
+        shieldMaterial.opacity = 0;
+        this.shieldAura.scale.setScalar(1);
+      }
+    }
+
     return { jumped };
   }
 
@@ -206,6 +244,13 @@ export class Player {
     }
   }
 
+  setShieldCount(count: number) {
+    this.shieldCount = count;
+    if (count === 0) {
+      this.shieldPulse = 0;
+    }
+  }
+
   reset(y = 0, z = 0) {
     this.mesh.position.set(0, y, z);
     this.velocity.set(0, 0, 0);
@@ -224,5 +269,11 @@ export class Player {
     this.doubleJumpAura.scale.setScalar(1);
     const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
     auraMaterial.opacity = 0;
+    this.shieldCount = 0;
+    this.shieldPulse = 0;
+    this.shieldAura.visible = false;
+    this.shieldAura.scale.setScalar(1);
+    const shieldMaterial = this.shieldAura.material as THREE.MeshBasicMaterial;
+    shieldMaterial.opacity = 0;
   }
 }

@@ -432,6 +432,36 @@ export class ParticleSystem {
     }
   }
 
+  spawnIceCrystals(position: THREE.Vector3, radius: number) {
+    const count = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < count; i++) {
+      const particle = this.acquire();
+      if (!particle) return;
+
+      const angle = Math.random() * Math.PI * 2;
+      const r = radius * (0.5 + Math.random() * 0.5);
+      particle.kind = "spark";
+      particle.life = 0;
+      particle.maxLife = 0.55 + Math.random() * 0.35;
+      particle.drag = 0.4 + Math.random() * 0.3;
+      particle.gravity = -0.3;
+      particle.mesh.visible = true;
+      particle.mesh.position.set(
+        position.x + Math.cos(angle) * r,
+        position.y + 0.1 + Math.random() * 0.2,
+        position.z + Math.sin(angle) * r
+      );
+      particle.velocity.set(
+        (Math.random() - 0.5) * 0.45,
+        0.15 + Math.random() * 0.35,
+        (Math.random() - 0.5) * 0.45
+      );
+      this.scale.setScalar(0.035 + Math.random() * 0.03);
+      particle.mesh.scale.copy(this.scale);
+      this.setMaterial(particle, Math.random() > 0.4 ? 0x88ccff : 0xeef8ff, 0.88);
+    }
+  }
+
   spawnSteamPuff(position: THREE.Vector3) {
     const particle = this.acquire();
     if (!particle) {

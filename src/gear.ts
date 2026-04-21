@@ -395,6 +395,18 @@ export class Gear {
     this.applyCrumbleMaterialState(urgency, fade, crumbleFallDistance);
   }
 
+  setFreezeEmissive(active: boolean) {
+    if (active) {
+      const iceColor = new THREE.Color(0x88ccff);
+      for (const mat of [this.bodyMaterial, this.topSurfaceMaterial, this.toothMaterial]) {
+        mat.emissive.lerp(iceColor, 0.55);
+        mat.emissiveIntensity = Math.max(mat.emissiveIntensity, 0.15);
+      }
+    } else {
+      this.resetMaterialVisuals();
+    }
+  }
+
   getAngularVelocity(): number {
     if (!this.active) {
       return 0;

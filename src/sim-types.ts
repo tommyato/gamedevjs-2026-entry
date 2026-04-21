@@ -45,7 +45,7 @@ export type SimBolt = {
 export type SimPowerUp = {
   id: number;
   gearId: number;
-  type: "bolt_magnet" | "slow_mo" | "shield" | "double_jump";
+  type: "bolt_magnet" | "slow_mo" | "shield" | "double_jump" | "gear_freeze";
   x: number;
   y: number;
   z: number;
@@ -66,8 +66,9 @@ export type SimPlayer = {
   speedBoostStrength: number;
   boltMagnetTimer: number;
   slowMoTimer: number;
-  shieldActive: boolean;
+  shieldCount: number;
   doubleJumpCharges: number;
+  gearFreezeTimer: number;
   lastLandedGearX: number;
   lastLandedGearY: number;
   lastLandedGearZ: number;
@@ -120,7 +121,9 @@ export type SimEvent =
   | { type: "zone_change"; zoneIndex: number }
   | { type: "achievement"; id: string }
   | { type: "bounce_jump"; x: number; y: number; z: number }
-  | { type: "powerup_collect"; powerUpType: "bolt_magnet" | "slow_mo" | "shield" | "double_jump"; x: number; y: number; z: number }
-  | { type: "shield_save"; x: number; y: number; z: number }
+  | { type: "powerup_collect"; powerUpType: "bolt_magnet" | "slow_mo" | "shield" | "double_jump" | "gear_freeze"; x: number; y: number; z: number }
+  | { type: "shield_save"; x: number; y: number; z: number; shieldCountRemaining: number }
   | { type: "challenge_zone_enter"; zoneCenter: number }
-  | { type: "challenge_zone_exit"; bonusScore: number };
+  | { type: "challenge_zone_exit"; bonusScore: number }
+  | { type: "gear_freeze_start" }
+  | { type: "gear_freeze_end" };
