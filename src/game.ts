@@ -1743,14 +1743,14 @@ export class Game {
       console.error("Failed to refresh leaderboard panels", error);
     });
 
-    // Unlock and toast achievements earned this run
-    const earnedAchievements: string[] = [];
-    if (this.score > 0) { unlockAchievement("FIRST_CLIMB"); earnedAchievements.push("FIRST_CLIMB"); }
-    if (this.score >= 500) { unlockAchievement("RISING_STAR"); earnedAchievements.push("RISING_STAR"); }
-    if (this.score >= 2000) { unlockAchievement("GEAR_MASTER"); earnedAchievements.push("GEAR_MASTER"); }
-    if (this.saveData.totalRuns === 1 && this.score >= 500) { unlockAchievement("PERFECT_START"); earnedAchievements.push("PERFECT_START"); }
-    if (state.bestAirBoltChain >= 3) { unlockAchievement("BOLT_CHAIN"); earnedAchievements.push("BOLT_CHAIN"); }
-    earnedAchievements.forEach((id, index) => {
+    // Unlock and toast *newly earned* achievements this run
+    const newAchievements: string[] = [];
+    if (this.score > 0 && unlockAchievement("FIRST_CLIMB")) newAchievements.push("FIRST_CLIMB");
+    if (this.score >= 500 && unlockAchievement("RISING_STAR")) newAchievements.push("RISING_STAR");
+    if (this.score >= 2000 && unlockAchievement("GEAR_MASTER")) newAchievements.push("GEAR_MASTER");
+    if (this.saveData.totalRuns === 1 && this.score >= 500 && unlockAchievement("PERFECT_START")) newAchievements.push("PERFECT_START");
+    if (state.bestAirBoltChain >= 3 && unlockAchievement("BOLT_CHAIN")) newAchievements.push("BOLT_CHAIN");
+    newAchievements.forEach((id, index) => {
       setTimeout(() => {
         if (this.state === GameState.GameOver) {
           this.showAchievementToast(formatAchievementId(id));

@@ -325,14 +325,25 @@ export async function writeSaveData(data: string): Promise<void> {
   storage?.setItem(DEFAULT_SAVE_KEY, data);
 }
 
-export function unlockAchievement(id: string) {
+/** Returns true if this was a *new* unlock (first time). */
+export function unlockAchievement(id: string): boolean {
   const sdk = getWavedashSdkSync();
-  if (!sdk || typeof sdk.setAchievement !== "function") return;
+  if (sdk && typeof sdk.setAchievement === "function") {
+    try {
+      if (!sdk.getAchievement(id)) {
+        sdk.setAchievement(id, true);
+        return true;
+      }
+      return false;
+    } catch { return false; }
+  }
+  // No SDK — track locally via localStorage
+  const key = `ach_${id}`;
   try {
-    if (!sdk.getAchievement(id)) {
-      sdk.setAchievement(id, true);
-    }
-  } catch { /* fail silently */ }
+    if (localStorage.getItem(key)) return false;
+    localStorage.setItem(key, "1");
+    return true;
+  } catch { return false; }
 }
 
 export function updateStat(id: string, value: number) {
