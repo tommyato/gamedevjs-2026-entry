@@ -122,7 +122,19 @@ export class MultiplayerManager {
       broadcastPlayerState(payload);
     }
 
-    // Drain inbound messages and update peer ghosts
+    this.drainInbound();
+  }
+
+  // Drain the peer message channel without broadcasting — useful while idling
+  // on the title/game-over screen so peer counts stay fresh but we don't spam
+  // peers with a bogus "(0,0,0)" player position.
+  pollPeers(dt: number): void {
+    if (!this.isActive()) return;
+    this.clock += dt;
+    this.drainInbound();
+  }
+
+  private drainInbound(): void {
     const messages = readPeerMessages();
     for (const message of messages) {
       const decoded = this.decodeState(message.payload);

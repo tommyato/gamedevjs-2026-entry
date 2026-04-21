@@ -31,6 +31,7 @@ import { ParticleSystem } from "./particles";
 import {
   fetchLeaderboardScores,
   getStat,
+  getUsername,
   isAudioEnabled,
   loadSaveData,
   onAudioChange,
@@ -566,7 +567,7 @@ export class Game {
     this.buildBackgroundAtmosphere(this.getMaxGearHeight(state) + 24);
     this.buildTitleBackdrop();
     await this.refreshLeaderboardPanels();
-    // TODO: multiplayer UI setup (method not yet implemented)
+    this.setupMultiplayerUi(container);
     this.updateHud(dtZero());
     this.updateOverlayText();
     this.input.setTouchControlsVisible(false);
@@ -663,6 +664,382 @@ export class Game {
         <span style="color:#ffaa44; font-weight:700;">${entry.score}</span>
       </div>`
     )).join("");
+  }
+
+  // -----------------------------------------------------------------------
+  // Multiplayer UI + ghost rendering
+  // -----------------------------------------------------------------------
+
+  private setupMultiplayerUi(container: HTMLElement) {
+    if (!this.multiplayer.isAvailable()) {
+      return;
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "MULTIPLAYER";
+    Object.assign(button.style, {
+      marginTop: "6px",
+      marginBottom: "18px",
+      padding: "10px 22px",
+      borderRadius: "999px",
+      border: "1px solid rgba(127, 214, 255, 0.45)",
+      background: "linear-gradient(180deg, rgba(14, 32, 46, 0.92), rgba(8, 16, 24, 0.82))",
+      boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(173, 232, 255, 0.18)",
+      color: "#d7f8ff",
+      cursor: "pointer",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      fontSize: "13px",
+      fontWeight: "700",
+      letterSpacing: "3px",
+      pointerEvents: "auto",
+    } as CSSStyleDeclaration);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.openMultiplayerLobby();
+    });
+    this.multiplayerButton = button;
+    this.titlePrompt.insertAdjacentElement("afterend", button);
+
+    const panel = document.createElement("div");
+    Object.assign(panel.style, {
+      marginTop: "12px",
+      padding: "16px 18px",
+      borderRadius: "18px",
+      border: "1px solid rgba(127, 214, 255, 0.32)",
+      background: "linear-gradient(180deg, rgba(14, 28, 40, 0.9), rgba(6, 14, 22, 0.78))",
+      boxShadow: "0 16px 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(173, 232, 255, 0.12)",
+      backdropFilter: "blur(10px)",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      color: "#d7f8ff",
+      width: "min(400px, calc(100vw - 40px))",
+      textAlign: "center",
+      pointerEvents: "auto",
+      display: "none",
+    } as CSSStyleDeclaration);
+    panel.addEventListener("click", (event) => event.stopPropagation());
+    panel.addEventListener("touchend", (event) => event.stopPropagation());
+
+    const status = document.createElement("div");
+    Object.assign(status.style, {
+      fontSize: "12px",
+      letterSpacing: "2px",
+      color: "#7fd6ff",
+      marginBottom: "10px",
+    } as CSSStyleDeclaration);
+    status.textContent = "WAITING FOR PLAYERS…";
+    panel.appendChild(status);
+    this.multiplayerStatus = status;
+
+    const buttonRow = document.createElement("div");
+    Object.assign(buttonRow.style, {
+      display: "flex",
+      gap: "8px",
+      justifyContent: "center",
+      flexWrap: "wrap",
+    } as CSSStyleDeclaration);
+
+    const makePanelButton = (label: string, accent: string) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      Object.assign(b.style, {
+        padding: "8px 16px",
+        borderRadius: "999px",
+        border: `1px solid ${accent}`,
+        background: "linear-gradient(180deg, rgba(18, 32, 46, 0.92), rgba(8, 16, 24, 0.82))",
+        color: "#d7f8ff",
+        cursor: "pointer",
+        fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+        fontSize: "12px",
+        fontWeight: "700",
+        letterSpacing: "2px",
+      } as CSSStyleDeclaration);
+      return b;
+    };
+
+    const inviteBtn = makePanelButton("COPY INVITE LINK", "rgba(127, 214, 255, 0.42)");
+    inviteBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.copyInviteLink();
+    });
+    this.multiplayerInviteBtn = inviteBtn;
+    buttonRow.appendChild(inviteBtn);
+
+    const startBtn = makePanelButton("START", "rgba(255, 196, 120, 0.5)");
+    startBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.startGame();
+    });
+    this.multiplayerStartBtn = startBtn;
+    buttonRow.appendChild(startBtn);
+
+    const leaveBtn = makePanelButton("LEAVE", "rgba(255, 120, 120, 0.4)");
+    leaveBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.leaveMultiplayer();
+    });
+    this.multiplayerLeaveBtn = leaveBtn;
+    buttonRow.appendChild(leaveBtn);
+
+    panel.appendChild(buttonRow);
+    this.multiplayerPanel = panel;
+    button.insertAdjacentElement("afterend", panel);
+
+    const labelLayer = document.createElement("div");
+    Object.assign(labelLayer.style, {
+      position: "absolute",
+      inset: "0",
+      pointerEvents: "none",
+      zIndex: "12",
+      overflow: "hidden",
+    } as CSSStyleDeclaration);
+    container.appendChild(labelLayer);
+    this.multiplayerLabelLayer = labelLayer;
+
+    const launchLobby = this.multiplayer.checkLaunchLobby();
+    if (launchLobby) {
+      void this.joinMultiplayerFromLaunch(launchLobby);
+    }
+  }
+
+  private async openMultiplayerLobby(): Promise<void> {
+    if (!this.multiplayer.isAvailable()) return;
+    if (this.multiplayer.isActive()) {
+      this.showMultiplayerPanel();
+      return;
+    }
+    this.setMultiplayerStatus("CREATING LOBBY…");
+    this.showMultiplayerPanel();
+    const id = await this.multiplayer.createLobby();
+    if (!id) {
+      this.setMultiplayerStatus("FAILED TO CREATE LOBBY");
+      return;
+    }
+    this.multiplayerInviteUrl = await this.multiplayer.getInviteLink();
+    this.refreshMultiplayerPanel();
+  }
+
+  private async joinMultiplayerFromLaunch(lobbyId: string): Promise<void> {
+    this.showMultiplayerPanel();
+    this.setMultiplayerStatus("JOINING LOBBY…");
+    const ok = await this.multiplayer.joinLobby(lobbyId);
+    if (!ok) {
+      this.setMultiplayerStatus("FAILED TO JOIN LOBBY");
+      return;
+    }
+    this.multiplayerInviteUrl = await this.multiplayer.getInviteLink();
+    this.refreshMultiplayerPanel();
+  }
+
+  private async copyInviteLink(): Promise<void> {
+    if (!this.multiplayerInviteUrl) {
+      this.multiplayerInviteUrl = await this.multiplayer.getInviteLink();
+    }
+    const link = this.multiplayerInviteUrl;
+    if (!link) {
+      this.setMultiplayerStatus("INVITE LINK UNAVAILABLE");
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(link);
+        this.setMultiplayerStatus("LINK COPIED!");
+        setTimeout(() => this.refreshMultiplayerPanel(), 1500);
+        return;
+      }
+    } catch {
+      // fall through to prompt fallback
+    }
+    try {
+      window.prompt("Copy this invite link:", link);
+    } catch {
+      // ignore
+    }
+  }
+
+  private async leaveMultiplayer(): Promise<void> {
+    await this.multiplayer.leaveLobby();
+    this.clearGhostMeshes();
+    this.multiplayerInviteUrl = null;
+    this.hideMultiplayerPanel();
+  }
+
+  private showMultiplayerPanel() {
+    if (!this.multiplayerPanel) return;
+    this.multiplayerPanel.style.display = "block";
+    this.multiplayerLobbyVisible = true;
+    this.refreshMultiplayerPanel();
+  }
+
+  private hideMultiplayerPanel() {
+    if (!this.multiplayerPanel) return;
+    this.multiplayerPanel.style.display = "none";
+    this.multiplayerLobbyVisible = false;
+  }
+
+  private setMultiplayerStatus(text: string) {
+    if (this.multiplayerStatus) {
+      this.multiplayerStatus.textContent = text;
+    }
+  }
+
+  private refreshMultiplayerPanel() {
+    if (!this.multiplayerPanel || !this.multiplayerLobbyVisible) return;
+    if (!this.multiplayer.isActive()) {
+      this.setMultiplayerStatus("WAITING FOR PLAYERS…");
+      return;
+    }
+    const memberCount = this.multiplayer.getLobbyMemberCount();
+    const peerCount = this.multiplayer.getPeerCount();
+    const total = Math.max(memberCount, peerCount + 1);
+    this.setMultiplayerStatus(
+      total > 1
+        ? `PLAYERS IN LOBBY: ${total}/4 · READY TO CLIMB`
+        : `LOBBY OPEN · SHARE INVITE LINK · ${total}/4`
+    );
+  }
+
+  private ensureGhostVisual(peer: PeerGhost, index: number): GhostVisual {
+    const existing = this.ghostMeshes.get(peer.userId);
+    if (existing) return existing;
+
+    const colorHex = GHOST_COLORS[index % GHOST_COLORS.length];
+    const group = new THREE.Group();
+    const bodyGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.6, 12);
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: colorHex,
+      emissive: colorHex,
+      emissiveIntensity: 0.8,
+      metalness: 0.3,
+      roughness: 0.35,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+    });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.3;
+    group.add(body);
+
+    const eyeGeo = new THREE.SphereGeometry(0.05, 8, 8);
+    const eyeMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+    leftEye.position.set(-0.1, 0.45, 0.25);
+    group.add(leftEye);
+    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+    rightEye.position.set(0.1, 0.45, 0.25);
+    group.add(rightEye);
+
+    this.ghostGroup.add(group);
+
+    const label = document.createElement("div");
+    Object.assign(label.style, {
+      position: "absolute",
+      transform: "translate(-50%, -100%)",
+      padding: "3px 8px",
+      borderRadius: "8px",
+      background: "rgba(8, 12, 18, 0.65)",
+      border: `1px solid #${colorHex.toString(16).padStart(6, "0")}`,
+      color: "#f3faff",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      fontSize: "11px",
+      letterSpacing: "1px",
+      whiteSpace: "nowrap",
+      pointerEvents: "none",
+    } as CSSStyleDeclaration);
+    label.textContent = peer.username;
+    if (this.multiplayerLabelLayer) {
+      this.multiplayerLabelLayer.appendChild(label);
+    }
+
+    const visual: GhostVisual = {
+      group,
+      body,
+      bodyMaterial: bodyMat,
+      eyes: [leftEye, rightEye],
+      label,
+      colorHex,
+    };
+    this.ghostMeshes.set(peer.userId, visual);
+    return visual;
+  }
+
+  private disposeGhostVisual(userId: string) {
+    const visual = this.ghostMeshes.get(userId);
+    if (!visual) return;
+    this.ghostGroup.remove(visual.group);
+    visual.body.geometry.dispose();
+    visual.bodyMaterial.dispose();
+    for (const eye of visual.eyes) {
+      eye.geometry.dispose();
+      (eye.material as THREE.Material).dispose();
+    }
+    if (visual.label.parentElement) {
+      visual.label.parentElement.removeChild(visual.label);
+    }
+    this.ghostMeshes.delete(userId);
+  }
+
+  private clearGhostMeshes() {
+    const userIds = Array.from(this.ghostMeshes.keys());
+    for (const userId of userIds) {
+      this.disposeGhostVisual(userId);
+    }
+  }
+
+  private updateGhosts(dt: number) {
+    const peers = this.multiplayer.getPeers();
+    const seen = new Set<string>();
+    peers.forEach((peer, index) => {
+      seen.add(peer.userId);
+      const visual = this.ensureGhostVisual(peer, index);
+
+      const clock = this.multiplayer.getClock();
+      const span = Math.max(0.02, peer.lastUpdate - peer.prevUpdate);
+      const t = THREE.MathUtils.clamp((clock - peer.lastUpdate) / span + 1, 0, 1.25);
+      const x = THREE.MathUtils.lerp(peer.prevX, peer.x, t);
+      const y = THREE.MathUtils.lerp(peer.prevY, peer.y, t);
+      const z = THREE.MathUtils.lerp(peer.prevZ, peer.z, t);
+      visual.group.position.set(x, y, z);
+      visual.group.rotation.y += dt * 0.6;
+
+      if (this.multiplayerLabelLayer) {
+        this.ghostTmpVec.set(x, y + 0.9, z);
+        this.ghostTmpVec.project(this.camera);
+        const halfW = this.multiplayerLabelLayer.clientWidth * 0.5;
+        const halfH = this.multiplayerLabelLayer.clientHeight * 0.5;
+        const onScreen =
+          this.ghostTmpVec.z > -1 &&
+          this.ghostTmpVec.z < 1 &&
+          Math.abs(this.ghostTmpVec.x) < 1.2 &&
+          Math.abs(this.ghostTmpVec.y) < 1.2;
+        if (onScreen) {
+          const screenX = halfW + this.ghostTmpVec.x * halfW;
+          const screenY = halfH - this.ghostTmpVec.y * halfH;
+          visual.label.style.display = "block";
+          visual.label.style.left = `${screenX}px`;
+          visual.label.style.top = `${screenY}px`;
+          visual.label.textContent = `${peer.username} · ${peer.score}`;
+        } else {
+          visual.label.style.display = "none";
+        }
+      }
+    });
+
+    const existingIds = Array.from(this.ghostMeshes.keys());
+    for (const userId of existingIds) {
+      if (!seen.has(userId)) {
+        this.disposeGhostVisual(userId);
+      }
+    }
   }
 
   private async readSaveData(): Promise<SaveData> {
@@ -1007,6 +1384,14 @@ export class Game {
     this.updateWorld(dt);
     this.updatePlayerLight(dt);
 
+    if (this.multiplayer.isActive()) {
+      // Keep the lobby responsive: drain messages + refresh the panel each
+      // frame while idling on the title screen. Don't broadcast — we're not
+      // playing, so sending (0,0,0) would show stale ghosts to peers.
+      this.multiplayer.pollPeers(dt);
+      this.refreshMultiplayerPanel();
+    }
+
     if (this.input.justPressed("space") || this.input.justPressed("click")) {
       this.startGame();
     }
@@ -1061,6 +1446,12 @@ export class Game {
     this.showTutorialOverlay();
     startAmbientTick();
     startMusic();
+
+    this.hideMultiplayerPanel();
+    if (this.multiplayerButton) {
+      this.multiplayerButton.style.display = "none";
+    }
+    this.clearGhostMeshes();
   }
 
   private pauseGame() {
@@ -1104,10 +1495,26 @@ export class Game {
     this.updateCamera(dt, state);
     this.updatePlayerShadow();
     this.updateHud(dt);
+    this.tickMultiplayer(dt, state);
 
     if (state.gameState === "gameover") {
       this.finishGame(state);
     }
+  }
+
+  private tickMultiplayer(dt: number, state: SimState) {
+    if (!this.multiplayer.isActive()) return;
+    this.multiplayer.update(
+      dt,
+      state.player.x,
+      state.player.y,
+      state.player.z,
+      this.heightMaxReached,
+      this.score,
+      this.bestCombo,
+      state.player.onGround
+    );
+    this.updateGhosts(dt);
   }
 
   private finishGame(state: SimState) {
@@ -1206,6 +1613,46 @@ export class Game {
     this.gameOverCard.classList.remove("hidden");
     this.gameOverLeaderboardPanel.classList.remove("hidden");
     this.shareScoreBtn.classList.remove("hidden");
+
+    if (this.multiplayer.isActive()) {
+      this.renderMultiplayerGameOverBoard();
+      if (this.multiplayerButton) {
+        this.multiplayerButton.style.display = "inline-flex";
+      }
+      this.showMultiplayerPanel();
+    } else if (this.multiplayer.isAvailable()) {
+      if (this.multiplayerButton) {
+        this.multiplayerButton.style.display = "inline-flex";
+      }
+    }
+  }
+
+  private renderMultiplayerGameOverBoard() {
+    const localUsername = this.getLocalUsername();
+    const combined: LeaderboardDisplayEntry[] = [
+      { username: localUsername, score: this.score, rank: 0 },
+      ...this.multiplayer.getPeers().map((peer) => ({
+        username: peer.username,
+        score: peer.score,
+        rank: 0,
+      })),
+    ];
+    combined.sort((a, b) => b.score - a.score);
+    const ranked = combined.map((entry, index) => ({ ...entry, rank: index + 1 }));
+    this.renderLeaderboardList(
+      this.gameOverLeaderboardContext,
+      this.gameOverLeaderboardList,
+      ranked,
+      `MULTIPLAYER RACE · ${ranked.length} PLAYER${ranked.length === 1 ? "" : "S"}`
+    );
+  }
+
+  private getLocalUsername(): string {
+    try {
+      return getUsername();
+    } catch {
+      return "You";
+    }
   }
 
   private updateGameOver(dt: number) {
@@ -1215,6 +1662,12 @@ export class Game {
     if (this.deathAnimTimer > 0) {
       this.deathAnimTimer -= dt;
       this.player.setBodyOpacity(Math.max(0, this.deathAnimTimer / 0.4));
+    }
+
+    if (this.multiplayer.isActive()) {
+      // Keep peers fresh on the post-run lobby screen — no broadcast
+      this.multiplayer.pollPeers(dt);
+      this.refreshMultiplayerPanel();
     }
 
     if (this.input.justPressed("space") || this.input.justPressed("click")) {
