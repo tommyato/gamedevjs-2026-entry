@@ -10,6 +10,8 @@ type GamepadButtonState = {
   click: boolean;
 };
 
+type GamepadConnectionChangeHandler = (connected: boolean) => void;
+
 export class Input {
   private readonly keys = new Map<string, boolean>();
   private readonly prevKeys = new Map<string, boolean>();
@@ -22,6 +24,8 @@ export class Input {
     space: false,
     click: false,
   };
+  private onGamepadConnectionChange: GamepadConnectionChangeHandler | null = null;
+  private lastGamepadSignature: string | null = null;
   private mouseX = 0;
   private mouseY = 0;
   private joystickVector: MovementVector = { x: 0, y: 0 };
@@ -36,7 +40,8 @@ export class Input {
   private touchJoystickThumb: HTMLElement | null = null;
   private touchJump: HTMLElement | null = null;
 
-  init(canvas: HTMLElement) {
+  init(canvas: HTMLElement, onGamepadConnectionChange?: GamepadConnectionChangeHandler) {
+    this.onGamepadConnectionChange = onGamepadConnectionChange ?? null;
     this.touchControlsRoot = document.getElementById("touch-controls");
     this.touchLeftZone = document.getElementById("touch-left-zone");
     this.touchJoystick = document.getElementById("touch-joystick");
@@ -251,6 +256,23 @@ export class Input {
       ? [navigatorGamepads[0], navigatorGamepads[1], navigatorGamepads[2], navigatorGamepads[3]]
           .find((candidate) => candidate && candidate.connected) || null
       : null;
+    const signature = gamepad ? `${gamepad.index}:${gamepad.id}:${gamepad.mapping}` : null;
+
+    if (signature !== this.lastGamepadSignature) {
+      const wasConnected = this.lastGamepadSignature !== null;
+      const isConnected = signature !== null;
+      this.lastGamepadSignature = signature;
+
+      if (this.onGamepadConnectionChange) {
+        if (!wasConnected && isConnected) {
+          this.onGamepadConnectionChange(true);
+        } else if (wasConnected && !isConnected) {
+          this.onGamepadConnectionChange(false);
+        } else if (wasConnected && isConnected) {
+          this.onGamepadConnectionChange(true);
+        }
+      }
+    }
 
     if (!gamepad) {
       return;

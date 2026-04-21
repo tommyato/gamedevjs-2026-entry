@@ -218,9 +218,9 @@ export class Game {
   private readonly visualPowerUpMap = new Map<number, THREE.Mesh>();
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
-  private playerShadow!: THREE.Mesh;
   private shadowLight!: THREE.DirectionalLight;
   private readonly cameraLookTarget = new THREE.Vector3();
+  private readonly shadowCameraOffset = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
   private readonly particles = new ParticleSystem(200);
@@ -343,21 +343,21 @@ export class Game {
     fillLight.position.set(-7, 9, -6);
     this.scene.add(fillLight);
 
-    // Shadow light — straight down for vertical shadow projection (Super Mario Galaxy style).
-    // Follows the player each frame so the ortho frustum stays centered on the action.
-    this.shadowLight = new THREE.DirectionalLight(0xffd6a3, 1.0);
-    this.shadowLight.position.set(0, 30, 0);
+    // Shadow light — angled to the active camera so cast shadows read on the visible
+    // faces of nearby gears and the player instead of collapsing into a flat blob.
+    this.shadowLight = new THREE.DirectionalLight(0xffd6a3, 0.95);
+    this.shadowLight.position.set(8, 26, 8);
     this.shadowLight.target.position.set(0, 0, 0);
     this.shadowLight.castShadow = true;
     this.shadowLight.shadow.mapSize.set(2048, 2048);
-    this.shadowLight.shadow.camera.near = 0.5;
-    this.shadowLight.shadow.camera.far = 60;
-    this.shadowLight.shadow.camera.left = -12;
-    this.shadowLight.shadow.camera.right = 12;
-    this.shadowLight.shadow.camera.top = 12;
-    this.shadowLight.shadow.camera.bottom = -12;
-    this.shadowLight.shadow.bias = -0.002;
-    this.shadowLight.shadow.normalBias = 0.02;
+    this.shadowLight.shadow.camera.near = 1;
+    this.shadowLight.shadow.camera.far = 55;
+    this.shadowLight.shadow.camera.left = -16;
+    this.shadowLight.shadow.camera.right = 16;
+    this.shadowLight.shadow.camera.top = 16;
+    this.shadowLight.shadow.camera.bottom = -16;
+    this.shadowLight.shadow.bias = -0.0007;
+    this.shadowLight.shadow.normalBias = 0.045;
     this.scene.add(this.shadowLight);
     this.scene.add(this.shadowLight.target);
 
@@ -376,7 +376,9 @@ export class Game {
     this.composer.addPass(renderPass);
     this.composer.addPass(this.bloomPass);
 
-    this.input.init(this.renderer.domElement);
+    this.input.init(this.renderer.domElement, (connected) => {
+      this.showToast(connected ? "CONTROLLER CONNECTED" : "CONTROLLER DISCONNECTED");
+    });
 
     const comboGlowOverlay = document.createElement("div");
     comboGlowOverlay.style.position = "absolute";
@@ -416,19 +418,6 @@ export class Game {
     this.scene.add(this.player.mesh);
     this.player.reset(0, 2);
     this.player.mesh.position.set(0, 0.32, 0);
-
-    const shadowGeo = new THREE.CircleGeometry(0.35, 16);
-    const shadowMat = new THREE.MeshBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 0.35,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    this.playerShadow = new THREE.Mesh(shadowGeo, shadowMat);
-    this.playerShadow.rotation.x = -Math.PI / 2;
-    this.playerShadow.visible = false;
-    this.scene.add(this.playerShadow);
 
     const hud = document.getElementById("hud");
     const titleOverlay = document.getElementById("title-overlay");
@@ -1554,7 +1543,6 @@ export class Game {
     this.updateEnvironment(state.player.y);
     this.updateWorld(dt);
     this.updateCamera(dt, state);
-    this.updatePlayerShadow();
     this.updateShadowLight();
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
@@ -1584,7 +1572,6 @@ export class Game {
     this.state = GameState.GameOver;
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
-    this.playerShadow.visible = false;
     stopAmbientTick();
     stopMusic();
     this.deathAnimTimer = 0.4;
@@ -2139,17 +2126,31 @@ export class Game {
 
   private updateShadowLight() {
     const playerPos = this.player.mesh.position;
-    this.shadowLight.position.set(playerPos.x, playerPos.y + 25, playerPos.z);
-    this.shadowLight.target.position.set(playerPos.x, playerPos.y - 10, playerPos.z);
+    const cameraDirX = this.camera.position.x - playerPos.x;
+    const cameraDirZ = this.camera.position.z - playerPos.z;
+    const dirLength = Math.hypot(cameraDirX, cameraDirZ) || 1;
+    const nx = cameraDirX / dirLength;
+    const nz = cameraDirZ / dirLength;
+
+    // Keep the shadow frustum local to the current gameplay bubble and tilt it so
+    // silhouettes land across visible geometry instead of hiding under the camera.
+    this.shadowCameraOffset.set(-nx * 9.5, 0, -nz * 9.5);
+    this.shadowLight.position.set(playerPos.x + this.shadowCameraOffset.x, playerPos.y + 24, playerPos.z + this.shadowCameraOffset.z);
+    this.shadowLight.target.position.set(playerPos.x, playerPos.y + 1.2, playerPos.z);
     this.shadowLight.target.updateMatrixWorld();
   }
 
   private updateGearShadowCasters() {
-    // Only gears within ~15 units vertically of the player cast/receive shadows.
-    // Keeps the shadow map budget focused on what the camera can actually see.
-    const playerY = this.player.mesh.position.y;
+    // Restrict shadow participation to the nearby gameplay volume so the map stays
+    // cheap while still covering the gears that can interact with the player.
+    const playerPos = this.player.mesh.position;
+    const maxHorizontalDistSq = 23 * 23;
+    const maxVerticalDist = 18;
     for (const gear of this.gears) {
-      const withinRange = Math.abs(gear.mesh.position.y - playerY) <= 15;
+      const dx = gear.mesh.position.x - playerPos.x;
+      const dy = gear.mesh.position.y - playerPos.y;
+      const dz = gear.mesh.position.z - playerPos.z;
+      const withinRange = dx * dx + dz * dz <= maxHorizontalDistSq && Math.abs(dy) <= maxVerticalDist;
       gear.mesh.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           child.castShadow = withinRange;
@@ -2654,41 +2655,6 @@ export class Game {
     this.playerLight.position.z = THREE.MathUtils.lerp(this.playerLight.position.z, this.player.mesh.position.z + 2.6, lightLerp);
   }
 
-  private updatePlayerShadow() {
-    let bestY = -Infinity;
-    let foundSurface = false;
-
-    for (const gear of this.gears) {
-      const active = getPrivateBoolean(gear, "active", true);
-      if (!active) continue;
-      const dx = this.player.mesh.position.x - gear.mesh.position.x;
-      const dz = this.player.mesh.position.z - gear.mesh.position.z;
-      const distSq = dx * dx + dz * dz;
-      const gearTop = gear.getTopY();
-
-      if (distSq < (gear.radius + 0.3) ** 2 && gearTop <= this.player.mesh.position.y + 0.1 && gearTop > bestY) {
-        bestY = gearTop;
-        foundSurface = true;
-      }
-    }
-
-    if (foundSurface) {
-      this.playerShadow.visible = true;
-      this.playerShadow.position.set(
-        this.player.mesh.position.x,
-        bestY + 0.02,
-        this.player.mesh.position.z
-      );
-      const distance = Math.max(0, this.player.mesh.position.y - bestY);
-      const opacity = THREE.MathUtils.clamp(0.65 - distance * 0.03, 0.15, 0.65);
-      const scale = THREE.MathUtils.clamp(1 + distance * 0.06, 0.5, 1.6);
-      (this.playerShadow.material as THREE.MeshBasicMaterial).opacity = opacity;
-      this.playerShadow.scale.setScalar(scale);
-    } else {
-      this.playerShadow.visible = false;
-    }
-  }
-
   private triggerLandingShake(strength: number) {
     this.cameraShakeOffset.set(
       randomRange(-strength, strength),
@@ -2874,11 +2840,6 @@ function randomRange(min: number, max: number): number {
 
 function setPrivate(target: object, key: string, value: boolean | number) {
   (target as Record<string, boolean | number>)[key] = value;
-}
-
-function getPrivateBoolean(target: object, key: string, fallback: boolean): boolean {
-  const value = (target as Record<string, unknown>)[key];
-  return typeof value === "boolean" ? value : fallback;
 }
 
 function dtZero(): number {
