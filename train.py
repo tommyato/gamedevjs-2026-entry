@@ -484,7 +484,23 @@ def main() -> int:
     # Clockwork Climb builds to dist/; check dist first, then root.
     sim_path = os.path.join(args.script_dir, "dist", "simulation.mjs")
     if not os.path.exists(sim_path):
-        sim_path = os.path.join(args.script_dir, "simulation.mjs")
+        sim_path_root = os.path.join(args.script_dir, "simulation.mjs")
+        if os.path.exists(sim_path_root):
+            sim_path = sim_path_root
+        else:
+            # Auto-build simulation.mjs from TypeScript source
+            print("[clockwork-climb] simulation.mjs not found, building from TypeScript...")
+            build_cmd = [
+                "npx", "esbuild",
+                os.path.join(args.script_dir, "src", "simulation.ts"),
+                "--bundle", "--format=esm",
+                f"--outfile={sim_path}",
+                "--platform=node",
+            ]
+            build_result = subprocess.run(build_cmd, cwd=args.script_dir, capture_output=True, text=True)
+            if build_result.returncode != 0 or not os.path.exists(sim_path):
+                raise RuntimeError(f"Failed to build simulation.mjs: {build_result.stderr}")
+            print(f"[clockwork-climb] Built {sim_path}")
     # sim-bridge.mjs is a shared utility in the tommyato repo. When the
     # relay invokes this script it injects TOMMYATO_SIM_BRIDGE_PATH; when
     # running standalone fall back to sibling lookup (works for the
