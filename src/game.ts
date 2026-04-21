@@ -25,7 +25,7 @@ import {
   toggleAudio,
 } from "./audio";
 import { BoltCollectible } from "./bolt";
-import { Gear, type GearVariant } from "./gear";
+import { Gear } from "./gear";
 import { Input } from "./input";
 import { ParticleSystem } from "./particles";
 import {
@@ -40,6 +40,8 @@ import {
   unlockAchievement,
 } from "./platform";
 import { Player } from "./player";
+import { ClockworkClimbSimulation } from "./simulation";
+import type { GearVariant, SimAction, SimBolt, SimEvent, SimGear, SimPlayer, SimState } from "./sim-types";
 
 enum GameState {
   Title,
@@ -77,6 +79,8 @@ export class Game {
   private hasRenderedFirstFrame = false;
 
   private readonly input = new Input();
+  private readonly sim = new ClockworkClimbSimulation();
+  private simState: SimState | null = null;
   private state = GameState.Title;
   private score = 0;
   private heightScore = 0;
@@ -84,7 +88,11 @@ export class Game {
   private boltCount = 0;
   private boltScore = 0;
   private highScore = 0;
+  private gameTime = 0;
   private elapsedTime = 0;
+  private nextMilestone = 25;
+  private currentZoneIndex = 0;
+  private bestCombo = 1;
 
   private hud!: HTMLElement;
   private titleOverlay!: HTMLElement;
@@ -119,6 +127,8 @@ export class Game {
   private readonly player = new Player();
   private gears: Gear[] = [];
   private bolts: BoltCollectible[] = [];
+  private readonly visualGearMap = new Map<number, Gear>();
+  private readonly visualBoltMap = new Map<number, BoltCollectible>();
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
   private playerShadow!: THREE.Mesh;
@@ -129,31 +139,22 @@ export class Game {
   private readonly particles = new ParticleSystem(200);
   private readonly backgroundGroup = new THREE.Group();
   private backgroundDecorations: BackgroundDecoration[] = [];
-  private readonly gearTickNextTimes = new Map<Gear, number>();
-  private generationHeight = 0;
-  private generationAngle = 0;
-  private generationCount = 0;
-  private cleanupTimer = 0;
+  private readonly gearTickNextTimes = new Map<number, number>();
+  private backgroundGenerationHeight = 0;
   private cameraKick = 0;
   private readonly cameraShakeOffset = new THREE.Vector3();
   private cameraShakeTimer = 0;
   private readonly cameraShakeDuration = 0.15;
   private closeCallFlashTimer = 0;
   private steamSpawnTimer = 0;
-  private isDying = false;
-  private deathFreezeTimer = 0;
   private deathAnimTimer = 0;
-  private activeGear: Gear | null = null;
-  private orbitAngle = 0;
-  private orbitAngleTarget = Math.PI / 2; // frozen while airborne
-  private readonly orbitRadius = 12;
-  private gameTime = 0;
-  private nextMilestone = 25;
   private toastTimer = 0;
   private zoneAnnouncementTimer = 0;
   private readonly zoneAnnouncementDuration = 2;
-  private readonly unlockedThisRun = new Set<string>();
-  private currentZoneIndex = 0;
+  private tutorialShown = false;
+  private tutorialFadeTimer: number | null = null;
+  private tutorialHideTimer: number | null = null;
+
   private readonly zoneNames = [
     "BRONZE DEPTHS",
     "IRON WORKS",
@@ -161,18 +162,6 @@ export class Game {
     "GOLDEN HEIGHTS",
   ] as const;
 
-  // Combo system
-  private comboLandings = 0;
-  private comboMultiplier = 1;
-  private bestCombo = 1;
-  private timeSinceLastLanding = Infinity;
-  private readonly comboWindow = 2.5;
-  private readonly lastComboGears = new WeakSet<Gear>();
-  private tutorialShown = false;
-  private tutorialFadeTimer: number | null = null;
-  private tutorialHideTimer: number | null = null;
-
-  // Environment transitions
   private readonly sceneBackgroundColor = new THREE.Color(0x140d0a);
   private readonly currentFogColor = new THREE.Color(0x140d0a);
   private readonly currentAmbientColor = new THREE.Color(0xc7aa7a);
@@ -258,9 +247,9 @@ export class Game {
     this.towerBase = new THREE.Mesh(towerGeo, towerMat);
     this.towerBase.position.y = 190;
     this.scene.add(this.towerBase);
+
     this.scene.add(this.backgroundGroup);
     this.scene.add(this.particles.group);
-
     this.scene.add(this.player.mesh);
     this.player.reset(0, 2);
 
@@ -362,13 +351,12 @@ export class Game {
     this.pauseOverlay = pauseOverlay;
     this.pauseBtn = pauseBtn;
 
-    // Sound toggle
     const updateSoundBtn = () => {
       this.soundToggleBtn.textContent = getAudioEnabled() ? "🔊" : "🔇";
     };
     updateSoundBtn();
-    this.soundToggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+    this.soundToggleBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
       toggleAudio();
       updateSoundBtn();
     });
@@ -381,10 +369,9 @@ export class Game {
       window.open(shareUrl, "_blank", "noopener,noreferrer");
     });
 
-    // Escape key: pause during Playing, resume during Paused
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
         if (this.state === GameState.Playing) {
           this.pauseGame();
         } else if (this.state === GameState.Paused) {
@@ -393,29 +380,26 @@ export class Game {
       }
     });
 
-    // Pause overlay: tap/click anywhere to resume (except restart button)
-    this.pauseOverlay.addEventListener("click", (e) => {
-      if (!(e.target as HTMLElement).closest("#pause-restart")) {
+    this.pauseOverlay.addEventListener("click", (event) => {
+      if (!(event.target as HTMLElement).closest("#pause-restart")) {
         this.resumeGame();
       }
     });
-    this.pauseOverlay.addEventListener("touchend", (e) => {
-      if (!(e.target as HTMLElement).closest("#pause-restart")) {
-        e.preventDefault();
+    this.pauseOverlay.addEventListener("touchend", (event) => {
+      if (!(event.target as HTMLElement).closest("#pause-restart")) {
+        event.preventDefault();
         this.resumeGame();
       }
     }, { passive: false });
 
-    // Restart button inside pause overlay
     const pauseRestartBtn = document.getElementById("pause-restart");
-    pauseRestartBtn?.addEventListener("click", (e) => {
-      e.stopPropagation();
+    pauseRestartBtn?.addEventListener("click", (event) => {
+      event.stopPropagation();
       this.startGame();
     });
 
-    // Mobile pause button in HUD
-    this.pauseBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+    this.pauseBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
       if (this.state === GameState.Playing) {
         this.pauseGame();
       }
@@ -432,7 +416,11 @@ export class Game {
     this.titleOverlay.addEventListener("click", handleOverlayActivate);
     this.titleOverlay.addEventListener("touchend", handleOverlayActivate, { passive: false });
 
-    this.resetLevel();
+    this.resetVisualWorld();
+    const { state } = this.sim.reset();
+    this.consumeState(state);
+    this.syncVisuals(state);
+    this.buildBackgroundAtmosphere(this.getMaxGearHeight(state) + 24);
     this.updateHud(dtZero());
     this.updateOverlayText();
     this.input.setTouchControlsVisible(false);
@@ -448,89 +436,523 @@ export class Game {
     await signalLoadComplete();
   }
 
-  private resetLevel() {
-    for (const gear of this.gears) {
+  private resetVisualWorld() {
+    for (const gear of this.visualGearMap.values()) {
       this.scene.remove(gear.mesh);
     }
-    for (const bolt of this.bolts) {
+    for (const bolt of this.visualBoltMap.values()) {
       this.scene.remove(bolt.mesh);
     }
     for (const { mesh } of this.gearShadowMap.values()) {
       this.scene.remove(mesh);
     }
-    this.gearShadowMap.clear();
-    this.backgroundGroup.clear();
-    this.backgroundDecorations = [];
+    this.visualGearMap.clear();
+    this.visualBoltMap.clear();
     this.gears = [];
     this.bolts = [];
+    this.gearShadowMap.clear();
     this.gearTickNextTimes.clear();
+    this.backgroundGroup.clear();
+    this.backgroundDecorations = [];
+    this.backgroundGenerationHeight = 0;
     this.particles.reset();
-    this.generationHeight = 0;
-    this.generationAngle = 0;
-    this.generationCount = 0;
-    this.cleanupTimer = 0;
+  }
 
-    const gearPalette = [0x8c6239, 0xb87333, 0xa67c52, 0x7c5a2c];
+  private loop() {
+    const dt = Math.min(this.clock.getDelta(), 0.05);
+    this.elapsedTime += dt;
+    this.input.update();
 
-    const startGear = new Gear({
-      color: 0x8f6b3d,
-      danger: 0,
-      height: 0.4,
-      radius: 2.6,
-      rotationSpeed: 0.28,
-      variant: "normal",
+    switch (this.state) {
+      case GameState.Title:
+        this.updateTitle(dt);
+        break;
+      case GameState.Playing:
+        this.updatePlaying(dt);
+        break;
+      case GameState.GameOver:
+        this.updateGameOver(dt);
+        break;
+    }
+
+    this.composer.render();
+    if (!this.hasRenderedFirstFrame) {
+      this.hasRenderedFirstFrame = true;
+      signalFirstFrame();
+    }
+    this.input.endFrame();
+  }
+
+  private updateTitle(dt: number) {
+    const t = performance.now() * 0.0003;
+    this.camera.position.set(Math.sin(t) * 8.6, 6.2 + Math.sin(t * 2) * 0.25, Math.cos(t) * 8.6 + 1.2);
+    this.camera.lookAt(0, 4.2, 0);
+
+    this.updateWorld(dt);
+    this.updatePlayerLight(dt);
+
+    if (this.input.justPressed("space") || this.input.justPressed("click")) {
+      this.startGame();
+    }
+  }
+
+  private startGame() {
+    initAudio();
+    playClick();
+    this.resumeAnimationLoop();
+    this.state = GameState.Playing;
+    this.toastTimer = 0;
+    this.zoneAnnouncementTimer = 0;
+    this.cameraKick = 0;
+    this.cameraShakeTimer = 0;
+    this.cameraShakeOffset.set(0, 0, 0);
+    this.closeCallFlashTimer = 0;
+    this.steamSpawnTimer = 0;
+    this.deathAnimTimer = 0;
+    this.closeCallOverlay.style.opacity = "0";
+    this.player.reset(0, 2);
+    this.player.resetVisuals();
+    this.resetVisualWorld();
+
+    const { state, events } = this.sim.reset();
+    this.consumeState(state);
+    this.syncVisuals(state);
+    this.buildBackgroundAtmosphere(this.getMaxGearHeight(state) + 24);
+    this.handleEvents(events, state);
+    this.updateHud(dtZero());
+
+    this.hud.classList.remove("hidden");
+    this.titleOverlay.classList.add("hidden");
+    this.titleOverlay.classList.remove("game-over");
+    this.pauseOverlay.classList.add("hidden");
+    this.gameOverCard.classList.add("hidden");
+    this.shareScoreBtn.classList.add("hidden");
+    this.titleTagline.classList.remove("new-best");
+    this.titleBest.classList.add("hidden");
+    this.zoneAnnouncement.style.opacity = "0";
+    this.zoneAnnouncement.style.transform = "translate(-50%, 12px)";
+    this.input.setTouchControlsVisible(this.input.isTouchDevice());
+    this.showTutorialOverlay();
+    startAmbientTick();
+    startMusic();
+  }
+
+  private pauseGame() {
+    this.state = GameState.Paused;
+    this.pauseOverlay.classList.remove("hidden");
+    this.pauseAnimationLoop();
+    stopMusic();
+    stopAmbientTick();
+  }
+
+  private resumeGame() {
+    this.state = GameState.Playing;
+    this.pauseOverlay.classList.add("hidden");
+    this.resumeAnimationLoop();
+    startMusic();
+    startAmbientTick();
+  }
+
+  private updatePlaying(dt: number) {
+    const action: SimAction = {
+      moveX: this.input.getMovement().x,
+      moveY: this.input.getMovement().y,
+      jump: this.input.justPressed("space"),
+    };
+
+    const { state, events } = this.sim.step(action, dt);
+    this.consumeState(state);
+    this.handleEvents(events, state);
+    this.updatePlayerVisuals(dt, state.player, state.orbitAngle);
+    this.syncVisuals(state);
+    setTickRate(this.heightMaxReached);
+    setMusicIntensity(this.heightMaxReached);
+    this.updateEnvironment(state.player.y);
+    this.updateWorld(dt);
+    this.updateCamera(dt, state);
+    this.updatePlayerShadow();
+    this.updateHud(dt);
+
+    if (state.gameState === "gameover") {
+      this.finishGame(state);
+    }
+  }
+
+  private finishGame(state: SimState) {
+    this.state = GameState.GameOver;
+    this.input.setTouchControlsVisible(false);
+    this.hideTutorialOverlay(true);
+    this.playerShadow.visible = false;
+    stopAmbientTick();
+    stopMusic();
+    this.deathAnimTimer = 0.4;
+    this.closeCallFlashTimer = 0;
+    this.closeCallOverlay.style.opacity = "0";
+
+    void submitScore(this.score).catch((error: unknown) => {
+      console.error("Failed to submit score", error);
     });
-    startGear.setPosition(0, -0.2, 0);
-    this.gears.push(startGear);
-    this.scene.add(startGear.mesh);
 
-    let height = 0;
-    let angle = Math.random() * Math.PI * 2;
-    for (let index = 1; index < 40; index += 1) {
-      const band = getDifficultyBand(height);
-      height += randomRange(band.verticalMin, band.verticalMax);
-      angle += randomRange(0.75, 1.75);
+    if (this.score > 0) unlockAchievement("FIRST_CLIMB");
+    if (this.score >= 500) unlockAchievement("RISING_STAR");
+    if (this.score >= 2000) unlockAchievement("GEAR_MASTER");
 
-      const radius = randomRange(band.radiusMin, band.radiusMax);
-      const distance = randomRange(band.distanceMin, band.distanceMax);
-      const color = gearPalette[Math.floor(Math.random() * gearPalette.length)];
-      const variant = this.pickGearVariant(height);
-      const gear = new Gear({
-        color,
-        danger: band.danger,
-        height: 0.3,
-        radius,
-        rotationSpeed: randomRange(band.rotationMin, band.rotationMax),
-        variant,
-      });
+    const isNewBest = this.score > this.highScore;
+    if (isNewBest) {
+      this.highScore = this.score;
+      localStorage.setItem("gameHighScore", String(this.highScore));
+    }
 
-      gear.setPosition(Math.cos(angle) * distance, height, Math.sin(angle) * distance);
-      this.gears.push(gear);
-      this.scene.add(gear.mesh);
+    this.updateHud(dtZero());
+    this.titleOverlay.classList.remove("hidden");
+    this.titleOverlay.classList.add("game-over");
+    this.titleHeading.textContent = "GAME OVER";
+    if (isNewBest) {
+      this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
+      this.titleTagline.classList.add("new-best");
+    } else {
+      this.titleTagline.textContent = `SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m · BEST ${this.highScore}`;
+      this.titleTagline.classList.remove("new-best");
+    }
+    this.titlePrompt.textContent = this.input.isTouchDevice() ? "TAP TO RESTART" : "PRESS SPACE TO RESTART";
 
-      if (variant !== "crumbling" && Math.random() < 0.3) {
-        const bolt = new BoltCollectible(gear);
+    const gameSeconds = Math.floor(state.gameTime);
+    this.gameOverHeightEl.textContent = String(this.heightScore);
+    this.gameOverBoltsEl.textContent = String(this.boltScore);
+    this.gameOverBoltCountEl.textContent = String(this.boltCount);
+    this.gameOverComboEl.textContent = `x${this.bestCombo}`;
+    this.gameOverTimeEl.textContent = `${gameSeconds}s`;
+    this.gameOverTotalEl.textContent = String(this.score);
+    this.gameOverCard.classList.remove("hidden");
+    this.shareScoreBtn.classList.remove("hidden");
+  }
+
+  private updateGameOver(dt: number) {
+    this.updateWorld(dt);
+    this.updatePlayerLight(dt);
+
+    if (this.deathAnimTimer > 0) {
+      this.deathAnimTimer -= dt;
+      this.player.setBodyOpacity(Math.max(0, this.deathAnimTimer / 0.4));
+    }
+
+    if (this.input.justPressed("space") || this.input.justPressed("click")) {
+      this.startGame();
+    }
+  }
+
+  private consumeState(state: SimState) {
+    this.simState = state;
+    this.score = state.score;
+    this.heightScore = state.heightScore;
+    this.heightMaxReached = state.heightMaxReached;
+    this.boltCount = state.boltCount;
+    this.boltScore = state.boltScore;
+    this.gameTime = state.gameTime;
+    this.nextMilestone = state.nextMilestone;
+    this.currentZoneIndex = state.currentZoneIndex;
+    this.bestCombo = state.bestCombo;
+  }
+
+  private syncVisuals(state: SimState) {
+    let rebuildShadows = false;
+
+    const nextGearIds = new Set(state.gears.map((gear) => gear.id));
+    for (const [id, gear] of this.visualGearMap) {
+      if (nextGearIds.has(id)) {
+        continue;
+      }
+      this.scene.remove(gear.mesh);
+      this.visualGearMap.delete(id);
+      this.gearTickNextTimes.delete(id);
+      const shadow = this.gearShadowMap.get(gear);
+      if (shadow) {
+        this.scene.remove(shadow.mesh);
+        this.gearShadowMap.delete(gear);
+      }
+      rebuildShadows = true;
+    }
+
+    for (const simGear of state.gears) {
+      let gear = this.visualGearMap.get(simGear.id);
+      if (!gear) {
+        gear = this.createGearVisual(simGear);
+        this.visualGearMap.set(simGear.id, gear);
+        this.scene.add(gear.mesh);
+        rebuildShadows = true;
+      }
+      this.applySimGearToVisual(gear, simGear);
+    }
+    this.gears = state.gears.map((gear) => this.visualGearMap.get(gear.id)).filter((gear): gear is Gear => gear !== undefined);
+
+    const nextBoltIds = new Set(state.bolts.map((bolt) => bolt.id));
+    for (const [id, bolt] of this.visualBoltMap) {
+      if (nextBoltIds.has(id)) {
+        continue;
+      }
+      this.scene.remove(bolt.mesh);
+      this.visualBoltMap.delete(id);
+    }
+    for (const simBolt of state.bolts) {
+      let bolt = this.visualBoltMap.get(simBolt.id);
+      if (!bolt) {
+        const gear = this.visualGearMap.get(simBolt.gearId);
+        if (!gear) {
+          continue;
+        }
+        bolt = new BoltCollectible(gear);
         bolt.reset();
-        this.bolts.push(bolt);
+        this.visualBoltMap.set(simBolt.id, bolt);
         this.scene.add(bolt.mesh);
+      }
+      this.applySimBoltToVisual(bolt, simBolt);
+    }
+    this.bolts = state.bolts.map((bolt) => this.visualBoltMap.get(bolt.id)).filter((bolt): bolt is BoltCollectible => bolt !== undefined);
+
+    this.player.mesh.position.set(state.player.x, state.player.y, state.player.z);
+    if (rebuildShadows) {
+      this.rebuildGearDropShadows();
+    }
+    this.ensureBackgroundCoverage(state);
+  }
+
+  private createGearVisual(simGear: SimGear): Gear {
+    const palette = [0x8c6239, 0xb87333, 0xa67c52, 0x7c5a2c];
+    const band = getDifficultyBand(simGear.y);
+    const gear = new Gear({
+      color: palette[simGear.id % palette.length],
+      danger: band.danger,
+      height: simGear.height,
+      radius: simGear.radius,
+      rotationSpeed: simGear.rotationSpeed,
+      variant: simGear.variant as GearVariant,
+    });
+    gear.rotationDir = simGear.rotationDir;
+    return gear;
+  }
+
+  private applySimGearToVisual(gear: Gear, simGear: SimGear) {
+    gear.rotationDir = simGear.rotationDir;
+    setPrivate(gear, "active", simGear.active);
+    setPrivate(gear, "crumbleArmed", simGear.crumbleArmed);
+    setPrivate(gear, "crumbleTimer", simGear.crumbleTimer);
+    setPrivate(gear, "crumbleFallVelocity", simGear.crumbleFallVelocity);
+    setPrivate(gear, "crumbleFallDistance", simGear.crumbleFallDistance);
+    setPrivate(gear, "reverseTimer", simGear.reverseTimer);
+    setPrivate(gear, "reverseInterval", simGear.reverseInterval);
+    setPrivate(gear, "reversePause", simGear.reversePause);
+    setPrivate(gear, "pistonTime", simGear.pistonTime);
+    gear.mesh.position.set(simGear.x, getRenderedGearY(simGear), simGear.z);
+    gear.mesh.rotation.y = simGear.currentRotation;
+  }
+
+  private applySimBoltToVisual(bolt: BoltCollectible, simBolt: SimBolt) {
+    if (!simBolt.available) {
+      setPrivate(bolt, "available", false);
+    }
+  }
+
+  private updatePlayerVisuals(dt: number, simPlayer: SimPlayer, orbitAngle: number) {
+    this.player.mesh.position.set(simPlayer.x, simPlayer.y, simPlayer.z);
+    this.player.velocity.set(simPlayer.vx, simPlayer.vy, simPlayer.vz);
+    this.player.onGround = simPlayer.onGround;
+    this.player.highestY = simPlayer.highestY;
+    this.player.prevY = simPlayer.prevY;
+    setPrivate(this.player, "speedBoostTimer", simPlayer.speedBoostTimer);
+    setPrivate(this.player, "speedBoostStrength", simPlayer.speedBoostStrength);
+    this.player.update(dt, this.input, orbitAngle);
+    this.player.mesh.position.set(simPlayer.x, simPlayer.y, simPlayer.z);
+    this.player.velocity.set(simPlayer.vx, simPlayer.vy, simPlayer.vz);
+    this.player.onGround = simPlayer.onGround;
+    this.player.highestY = simPlayer.highestY;
+    this.player.prevY = simPlayer.prevY;
+  }
+
+  private handleEvents(events: SimEvent[], state: SimState) {
+    for (const event of events) {
+      switch (event.type) {
+        case "gear_land":
+          this.landingEffectPosition.set(event.x, event.y + 0.04, event.z);
+          this.particles.spawnLandingDust(this.landingEffectPosition);
+          this.player.land(event.landingSpeed);
+          playLand(event.landingSpeed / 12);
+          this.cameraKick = Math.min(this.cameraKick + event.landingSpeed * 0.015, 0.28);
+          if (event.nearMiss) {
+            this.triggerCloseCallFlash();
+          }
+          this.triggerLandingShake(event.variant === "crumbling" ? 0.085 : 0.05);
+          break;
+        case "bolt_collect": {
+          const bolt = this.visualBoltMap.get(event.boltId);
+          if (bolt) {
+            setPrivate(bolt, "available", false);
+            setPrivate(bolt, "collectTimer", 0);
+          }
+          playCollect(1 + event.totalBolts * 0.02);
+          this.showToast(`BOLT +5 · ${event.totalBolts} COLLECTED`);
+          break;
+        }
+        case "combo_up":
+          this.showToast(`COMBO x${event.multiplier}!`);
+          playComboLand(event.multiplier);
+          break;
+        case "combo_break":
+          this.showToast("COMBO LOST");
+          break;
+        case "milestone":
+          this.showToast(`CHECKPOINT ${event.height}m`);
+          playMilestone(1 + event.height / 220);
+          break;
+        case "piston_launch":
+          this.landingEffectPosition.set(event.x, event.y, event.z);
+          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          playPistonLaunch();
+          this.showToast("PISTON LAUNCH!");
+          this.cameraKick = Math.min(this.cameraKick + 0.18, 0.34);
+          break;
+        case "speed_boost":
+          this.showToast("SURGE GEAR");
+          break;
+        case "death_start":
+          if (this.simState) {
+            this.particles.spawnDeathBurst(this.player.mesh.position);
+          }
+          this.player.setDyingVisual();
+          this.cameraShakeOffset.set(
+            randomRange(-0.08, 0.08),
+            randomRange(-0.05, 0.05),
+            randomRange(-0.08, 0.08)
+          );
+          this.cameraShakeTimer = this.cameraShakeDuration;
+          playHit();
+          break;
+        case "death":
+          break;
+        case "jump":
+          this.landingEffectPosition.set(event.x, event.y, event.z);
+          playJump();
+          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          this.cameraKick = Math.max(this.cameraKick, 0.12);
+          break;
+        case "gear_block":
+          break;
+        case "zone_change":
+          if (this.state === GameState.Playing) {
+            this.showZoneAnnouncement(event.zoneIndex);
+          }
+          break;
+        case "achievement":
+          unlockAchievement(event.id);
+          break;
       }
     }
 
-    this.buildGearDropShadows();
-    this.generationHeight = height;
-    this.generationAngle = angle;
-    this.generationCount = 40;
-    this.buildBackgroundAtmosphere(height + 24);
+    this.updateComboHud(state.comboMultiplier);
   }
 
-  private buildGearDropShadows() {
+  private updateWorld(dt: number) {
+    if (this.simState) {
+      for (const simGear of this.simState.gears) {
+        const gear = this.visualGearMap.get(simGear.id);
+        if (!gear) {
+          continue;
+        }
+        const nearCamera = Math.abs(getRenderedGearTopY(simGear) - this.camera.position.y) < 18;
+        if (nearCamera && simGear.active && Math.random() < dt * 0.45) {
+          this.particles.spawnGearSpark(gear);
+        }
+
+        if (this.state === GameState.Playing && simGear.active) {
+          const distance = gear.mesh.position.distanceTo(this.player.mesh.position);
+          if (distance <= 15) {
+            const angularSpeed = Math.abs(getSimGearAngularVelocity(simGear));
+            if (angularSpeed < 0.05) {
+              this.gearTickNextTimes.delete(simGear.id);
+              continue;
+            }
+            const teethInterval = (Math.PI * 2) / Math.max(angularSpeed * Math.max(6, Math.floor(gear.radius * 10)), 0.001);
+            const interval = THREE.MathUtils.clamp(teethInterval, 0.25, 1.25);
+            const nextTickAt = this.gearTickNextTimes.get(simGear.id) ?? this.elapsedTime + interval;
+            if (this.elapsedTime >= nextTickAt) {
+              playGearTick(distance, angularSpeed);
+              this.gearTickNextTimes.set(simGear.id, this.elapsedTime + interval);
+            } else if (!this.gearTickNextTimes.has(simGear.id)) {
+              this.gearTickNextTimes.set(simGear.id, nextTickAt);
+            }
+          } else {
+            this.gearTickNextTimes.delete(simGear.id);
+          }
+        }
+      }
+    }
+
+    for (const bolt of this.bolts) {
+      bolt.update(dt, this.elapsedTime);
+    }
+
+    for (const decoration of this.backgroundDecorations) {
+      decoration.mesh.rotation.z += decoration.rotationSpeed * dt;
+    }
+
+    this.updateGearDropShadows();
+    this.updateSteam(dt);
+    this.particles.update(dt, this.player.mesh.position);
+  }
+
+  private updateCamera(dt: number, state: SimState) {
+    const playerX = state.player.x;
+    const playerY = state.player.y;
+    const playerZ = state.player.z;
+    const verticalLead = THREE.MathUtils.clamp(state.player.vy * 0.12, -1.2, 1.6);
+    const followLerp = 1 - Math.exp(-dt * (state.player.onGround ? 5.5 : 4));
+
+    const radius = 12 + Math.max(-state.player.vy * 0.08, 0);
+    const targetCamX = Math.cos(state.orbitAngle) * radius;
+    const targetCamZ = Math.sin(state.orbitAngle) * radius;
+    const targetCamY = playerY + 6.1 + verticalLead + this.cameraKick;
+
+    this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, targetCamX, followLerp);
+    this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, targetCamY, followLerp);
+    this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetCamZ, followLerp);
+
+    this.cameraLookTarget.set(
+      playerX,
+      playerY + 1.3 + verticalLead * 0.35,
+      playerZ
+    );
+    this.camera.lookAt(this.cameraLookTarget);
+
+    const targetFov = THREE.MathUtils.clamp(58 + Math.max(-state.player.vy - 5, 0) * 0.45, 58, 64);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, followLerp);
+    this.camera.updateProjectionMatrix();
+    this.cameraKick = THREE.MathUtils.lerp(this.cameraKick, 0, 1 - Math.exp(-dt * 7));
+
+    if (this.cameraShakeTimer > 0) {
+      const shakeProgress = this.cameraShakeTimer / this.cameraShakeDuration;
+      const shakeEnvelope = shakeProgress * shakeProgress;
+      this.camera.position.addScaledVector(this.cameraShakeOffset, shakeEnvelope);
+      this.cameraShakeTimer = Math.max(0, this.cameraShakeTimer - dt);
+      if (this.cameraShakeTimer === 0) {
+        this.cameraShakeOffset.set(0, 0, 0);
+      }
+    }
+
+    this.updatePlayerLight(dt);
+  }
+
+  private rebuildGearDropShadows() {
+    for (const { mesh } of this.gearShadowMap.values()) {
+      this.scene.remove(mesh);
+    }
+    this.gearShadowMap.clear();
     for (const gear of this.gears) {
       this.addDropShadowForGear(gear);
     }
   }
 
   private addDropShadowForGear(upperGear: Gear) {
-    // Find the nearest gear directly below whose XZ footprint overlaps
     let bestLower: Gear | null = null;
     let bestTopY = -Infinity;
 
@@ -572,6 +994,33 @@ export class Game {
 
     this.scene.add(shadowMesh);
     this.gearShadowMap.set(upperGear, { mesh: shadowMesh, lowerGear: bestLower });
+  }
+
+  private updateGearDropShadows() {
+    for (const [upperGear, { mesh: shadowMesh, lowerGear }] of this.gearShadowMap) {
+      const upperActive = getPrivateBoolean(upperGear, "active", true);
+      const lowerActive = getPrivateBoolean(lowerGear, "active", true);
+      if (!upperActive || !lowerActive) {
+        shadowMesh.visible = false;
+        continue;
+      }
+      shadowMesh.visible = true;
+      shadowMesh.position.x = upperGear.mesh.position.x;
+      shadowMesh.position.z = upperGear.mesh.position.z;
+      shadowMesh.position.y = lowerGear.getTopY() + 0.02;
+    }
+  }
+
+  private ensureBackgroundCoverage(state: SimState) {
+    const maxHeight = this.getMaxGearHeight(state) + 24;
+    if (this.backgroundGenerationHeight === 0) {
+      this.backgroundGenerationHeight = maxHeight;
+      return;
+    }
+    while (this.backgroundGenerationHeight < maxHeight) {
+      this.backgroundGenerationHeight += 10;
+      this.addBackgroundDecorationsAtHeight(this.backgroundGenerationHeight);
+    }
   }
 
   private buildBackgroundAtmosphere(maxHeight: number) {
@@ -643,108 +1092,8 @@ export class Game {
       this.backgroundGroup.add(pipe);
       this.backgroundDecorations.push({ mesh: pipe, rotationSpeed: 0 });
     }
-  }
 
-  private generateAhead() {
-    const gearPalette = [0x8c6239, 0xb87333, 0xa67c52, 0x7c5a2c];
-    let height = this.generationHeight;
-    let angle = this.generationAngle;
-    let batchesGenerated = 0;
-
-    while (height - this.heightMaxReached <= 40 && batchesGenerated < 5) {
-      for (let i = 0; i < 10; i += 1) {
-        const band = getDifficultyBand(height);
-        height += randomRange(band.verticalMin, band.verticalMax);
-        angle += randomRange(0.75, 1.75);
-
-        const radius = randomRange(band.radiusMin, band.radiusMax);
-        const distance = randomRange(band.distanceMin, band.distanceMax);
-        const color = gearPalette[Math.floor(Math.random() * gearPalette.length)];
-        const variant = this.pickGearVariant(height);
-        const gear = new Gear({
-          color,
-          danger: band.danger,
-          height: 0.3,
-          radius,
-          rotationSpeed: randomRange(band.rotationMin, band.rotationMax),
-          variant,
-        });
-
-        gear.setPosition(Math.cos(angle) * distance, height, Math.sin(angle) * distance);
-        this.gears.push(gear);
-        this.scene.add(gear.mesh);
-
-        if (variant !== "crumbling" && Math.random() < 0.3) {
-          const bolt = new BoltCollectible(gear);
-          bolt.reset();
-          // Set initial position to avoid stale (0,0,0) during cleanup checks
-          bolt.mesh.position.set(gear.mesh.position.x, gear.getTopY() + 0.75, gear.mesh.position.z);
-          this.bolts.push(bolt);
-          this.scene.add(bolt.mesh);
-        }
-
-        this.addDropShadowForGear(gear);
-      }
-
-      this.addBackgroundDecorationsAtHeight(height);
-      batchesGenerated += 1;
-    }
-
-    this.generationHeight = height;
-    this.generationAngle = angle;
-    this.generationCount += batchesGenerated * 10;
-  }
-
-  private cleanupBelow(playerY: number) {
-    const cutoffY = playerY - 40;
-
-    const gearsToRemove: Gear[] = [];
-    for (const gear of this.gears) {
-      if (gear.mesh.position.y < cutoffY) {
-        gearsToRemove.push(gear);
-      }
-    }
-
-    const removedGearSet = new Set(gearsToRemove);
-    for (const gear of gearsToRemove) {
-      this.scene.remove(gear.mesh);
-      const idx = this.gears.indexOf(gear);
-      if (idx !== -1) this.gears.splice(idx, 1);
-      this.gearTickNextTimes.delete(gear);
-
-      const shadow = this.gearShadowMap.get(gear);
-      if (shadow) {
-        this.scene.remove(shadow.mesh);
-        this.gearShadowMap.delete(gear);
-      }
-    }
-
-    // For shadows whose lowerGear was removed, recompute against remaining gears
-    const orphanedUpperGears: Gear[] = [];
-    for (const [upperGear, shadowData] of this.gearShadowMap) {
-      if (removedGearSet.has(shadowData.lowerGear)) {
-        this.scene.remove(shadowData.mesh);
-        this.gearShadowMap.delete(upperGear);
-        orphanedUpperGears.push(upperGear);
-      }
-    }
-    for (const upperGear of orphanedUpperGears) {
-      this.addDropShadowForGear(upperGear);
-    }
-
-    const boltsToRemove = this.bolts.filter((b) => b.mesh.position.y < cutoffY);
-    for (const bolt of boltsToRemove) {
-      this.scene.remove(bolt.mesh);
-      const idx = this.bolts.indexOf(bolt);
-      if (idx !== -1) this.bolts.splice(idx, 1);
-    }
-
-    const decsToRemove = this.backgroundDecorations.filter((d) => d.mesh.position.y < cutoffY);
-    for (const dec of decsToRemove) {
-      this.backgroundGroup.remove(dec.mesh);
-      const idx = this.backgroundDecorations.indexOf(dec);
-      if (idx !== -1) this.backgroundDecorations.splice(idx, 1);
-    }
+    this.backgroundGenerationHeight = maxHeight;
   }
 
   private addBackgroundDecorationsAtHeight(baseHeight: number) {
@@ -769,9 +1118,9 @@ export class Game {
     toothMaterial.opacity *= 0.9;
     const toothGeo = new THREE.BoxGeometry(0.28, 0.18, 0.52);
     const toothCount = Math.floor(radius * 8);
-    for (let i = 0; i < toothCount; i += 1) {
+    for (let index = 0; index < toothCount; index += 1) {
       const tooth = new THREE.Mesh(toothGeo, toothMaterial);
-      const toothAngle = (i / toothCount) * Math.PI * 2;
+      const toothAngle = (index / toothCount) * Math.PI * 2;
       tooth.position.set(Math.cos(toothAngle) * radius, 0, Math.sin(toothAngle) * radius);
       tooth.rotation.y = -toothAngle;
       bgGear.add(tooth);
@@ -813,568 +1162,6 @@ export class Game {
       pipe.rotation.y = pipeAngle;
       this.backgroundGroup.add(pipe);
       this.backgroundDecorations.push({ mesh: pipe, rotationSpeed: 0 });
-    }
-  }
-
-  private pickGearVariant(height: number): GearVariant {
-    if (height >= 55 && Math.random() < 0.15) {
-      return "piston";
-    }
-    const roll = Math.random();
-    if (height >= 75 && roll < 0.22) {
-      return "reverse";
-    }
-    if (height >= 45 && roll < 0.38) {
-      return "speed";
-    }
-    if (height >= 30 && roll < 0.54) {
-      return "crumbling";
-    }
-    return "normal";
-  }
-
-  private loop() {
-    const dt = Math.min(this.clock.getDelta(), 0.05);
-    this.elapsedTime += dt;
-    this.input.update();
-
-    switch (this.state) {
-      case GameState.Title:
-        this.updateTitle(dt);
-        break;
-      case GameState.Playing:
-        this.updatePlaying(dt);
-        break;
-      case GameState.GameOver:
-        this.updateGameOver(dt);
-        break;
-    }
-
-    this.composer.render();
-    if (!this.hasRenderedFirstFrame) {
-      this.hasRenderedFirstFrame = true;
-      signalFirstFrame();
-    }
-    this.input.endFrame();
-  }
-
-  private updateTitle(dt: number) {
-    const t = performance.now() * 0.0003;
-    this.camera.position.set(Math.sin(t) * 8.6, 6.2 + Math.sin(t * 2) * 0.25, Math.cos(t) * 8.6 + 1.2);
-    this.camera.lookAt(0, 4.2, 0);
-
-    this.updateWorld(dt);
-    this.updatePlayerLight(dt);
-
-    if (this.input.justPressed("space") || this.input.justPressed("click")) {
-      this.startGame();
-    }
-  }
-
-  private startGame() {
-    initAudio();
-    playClick();
-    this.resumeAnimationLoop();
-    this.state = GameState.Playing;
-    this.score = 0;
-    this.heightScore = 0;
-    this.boltCount = 0;
-    this.boltScore = 0;
-    this.nextMilestone = 25;
-    this.toastTimer = 0;
-    this.zoneAnnouncementTimer = 0;
-    this.currentZoneIndex = 0;
-    this.unlockedThisRun.clear();
-    this.cameraKick = 0;
-    this.orbitAngle = Math.PI / 2;
-    this.orbitAngleTarget = this.orbitAngle;
-    this.isDying = false;
-    this.deathFreezeTimer = 0;
-    this.deathAnimTimer = 0;
-    this.gameTime = 0;
-    this.closeCallFlashTimer = 0;
-    this.cameraShakeTimer = 0;
-    this.cameraShakeOffset.set(0, 0, 0);
-    this.steamSpawnTimer = 0;
-    this.closeCallOverlay.style.opacity = "0";
-    this.comboLandings = 0;
-    this.comboMultiplier = 1;
-    this.bestCombo = 1;
-    this.timeSinceLastLanding = Infinity;
-    this.heightMaxReached = 0;
-    this.updateComboHud();
-    this.player.reset(0, 2);
-    this.resetLevel();
-    this.updateHud(dtZero());
-    this.hud.classList.remove("hidden");
-    this.titleOverlay.classList.add("hidden");
-    this.titleOverlay.classList.remove("game-over");
-    this.pauseOverlay.classList.add("hidden");
-    this.gameOverCard.classList.add("hidden");
-    this.shareScoreBtn.classList.add("hidden");
-    this.titleTagline.classList.remove("new-best");
-    this.titleBest.classList.add("hidden");
-    this.zoneAnnouncement.style.opacity = "0";
-    this.zoneAnnouncement.style.transform = "translate(-50%, 12px)";
-    this.input.setTouchControlsVisible(this.input.isTouchDevice());
-    this.showTutorialOverlay();
-    startAmbientTick();
-    startMusic();
-  }
-
-  private pauseGame() {
-    this.state = GameState.Paused;
-    this.pauseOverlay.classList.remove("hidden");
-    this.pauseAnimationLoop();
-    stopMusic();
-    stopAmbientTick();
-  }
-
-  private resumeGame() {
-    this.state = GameState.Playing;
-    this.pauseOverlay.classList.add("hidden");
-    this.resumeAnimationLoop();
-    startMusic();
-    startAmbientTick();
-  }
-
-  private updatePlaying(dt: number) {
-    // Handle death freeze frame
-    if (this.isDying) {
-      this.deathFreezeTimer -= dt;
-      this.updateWorld(dt);
-      this.updateCamera(dt);
-      this.updatePlayerLight(dt);
-      if (this.deathFreezeTimer <= 0) {
-        this.die();
-      }
-      return;
-    }
-
-    // Ensure gears are always generated ahead of the player
-    this.generateAhead();
-
-    this.gameTime += dt;
-    this.timeSinceLastLanding += dt;
-    if (this.comboLandings > 0 && this.timeSinceLastLanding > this.comboWindow) {
-      this.breakCombo();
-    }
-    setTickRate(this.heightMaxReached);
-    setMusicIntensity(this.heightMaxReached);
-    this.updateEnvironment(this.player.mesh.position.y);
-    this.updateWorld(dt);
-
-    let foundGround = false;
-    const wasOnGround = this.player.onGround;
-    const landingSpeed = Math.max(0, -this.player.velocity.y);
-
-    if (this.player.velocity.y <= 0) {
-      for (const gear of this.gears) {
-        // Prevent landing on a gear the player jumped through from below
-        const gearBottom = gear.mesh.position.y - gear.height / 2;
-        if (this.player.prevY < gearBottom - 0.05) continue;
-
-        const result = gear.checkCollision(this.player.mesh.position, 0.3);
-        if (!result.onGear) {
-          continue;
-        }
-
-        this.player.onGround = true;
-        this.player.mesh.position.y = result.y;
-        this.player.velocity.y = 0;
-
-        if (!wasOnGround) {
-          gear.onPlayerLand();
-          this.player.land(landingSpeed);
-          this.landingEffectPosition.set(this.player.mesh.position.x, result.y + 0.04, this.player.mesh.position.z);
-          this.particles.spawnLandingDust(this.landingEffectPosition);
-          playLand(landingSpeed / 12);
-          this.cameraKick = Math.min(this.cameraKick + landingSpeed * 0.015, 0.28);
-          const nearMissDistance = Math.hypot(
-            this.player.mesh.position.x - gear.mesh.position.x,
-            this.player.mesh.position.z - gear.mesh.position.z
-          );
-          if (nearMissDistance > gear.radius * 0.7) {
-            this.triggerCloseCallFlash();
-          }
-          this.triggerLandingShake(gear.variant === "crumbling" ? 0.085 : 0.05);
-          if (gear.variant === "speed") {
-            this.player.giveSpeedBoost(1.55, 0.9);
-            this.showToast("SURGE GEAR");
-          }
-          this.handleComboLanding(gear);
-          if (gear.variant === "piston") {
-            this.triggerPistonLaunch();
-          }
-        }
-
-        this.player.mesh.position.addScaledVector(result.momentum, dt);
-        this.player.mesh.rotation.y += gear.getAngularVelocity() * dt;
-        this.activeGear = gear;
-        foundGround = true;
-        break;
-      }
-    }
-
-    if (!foundGround) {
-      this.activeGear = null;
-    }
-
-    if (this.player.velocity.y > 0) {
-      for (const gear of this.gears) {
-        const block = gear.checkBlockFromBelow(this.player.mesh.position, 0.6, 0.3);
-        if (block.blocked) {
-          this.player.mesh.position.y = block.capY;
-          this.player.velocity.y = 0;
-          break;
-        }
-      }
-    }
-
-    if (!foundGround) {
-      this.player.onGround = false;
-    }
-
-    const playerFrame = this.player.update(dt, this.input, this.orbitAngle);
-    if (playerFrame.jumped) {
-      playJump();
-      this.particles.spawnJumpSparks(this.player.mesh.position);
-      this.cameraKick = Math.max(this.cameraKick, 0.12);
-    }
-
-    this.handlePoleCollision();
-    this.handleBoltCollection();
-    this.updateCamera(dt);
-    this.updatePlayerShadow();
-    this.updateScores();
-    this.updateHud(dt);
-    this.checkMilestoneAchievements();
-
-    // Periodically remove gears/bolts/decorations far below the player
-    this.cleanupTimer += dt;
-    if (this.cleanupTimer >= 2) {
-      this.cleanupTimer = 0;
-      this.cleanupBelow(this.player.mesh.position.y);
-    }
-
-    if (this.player.mesh.position.y < this.camera.position.y - 12) {
-      this.startDeath();
-    }
-  }
-
-  private startDeath() {
-    this.isDying = true;
-    this.deathFreezeTimer = 0.2;
-    if (this.comboMultiplier > 1) {
-      this.breakCombo();
-    } else {
-      this.comboLandings = 0;
-      this.comboMultiplier = 1;
-      this.updateComboHud();
-    }
-    this.cameraShakeOffset.set(
-      randomRange(-0.08, 0.08),
-      randomRange(-0.05, 0.05),
-      randomRange(-0.08, 0.08)
-    );
-    this.cameraShakeTimer = this.cameraShakeDuration;
-    this.particles.spawnDeathBurst(this.player.mesh.position);
-    this.player.setDyingVisual();
-    playHit();
-  }
-
-  private updateWorld(dt: number) {
-    for (const gear of this.gears) {
-      gear.update(dt);
-      const nearCamera = Math.abs(gear.getTopY() - this.camera.position.y) < 18;
-      if (nearCamera && gear.isSolid() && Math.random() < dt * 0.45) {
-        this.particles.spawnGearSpark(gear);
-      }
-
-      if (this.state === GameState.Playing && gear.isSolid()) {
-        const gearPosition = gear.getPosition(this.landingEffectPosition);
-        const distance = gearPosition.distanceTo(this.player.mesh.position);
-        if (distance <= 15) {
-          const angularSpeed = Math.abs(gear.getAngularVelocity());
-          if (angularSpeed < 0.05) {
-            this.gearTickNextTimes.delete(gear);
-            continue;
-          }
-          const teethInterval = (Math.PI * 2) / Math.max(angularSpeed * Math.max(6, Math.floor(gear.radius * 10)), 0.001);
-          const interval = THREE.MathUtils.clamp(teethInterval, 0.25, 1.25);
-          const nextTickAt = this.gearTickNextTimes.get(gear) ?? this.elapsedTime + interval;
-          if (this.elapsedTime >= nextTickAt) {
-            playGearTick(distance, angularSpeed);
-            this.gearTickNextTimes.set(gear, this.elapsedTime + interval);
-          } else if (!this.gearTickNextTimes.has(gear)) {
-            this.gearTickNextTimes.set(gear, nextTickAt);
-          }
-        } else {
-          this.gearTickNextTimes.delete(gear);
-        }
-      }
-    }
-
-    for (const bolt of this.bolts) {
-      bolt.update(dt, this.elapsedTime);
-    }
-
-    for (const decoration of this.backgroundDecorations) {
-      decoration.mesh.rotation.z += decoration.rotationSpeed * dt;
-    }
-
-    this.updateGearDropShadows();
-    this.updateSteam(dt);
-    this.particles.update(dt, this.player.mesh.position);
-  }
-
-  private updateGearDropShadows() {
-    for (const [upperGear, { mesh: shadowMesh, lowerGear }] of this.gearShadowMap) {
-      if (!upperGear.isSolid() || !lowerGear.isSolid()) {
-        shadowMesh.visible = false;
-        continue;
-      }
-      shadowMesh.visible = true;
-      if (upperGear.variant === "piston") {
-        // Update Y in case the gear surface moves
-        shadowMesh.position.y = lowerGear.getTopY() + 0.02;
-      }
-    }
-  }
-
-  private handlePoleCollision() {
-    const distFromCenter = Math.hypot(this.player.mesh.position.x, this.player.mesh.position.z);
-    const minRadius = 0.8 + 0.3;
-    if (distFromCenter < minRadius && distFromCenter > 0.001) {
-      const pushOut = minRadius / distFromCenter;
-      this.player.mesh.position.x *= pushOut;
-      this.player.mesh.position.z *= pushOut;
-    }
-  }
-
-  private handleBoltCollection() {
-    for (const bolt of this.bolts) {
-      if (!bolt.tryCollect(this.player.mesh.position)) {
-        continue;
-      }
-
-      this.boltCount += 1;
-      this.boltScore += 5;
-      playCollect(1 + this.boltCount * 0.02);
-      this.showToast(`BOLT +5 · ${this.boltCount} COLLECTED`);
-    }
-  }
-
-  private updateCamera(dt: number) {
-    const playerX = this.player.mesh.position.x;
-    const playerY = this.player.mesh.position.y;
-    const playerZ = this.player.mesh.position.z;
-
-    const verticalLead = THREE.MathUtils.clamp(this.player.velocity.y * 0.12, -1.2, 1.6);
-    const followLerp = 1 - Math.exp(-dt * (this.player.onGround ? 5.5 : 4));
-    const orbitLerp = 1 - Math.exp(-dt * 7);
-
-    // Only recompute orbit target when grounded — camera holds steady during jumps
-    // so the player can judge trajectories without the world rotating under them.
-    if (this.player.onGround) {
-      // Height-based orbit spiral — camera rotates ~90° per 40m of climbing.
-      // Creates a dramatic "spiralling around the tower" effect and prevents
-      // the same viewing angle from stacking gears on top of each other.
-      const heightOrbitBias = playerY * (Math.PI / 2) / 40;
-
-      // Player position tracking prevents the central shaft from occluding.
-      const playerDist = Math.hypot(playerX, playerZ);
-      const baseAngle = heightOrbitBias + (playerDist > 0.5
-        ? Math.atan2(playerZ, playerX)
-        : 0);
-
-      // Gear-avoidance nudge — if any nearby gear sits between the camera and the
-      // player (in XZ projection), push the target angle further counterclockwise.
-      let nudge = 0;
-      const maxNudge = 1.3; // ~75° — enough to swing around occluding gears
-      const nudgeStep = 0.05;
-      const angleTolerance = 0.18; // ~10° — how close a gear must be to the cam→player line to count as occluding
-      const verticalWindow = 3;
-
-      // Iteratively search for a clear angle, up to maxNudge
-      for (let step = 0; step <= maxNudge / nudgeStep; step += 1) {
-        const testAngle = baseAngle + nudge;
-        const camX = Math.cos(testAngle) * this.orbitRadius;
-        const camZ = Math.sin(testAngle) * this.orbitRadius;
-        const toPlayerX = playerX - camX;
-        const toPlayerZ = playerZ - camZ;
-        const toPlayerLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
-        const camToPlayerAngle = Math.atan2(toPlayerZ, toPlayerX);
-
-        let clear = true;
-        for (const gear of this.gears) {
-          if (gear === this.activeGear) continue;
-          const gy = gear.mesh.position.y;
-          if (Math.abs(gy - playerY) > verticalWindow) continue;
-          const gx = gear.mesh.position.x;
-          const gz = gear.mesh.position.z;
-          const toGearX = gx - camX;
-          const toGearZ = gz - camZ;
-          const toGearLen = Math.hypot(toGearX, toGearZ) || 1;
-          // Gear must be between camera and player (closer to camera than player is)
-          if (toGearLen >= toPlayerLen) continue;
-          const camToGearAngle = Math.atan2(toGearZ, toGearX);
-          let angleDelta = camToGearAngle - camToPlayerAngle;
-          while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
-          while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
-          // Widen the tolerance by the gear's angular half-width as seen from camera
-          const gearAngularHalf = Math.atan2(gear.radius, toGearLen);
-          if (Math.abs(angleDelta) < angleTolerance + gearAngularHalf) {
-            clear = false;
-            break;
-          }
-        }
-
-        if (clear) break;
-        nudge = Math.min(nudge + nudgeStep, maxNudge);
-      }
-
-      this.orbitAngleTarget = baseAngle + nudge;
-    }
-
-    const targetAngle = this.orbitAngleTarget;
-
-    // Smoothly interpolate orbit angle toward target, handling wrap-around
-    let angleDiff = targetAngle - this.orbitAngle;
-    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-    this.orbitAngle += angleDiff * orbitLerp;
-
-    // Fallback zoom — pull camera back when falling fast
-    const radius = this.orbitRadius + Math.max(-this.player.velocity.y * 0.08, 0);
-
-    const targetCamX = Math.cos(this.orbitAngle) * radius;
-    const targetCamZ = Math.sin(this.orbitAngle) * radius;
-    const targetCamY = playerY + 6.1 + verticalLead + this.cameraKick;
-
-    this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, targetCamX, followLerp);
-    this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, targetCamY, followLerp);
-    this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetCamZ, followLerp);
-
-    this.cameraLookTarget.set(
-      playerX,
-      playerY + 1.3 + verticalLead * 0.35,
-      playerZ
-    );
-    this.camera.lookAt(this.cameraLookTarget);
-
-    const targetFov = THREE.MathUtils.clamp(58 + Math.max(-this.player.velocity.y - 5, 0) * 0.45, 58, 64);
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, followLerp);
-    this.camera.updateProjectionMatrix();
-    this.cameraKick = THREE.MathUtils.lerp(this.cameraKick, 0, 1 - Math.exp(-dt * 7));
-
-    if (this.cameraShakeTimer > 0) {
-      const shakeProgress = this.cameraShakeTimer / this.cameraShakeDuration;
-      const shakeEnvelope = shakeProgress * shakeProgress;
-      this.camera.position.addScaledVector(this.cameraShakeOffset, shakeEnvelope);
-      this.cameraShakeTimer = Math.max(0, this.cameraShakeTimer - dt);
-      if (this.cameraShakeTimer === 0) {
-        this.cameraShakeOffset.set(0, 0, 0);
-      }
-    }
-
-    this.updatePlayerLight(dt);
-  }
-
-  private updateScores() {
-    const currentHeight = Math.max(0, Math.floor(this.player.mesh.position.y));
-    const previousReached = this.heightMaxReached;
-    if (currentHeight > this.heightMaxReached) {
-      const delta = currentHeight - this.heightMaxReached;
-      this.heightMaxReached = currentHeight;
-      this.heightScore += delta * this.comboMultiplier;
-    }
-    this.score = this.heightScore + this.boltScore;
-
-    if (this.heightMaxReached > previousReached && this.heightMaxReached >= this.nextMilestone) {
-      while (this.heightMaxReached >= this.nextMilestone) {
-        this.showToast(`CHECKPOINT ${this.nextMilestone}m`);
-        playMilestone(1 + this.nextMilestone / 220);
-        this.nextMilestone += 25;
-      }
-    }
-  }
-
-  private checkMilestoneAchievements() {
-    const unlock = (id: string) => {
-      if (!this.unlockedThisRun.has(id)) {
-        this.unlockedThisRun.add(id);
-        unlockAchievement(id);
-      }
-    };
-    if (this.heightMaxReached >= 50) unlock('SKY_HIGH');
-    if (this.heightMaxReached >= 100) unlock('CLOUD_WALKER');
-    if (this.boltCount >= 10) unlock('BOLT_COLLECTOR');
-    if (this.boltCount >= 25) unlock('BOLT_HOARDER');
-    if (this.gameTime >= 60) unlock('ENDURANCE');
-  }
-
-  private die() {
-    this.isDying = false;
-    this.state = GameState.GameOver;
-    this.input.setTouchControlsVisible(false);
-    this.hideTutorialOverlay(true);
-    this.playerShadow.visible = false;
-    stopAmbientTick();
-    stopMusic();
-    this.deathAnimTimer = 0.4;
-    this.closeCallFlashTimer = 0;
-    this.closeCallOverlay.style.opacity = "0";
-
-    void submitScore(this.score).catch((error: unknown) => {
-      console.error("Failed to submit score", error);
-    });
-
-    if (this.score > 0) unlockAchievement('FIRST_CLIMB');
-    if (this.score >= 500) unlockAchievement('RISING_STAR');
-    if (this.score >= 2000) unlockAchievement('GEAR_MASTER');
-
-    const isNewBest = this.score > this.highScore;
-    if (isNewBest) {
-      this.highScore = this.score;
-      localStorage.setItem("gameHighScore", String(this.highScore));
-    }
-
-    this.updateHud(dtZero());
-    this.titleOverlay.classList.remove("hidden");
-    this.titleOverlay.classList.add("game-over");
-    this.titleHeading.textContent = "GAME OVER";
-    if (isNewBest) {
-      this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
-      this.titleTagline.classList.add("new-best");
-    } else {
-      this.titleTagline.textContent = `SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m · BEST ${this.highScore}`;
-      this.titleTagline.classList.remove("new-best");
-    }
-    this.titlePrompt.textContent = this.input.isTouchDevice() ? "TAP TO RESTART" : "PRESS SPACE TO RESTART";
-
-    const gameSeconds = Math.floor(this.gameTime);
-    this.gameOverHeightEl.textContent = String(this.heightScore);
-    this.gameOverBoltsEl.textContent = String(this.boltScore);
-    this.gameOverBoltCountEl.textContent = String(this.boltCount);
-    this.gameOverComboEl.textContent = `x${this.bestCombo}`;
-    this.gameOverTimeEl.textContent = `${gameSeconds}s`;
-    this.gameOverTotalEl.textContent = String(this.score);
-    this.gameOverCard.classList.remove("hidden");
-    this.shareScoreBtn.classList.remove("hidden");
-  }
-
-  private updateGameOver(dt: number) {
-    this.updateWorld(dt);
-    this.updatePlayerLight(dt);
-
-    if (this.deathAnimTimer > 0) {
-      this.deathAnimTimer -= dt;
-      this.player.setBodyOpacity(Math.max(0, this.deathAnimTimer / 0.4));
-    }
-
-    if (this.input.justPressed("space") || this.input.justPressed("click")) {
-      this.startGame();
     }
   }
 
@@ -1435,36 +1222,6 @@ export class Game {
     }
   }
 
-  private onResize() {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height);
-    this.composer.setSize(width, height);
-    this.bloomPass.setSize(width, height);
-  }
-
-  private pauseAnimationLoop() {
-    if (!this.animationLoopRunning) {
-      return;
-    }
-
-    this.renderer.setAnimationLoop(null);
-    this.animationLoopRunning = false;
-    this.clock.stop();
-  }
-
-  private resumeAnimationLoop() {
-    if (this.animationLoopRunning) {
-      return;
-    }
-
-    this.clock.start();
-    this.renderer.setAnimationLoop(this.animationLoop);
-    this.animationLoopRunning = true;
-  }
-
   private updateHud(dt: number) {
     this.hudScore.textContent = String(this.score);
     this.hudBest.textContent = String(Math.max(this.highScore, this.score));
@@ -1487,6 +1244,16 @@ export class Game {
     this.zoneAnnouncement.style.transform = `translate(-50%, ${zoneVisible ? (1 - zoneOpacity) * 12 : 12}px)`;
   }
 
+  private updateComboHud(multiplier: number) {
+    if (multiplier > 1) {
+      this.hudCombo.textContent = `COMBO x${multiplier}`;
+      this.hudCombo.classList.add("active");
+    } else {
+      this.hudCombo.textContent = "";
+      this.hudCombo.classList.remove("active");
+    }
+  }
+
   private showToast(message: string) {
     this.hudToast.textContent = message;
     this.toastTimer = 1.3;
@@ -1501,6 +1268,78 @@ export class Game {
     this.zoneAnnouncement.style.transform = "translate(-50%, 0)";
   }
 
+  private updateEnvironment(height: number) {
+    type Zone = {
+      height: number;
+      bg: number;
+      fogDensity: number;
+      ambient: number;
+      ambientIntensity: number;
+      bloom: number;
+    };
+    const zones: Zone[] = [
+      { height: 0, bg: 0x140d0a, fogDensity: 0.014, ambient: 0xc7aa7a, ambientIntensity: 1.35, bloom: 0.18 },
+      { height: 25, bg: 0x0f1318, fogDensity: 0.012, ambient: 0x8899bb, ambientIntensity: 1.5, bloom: 0.22 },
+      { height: 50, bg: 0x181b22, fogDensity: 0.010, ambient: 0xb8c4dd, ambientIntensity: 1.7, bloom: 0.26 },
+      { height: 75, bg: 0x1a1408, fogDensity: 0.008, ambient: 0xffd6a3, ambientIntensity: 2.0, bloom: 0.32 },
+    ];
+
+    let from = zones[0];
+    let to = zones[0];
+    let t = 0;
+    for (let index = 0; index < zones.length - 1; index += 1) {
+      const a = zones[index];
+      const b = zones[index + 1];
+      if (height <= a.height) {
+        from = a;
+        to = a;
+        t = 0;
+        break;
+      }
+      const bandStart = b.height - 5;
+      if (height < bandStart) {
+        from = a;
+        to = a;
+        t = 0;
+        break;
+      }
+      if (height <= b.height) {
+        from = a;
+        to = b;
+        t = (height - bandStart) / 5;
+        break;
+      }
+      if (index === zones.length - 2) {
+        from = b;
+        to = b;
+      }
+    }
+
+    t = THREE.MathUtils.clamp(t, 0, 1);
+    this.zoneBgColor.setHex(from.bg);
+    this.zoneNextBgColor.setHex(to.bg);
+    this.currentFogColor.copy(this.zoneBgColor).lerp(this.zoneNextBgColor, t);
+    this.sceneBackgroundColor.copy(this.currentFogColor);
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.copy(this.sceneBackgroundColor);
+    } else {
+      this.scene.background = this.sceneBackgroundColor.clone();
+    }
+
+    if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.copy(this.currentFogColor);
+      this.scene.fog.density = THREE.MathUtils.lerp(from.fogDensity, to.fogDensity, t);
+    }
+
+    this.zoneAmbientColor.setHex(from.ambient);
+    this.zoneNextAmbientColor.setHex(to.ambient);
+    this.currentAmbientColor.copy(this.zoneAmbientColor).lerp(this.zoneNextAmbientColor, t);
+    this.ambientLight.color.copy(this.currentAmbientColor);
+    this.ambientLight.intensity = THREE.MathUtils.lerp(from.ambientIntensity, to.ambientIntensity, t);
+
+    this.bloomPass.strength = THREE.MathUtils.lerp(from.bloom, to.bloom, t);
+  }
+
   private updatePlayerLight(dt: number) {
     const lightLerp = 1 - Math.exp(-dt * 5);
     this.playerLight.position.x = THREE.MathUtils.lerp(this.playerLight.position.x, this.player.mesh.position.x, lightLerp);
@@ -1513,7 +1352,8 @@ export class Game {
     let foundSurface = false;
 
     for (const gear of this.gears) {
-      if (!gear.isSolid()) continue;
+      const active = getPrivateBoolean(gear, "active", true);
+      if (!active) continue;
       const dx = this.player.mesh.position.x - gear.mesh.position.x;
       const dz = this.player.mesh.position.z - gear.mesh.position.z;
       const distSq = dx * dx + dz * dz;
@@ -1560,7 +1400,7 @@ export class Game {
     this.steamSpawnTimer -= dt;
     while (this.steamSpawnTimer <= 0) {
       this.spawnSteamPuff();
-      this.steamSpawnTimer += randomRange(0.5, 1.0);
+      this.steamSpawnTimer += randomRange(0.5, 1);
     }
 
     if (this.closeCallFlashTimer > 0) {
@@ -1586,165 +1426,72 @@ export class Game {
     }
   }
 
-  private handleComboLanding(gear: Gear) {
-    // Only count combo if this is a different gear from last landing (chaining),
-    // and within the combo window.
-    const withinWindow = this.timeSinceLastLanding <= this.comboWindow;
-    const sameGear = this.lastComboGears.has(gear);
-
-    let progressed = false;
-    if (!sameGear) {
-      if (withinWindow || this.comboLandings === 0) {
-        this.comboLandings += 1;
-      } else {
-        // Window expired: reset to start this as first landing of a new combo
-        this.comboLandings = 1;
-      }
-      progressed = true;
-    }
-
-    // Track most recent gear so re-bounces on same gear don't inflate combo
-    this.lastComboGears.add(gear);
-
-    this.timeSinceLastLanding = 0;
-    const newMultiplier = comboLandingsToMultiplier(this.comboLandings);
-
-    if (newMultiplier > 1 && newMultiplier !== this.comboMultiplier) {
-      this.showToast(`COMBO x${newMultiplier}!`);
-    }
-    this.comboMultiplier = newMultiplier;
-    this.bestCombo = Math.max(this.bestCombo, this.comboMultiplier);
-
-    if (progressed && this.comboMultiplier > 1) {
-      playComboLand(this.comboMultiplier);
-    }
-
-    this.updateComboHud();
+  private onResize() {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height);
+    this.composer.setSize(width, height);
+    this.bloomPass.setSize(width, height);
   }
 
-  private breakCombo() {
-    if (this.comboMultiplier > 1) {
-      this.showToast("COMBO LOST");
+  private pauseAnimationLoop() {
+    if (!this.animationLoopRunning) {
+      return;
     }
-    this.comboLandings = 0;
-    this.comboMultiplier = 1;
-    this.timeSinceLastLanding = Infinity;
-    this.updateComboHud();
+
+    this.renderer.setAnimationLoop(null);
+    this.animationLoopRunning = false;
+    this.clock.stop();
   }
 
-  private updateComboHud() {
-    if (this.comboMultiplier > 1) {
-      this.hudCombo.textContent = `COMBO x${this.comboMultiplier}`;
-      this.hudCombo.classList.add("active");
-    } else {
-      this.hudCombo.textContent = "";
-      this.hudCombo.classList.remove("active");
+  private resumeAnimationLoop() {
+    if (this.animationLoopRunning) {
+      return;
     }
+
+    this.clock.start();
+    this.renderer.setAnimationLoop(this.animationLoop);
+    this.animationLoopRunning = true;
   }
 
-  private triggerPistonLaunch() {
-    this.player.velocity.y = 18;
-    this.player.onGround = false;
-    this.particles.spawnJumpSparks(this.player.mesh.position);
-    this.particles.spawnJumpSparks(this.player.mesh.position);
-    this.particles.spawnJumpSparks(this.player.mesh.position);
-    playPistonLaunch();
-    this.showToast("PISTON LAUNCH!");
-    this.cameraKick = Math.min(this.cameraKick + 0.18, 0.34);
-  }
-
-  private updateEnvironment(height: number) {
-    // Zone waypoints — (heightAtZoneCenter, bg, fogDensity, ambientHex, ambientIntensity, bloomStrength)
-    type Zone = {
-      height: number;
-      bg: number;
-      fogDensity: number;
-      ambient: number;
-      ambientIntensity: number;
-      bloom: number;
-    };
-    const zones: Zone[] = [
-      { height: 0, bg: 0x140d0a, fogDensity: 0.014, ambient: 0xc7aa7a, ambientIntensity: 1.35, bloom: 0.18 },
-      { height: 25, bg: 0x0f1318, fogDensity: 0.012, ambient: 0x8899bb, ambientIntensity: 1.5, bloom: 0.22 },
-      { height: 50, bg: 0x181b22, fogDensity: 0.010, ambient: 0xb8c4dd, ambientIntensity: 1.7, bloom: 0.26 },
-      { height: 75, bg: 0x1a1408, fogDensity: 0.008, ambient: 0xffd6a3, ambientIntensity: 2.0, bloom: 0.32 },
-    ];
-    const zoneIndex = zones.reduce((index, zone, candidateIndex) => (
-      height >= zone.height ? candidateIndex : index
-    ), 0);
-
-    if (this.state === GameState.Playing && zoneIndex > this.currentZoneIndex) {
-      this.showZoneAnnouncement(zoneIndex);
+  private getMaxGearHeight(state: SimState): number {
+    let maxHeight = 0;
+    for (const gear of state.gears) {
+      maxHeight = Math.max(maxHeight, gear.y);
     }
-    this.currentZoneIndex = zoneIndex;
-
-    // Find the two zones to interpolate between, with a ~5m transition band.
-    let from = zones[0];
-    let to = zones[0];
-    let t = 0;
-    for (let i = 0; i < zones.length - 1; i += 1) {
-      const a = zones[i];
-      const b = zones[i + 1];
-      if (height <= a.height) {
-        from = a;
-        to = a;
-        t = 0;
-        break;
-      }
-      // Transition band is [b.height - 5, b.height]
-      const bandStart = b.height - 5;
-      if (height < bandStart) {
-        from = a;
-        to = a;
-        t = 0;
-        break;
-      }
-      if (height <= b.height) {
-        from = a;
-        to = b;
-        t = (height - bandStart) / 5;
-        break;
-      }
-      if (i === zones.length - 2) {
-        from = b;
-        to = b;
-        t = 0;
-      }
-    }
-
-    t = THREE.MathUtils.clamp(t, 0, 1);
-
-    this.zoneBgColor.setHex(from.bg);
-    this.zoneNextBgColor.setHex(to.bg);
-    this.currentFogColor.copy(this.zoneBgColor).lerp(this.zoneNextBgColor, t);
-    this.sceneBackgroundColor.copy(this.currentFogColor);
-    if (this.scene.background instanceof THREE.Color) {
-      this.scene.background.copy(this.sceneBackgroundColor);
-    } else {
-      this.scene.background = this.sceneBackgroundColor.clone();
-    }
-
-    if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.copy(this.currentFogColor);
-      this.scene.fog.density = THREE.MathUtils.lerp(from.fogDensity, to.fogDensity, t);
-    }
-
-    this.zoneAmbientColor.setHex(from.ambient);
-    this.zoneNextAmbientColor.setHex(to.ambient);
-    this.currentAmbientColor.copy(this.zoneAmbientColor).lerp(this.zoneNextAmbientColor, t);
-    this.ambientLight.color.copy(this.currentAmbientColor);
-    this.ambientLight.intensity = THREE.MathUtils.lerp(from.ambientIntensity, to.ambientIntensity, t);
-
-    this.bloomPass.strength = THREE.MathUtils.lerp(from.bloom, to.bloom, t);
+    return maxHeight;
   }
 }
 
-function comboLandingsToMultiplier(landings: number): number {
-  if (landings >= 8) return 5;
-  if (landings >= 6) return 4;
-  if (landings >= 4) return 3;
-  if (landings >= 2) return 2;
-  return 1;
+function getRenderedGearY(gear: SimGear): number {
+  return gear.y - gear.crumbleFallDistance;
+}
+
+function getRenderedGearTopY(gear: SimGear): number {
+  return getRenderedGearY(gear) + gear.height / 2 + 0.12 + getPistonOffset(gear);
+}
+
+function getPistonOffset(gear: SimGear): number {
+  if (gear.variant !== "piston") {
+    return 0;
+  }
+  return Math.sin((gear.pistonTime / 1.5) * Math.PI * 2) * 0.15;
+}
+
+function getSimGearAngularVelocity(gear: SimGear): number {
+  if (!gear.active) {
+    return 0;
+  }
+  if (gear.variant === "reverse") {
+    const cycleTime = gear.reverseTimer % gear.reverseInterval;
+    if (cycleTime >= gear.reverseInterval - gear.reversePause) {
+      return 0;
+    }
+  }
+  const multiplier = gear.variant === "speed" ? 2 : 1;
+  return gear.rotationSpeed * multiplier * gear.rotationDir;
 }
 
 function getDifficultyBand(height: number): DifficultyBand {
@@ -1802,6 +1549,15 @@ function getDifficultyBand(height: number): DifficultyBand {
 
 function randomRange(min: number, max: number): number {
   return min + Math.random() * (max - min);
+}
+
+function setPrivate(target: object, key: string, value: boolean | number) {
+  (target as Record<string, boolean | number>)[key] = value;
+}
+
+function getPrivateBoolean(target: object, key: string, fallback: boolean): boolean {
+  const value = (target as Record<string, unknown>)[key];
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function dtZero(): number {
