@@ -11,6 +11,17 @@
  */
 
 import { Game } from "./game";
+import { mountCharacterSandbox } from "./character-sandbox";
 
-const game = new Game();
-game.start();
+// Check for scene parameter
+const params = new URLSearchParams(window.location.search);
+const scene = params.get("scene");
+
+if (scene === "character") {
+  // Mount character sandbox instead of main game
+  mountCharacterSandbox(document.body);
+} else {
+  // Normal game bootstrap
+  const game = new Game();
+  game.start();
+}
