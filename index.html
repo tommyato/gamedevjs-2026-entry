@@ -12,6 +12,9 @@
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Clockwork Climb — Gamedev.js Jam 2026">
   <meta name="twitter:description" content="Timing-based 3D platformer. Climb a massive clockwork tower as a tiny bronze robot.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
   <title>CLOCKWORK CLIMB — GAMEDEV.JS JAM 2026</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -38,7 +41,7 @@
       pointer-events: none;
       opacity: 1;
       transition: opacity 500ms ease;
-      background: radial-gradient(circle at center, rgba(16, 11, 8, 0.42), rgba(5, 5, 8, 0.72));
+      background: radial-gradient(circle at center, rgba(16, 11, 8, 0.25), rgba(5, 5, 8, 0.45));
     }
     #tutorial-overlay.hidden {
       opacity: 0;
@@ -243,7 +246,7 @@
       backdrop-filter: blur(6px);
     }
     #title-overlay h1 {
-      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 56px; font-weight: 900;
+      font-family: "Orbitron", ui-monospace, monospace; font-size: 56px; font-weight: 900;
       color: #ffaa44; text-shadow: 0 0 60px rgba(255,170,68,0.4);
       letter-spacing: 6px; margin-bottom: 16px; text-align: center;
     }
@@ -286,6 +289,10 @@
       backdrop-filter: blur(10px);
       text-align: left;
     }
+    .game-over-layout {
+      display: grid;
+      gap: 12px;
+    }
     .stat-row {
       display: flex;
       align-items: baseline;
@@ -317,6 +324,56 @@
       font-size: 28px;
       color: #ffaa44;
       text-shadow: 0 0 24px rgba(255,170,68,0.28);
+    }
+    @media (min-aspect-ratio: 4/3) {
+      .game-over-card {
+        max-width: min(520px, calc(100vw - 40px));
+      }
+      .game-over-layout {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 18px;
+        row-gap: 8px;
+      }
+      .game-over-card .stat-row {
+        gap: 10px;
+      }
+      .game-over-card .stat-row + .stat-row {
+        margin-top: 0;
+      }
+      .game-over-card .stat-value {
+        font-size: 18px;
+      }
+      .game-over-card .stat-total {
+        grid-column: 1 / -1;
+      }
+      .game-over-card .stat-total .stat-value {
+        font-size: 22px;
+      }
+      #title-overlay h1 {
+        font-size: 44px;
+        margin-bottom: 10px;
+      }
+      #title-overlay .tagline {
+        margin-bottom: 24px;
+      }
+    }
+
+    @media (min-aspect-ratio: 16/10) {
+      .game-over-card {
+        padding: 14px 20px;
+        margin-bottom: 16px;
+      }
+      .game-over-card .stat-row + .stat-row {
+        margin-top: 8px;
+      }
+      #title-overlay h1 {
+        font-size: 40px;
+        margin-bottom: 8px;
+      }
+      #title-overlay .tagline {
+        font-size: 12px;
+        margin-bottom: 18px;
+      }
     }
     #share-score-btn {
       margin-bottom: 24px;
@@ -574,7 +631,7 @@
       <h1>CLOCKWORK CLIMB</h1>
       <div class="tagline">GAMEDEV.JS JAM 2026 — Theme: MACHINES</div>
       <div id="title-best" class="hidden"></div>
-      <div class="game-over-card hidden">
+      <div class="game-over-card game-over-layout hidden">
         <div class="stat-row"><span class="stat-label">HEIGHT SCORE</span><span class="stat-value" id="go-height"></span></div>
         <div class="stat-row"><span class="stat-label">BOLT SCORE</span><span class="stat-value" id="go-bolts"></span></div>
         <div class="stat-row"><span class="stat-label">BOLTS COLLECTED</span><span class="stat-value" id="go-bolt-count"></span></div>

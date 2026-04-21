@@ -93,7 +93,7 @@ export class Player {
     if (this.onGround && input.justPressed("space")) {
       this.velocity.y = 12;
       this.onGround = false;
-      this.scaleYImpulse = 0.22;
+      this.scaleYImpulse = 0.35;
       jumped = true;
     }
 
@@ -111,15 +111,15 @@ export class Player {
 
     const verticalVelocityFactor = THREE.MathUtils.clamp(this.velocity.y / 14, -1, 1);
     const airborneScaleY = verticalVelocityFactor > 0
-      ? verticalVelocityFactor * 0.12
-      : verticalVelocityFactor * 0.08;
+      ? verticalVelocityFactor * 0.25
+      : verticalVelocityFactor * 0.18;
     const targetScaleY = 1 + airborneScaleY + this.scaleYImpulse;
-    const targetScaleXZ = 1 - (targetScaleY - 1) * 0.45;
-    const scaleLerp = 1 - Math.exp(-dt * 14);
+    const targetScaleXZ = 1 - (targetScaleY - 1) * 0.55;
+    const scaleLerp = 1 - Math.exp(-dt * 18);
     this.visualRoot.scale.x = THREE.MathUtils.lerp(this.visualRoot.scale.x, targetScaleXZ, scaleLerp);
     this.visualRoot.scale.y = THREE.MathUtils.lerp(this.visualRoot.scale.y, targetScaleY, scaleLerp);
     this.visualRoot.scale.z = THREE.MathUtils.lerp(this.visualRoot.scale.z, targetScaleXZ, scaleLerp);
-    this.scaleYImpulse = THREE.MathUtils.lerp(this.scaleYImpulse, 0, 1 - Math.exp(-dt * 10));
+    this.scaleYImpulse = THREE.MathUtils.lerp(this.scaleYImpulse, 0, 1 - Math.exp(-dt * 12));
 
     const targetLean = THREE.MathUtils.clamp(-move.x * 0.16, -0.16, 0.16);
     this.visualRoot.rotation.z = THREE.MathUtils.lerp(
@@ -149,7 +149,7 @@ export class Player {
   }
 
   land(impactSpeed: number) {
-    this.scaleYImpulse = -THREE.MathUtils.clamp(impactSpeed * 0.028, 0.08, 0.22);
+    this.scaleYImpulse = -THREE.MathUtils.clamp(impactSpeed * 0.04, 0.12, 0.32);
   }
 
   giveSpeedBoost(multiplier: number, duration: number) {
