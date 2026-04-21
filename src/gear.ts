@@ -291,12 +291,18 @@ export class Gear {
       return;
     }
 
-    if (this.crumbleTimer >= 0.5) {
-      const shakeStrength = THREE.MathUtils.mapLinear(this.crumbleTimer, 0.5, 1.5, 0.015, 0.08);
-      const time = this.crumbleTimer * 40 + this.shakePhase;
+    if (this.crumbleTimer >= 0.3) {
+      const shakeStrength = THREE.MathUtils.mapLinear(this.crumbleTimer, 0.3, 1.5, 0.03, 0.18);
+      const time = this.crumbleTimer * 50 + this.shakePhase;
       this.mesh.position.copy(this.restPosition);
       this.mesh.position.x += Math.sin(time) * shakeStrength;
       this.mesh.position.z += Math.cos(time * 1.3) * shakeStrength;
+      this.mesh.position.y += Math.sin(time * 2.1) * shakeStrength * 0.3;
+
+      // Warning color: tint body red as crumble progresses
+      const urgency = THREE.MathUtils.mapLinear(this.crumbleTimer, 0.3, 1.5, 0, 0.6);
+      this.bodyMaterial.emissive.setRGB(urgency * 1.2, urgency * 0.15, 0);
+      this.bodyMaterial.emissiveIntensity = 0.3 + urgency * 1.4;
       return;
     }
 

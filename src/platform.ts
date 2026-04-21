@@ -1,6 +1,28 @@
+type WavedashP2POptions = {
+  maxPeers?: number;
+  messageSize?: number;
+  maxIncomingMessages?: number;
+};
+
 type WavedashInitOptions = {
   debug: boolean;
   deferEvents: boolean;
+  p2p?: WavedashP2POptions;
+};
+
+export type LobbyUser = {
+  userId: string;
+  username: string;
+};
+
+export type PeerMessage = {
+  fromUserId: string;
+  payload: Uint8Array;
+};
+
+export type LobbySummary = {
+  id: string;
+  playerCount: number;
 };
 
 type WavedashUser = {
@@ -60,6 +82,18 @@ interface WavedashSdk {
   getStat(statId: string): number;
   requestStats(): Promise<{ success: boolean }>;
   storeStats(): void;
+  createLobby?(type: number, maxPlayers: number): Promise<{ success: boolean; data: string }>;
+  joinLobby?(lobbyId: string): Promise<void>;
+  leaveLobby?(lobbyId: string): Promise<void>;
+  listAvailableLobbies?(): Promise<Array<{ id: string; playerCount: number }>>;
+  getLobbyUsers?(lobbyId: string): Array<{ userId: string; username: string }>;
+  getNumLobbyUsers?(lobbyId: string): number;
+  getLobbyInviteLink?(createIfNone: boolean): Promise<{ success: boolean; data: string }>;
+  getLaunchParams?(): { lobby?: string } | null | undefined;
+  broadcastP2PMessage?(channel: number, reliable: boolean, data: Uint8Array): void;
+  readP2PMessageFromChannel?(channel: number): { fromUserId: string; payload: Uint8Array } | null;
+  addEventListener?(event: string, callback: (e: any) => void): void;
+  Events?: Record<string, string>;
 }
 
 interface YoutubePlayablesGame {
@@ -154,7 +188,11 @@ export async function platformInit() {
     return;
   }
 
-  wavedash.init({ debug: false, deferEvents: true });
+  wavedash.init({
+    debug: false,
+    deferEvents: true,
+    p2p: { maxPeers: 4, messageSize: 4096, maxIncomingMessages: 512 },
+  });
   wavedash.readyForEvents();
 
   for (const slug of LEADERBOARD_SLUGS) {
@@ -466,6 +504,154 @@ function firstString(source: Record<string, unknown>, keys: string[]): string | 
     }
   }
   return null;
+}
+
+// --------------------------------------------------------------------------
+// P2P Multiplayer (Wavedash lobbies + peer-to-peer binary messaging)
+// --------------------------------------------------------------------------
+
+export function isMultiplayerAvailable(): boolean {
+  const sdk = getWavedashSdkSync();
+  return !!(
+    sdk &&
+    typeof sdk.createLobby === "function" &&
+    typeof sdk.joinLobby === "function" &&
+    typeof sdk.broadcastP2PMessage === "function" &&
+    typeof sdk.readP2PMessageFromChannel === "function"
+  );
+}
+
+export async function createMultiplayerLobby(): Promise<string | null> {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.createLobby !== "function") return null;
+  try {
+    const response = await sdk.createLobby(0, 4);
+    if (response && response.success && typeof response.data === "string") {
+      return response.data;
+    }
+  } catch {
+    // lobby creation failed — return null so caller can fall back
+  }
+  return null;
+}
+
+export async function joinMultiplayerLobby(lobbyId: string): Promise<boolean> {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.joinLobby !== "function") return false;
+  try {
+    await sdk.joinLobby(lobbyId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function leaveMultiplayerLobby(lobbyId: string): Promise<void> {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.leaveLobby !== "function") return;
+  try {
+    await sdk.leaveLobby(lobbyId);
+  } catch {
+    // ignore — lobby may already be gone
+  }
+}
+
+export function broadcastPlayerState(data: Uint8Array): void {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.broadcastP2PMessage !== "function") return;
+  try {
+    sdk.broadcastP2PMessage(0, false, data);
+  } catch {
+    // drop message silently — fire-and-forget position updates
+  }
+}
+
+export function readPeerMessages(): PeerMessage[] {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.readP2PMessageFromChannel !== "function") return [];
+  const messages: PeerMessage[] = [];
+  try {
+    // Drain channel 0 until empty; cap iterations to avoid runaway loops.
+    for (let i = 0; i < 256; i++) {
+      const msg = sdk.readP2PMessageFromChannel(0);
+      if (!msg) break;
+      messages.push({ fromUserId: msg.fromUserId, payload: msg.payload });
+    }
+  } catch {
+    // ignore read errors
+  }
+  return messages;
+}
+
+export async function getInviteLink(): Promise<string | null> {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.getLobbyInviteLink !== "function") return null;
+  try {
+    const response = await sdk.getLobbyInviteLink(true);
+    if (response && response.success && typeof response.data === "string") {
+      return response.data;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+export function checkLaunchLobby(): string | null {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.getLaunchParams !== "function") return null;
+  try {
+    const params = sdk.getLaunchParams();
+    if (params && typeof params.lobby === "string" && params.lobby.length > 0) {
+      return params.lobby;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function getLobbyUsers(lobbyId: string): LobbyUser[] {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.getLobbyUsers !== "function") return [];
+  try {
+    const users = sdk.getLobbyUsers(lobbyId);
+    if (Array.isArray(users)) {
+      return users.map((user) => ({
+        userId: String(user.userId ?? ""),
+        username: String(user.username ?? DEFAULT_USERNAME),
+      }));
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export function getLobbyUserCount(lobbyId: string): number {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.getNumLobbyUsers !== "function") return 0;
+  try {
+    const count = sdk.getNumLobbyUsers(lobbyId);
+    return Number.isFinite(count) ? count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function addMultiplayerListener(event: string, callback: (e: any) => void): void {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.addEventListener !== "function") return;
+  try {
+    sdk.addEventListener(event, callback);
+  } catch {
+    // ignore registration errors
+  }
+}
+
+export function getMultiplayerEvents(): Record<string, string> {
+  const sdk = getWavedashSdkSync();
+  return sdk?.Events ?? {};
 }
 
 export type { WavedashSdk, YoutubePlayablesSdk };

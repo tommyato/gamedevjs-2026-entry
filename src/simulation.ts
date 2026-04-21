@@ -1047,7 +1047,56 @@ export class ClockworkClimbSimulation {
     });
   }
 
+  private isPlayerStranded(): boolean {
+    const player = this.state.player;
+    if (!player.onGround) return false;
+
+    // Check if standing on a crumbling gear that's about to fall
+    const activeGear = this.state.activeGearId !== null
+      ? this.state.gears.find((g) => g.id === this.state.activeGearId)
+      : null;
+    if (!activeGear || activeGear.variant !== "crumbling" || !activeGear.crumbleArmed) return false;
+
+    // Only check once crumble is well underway
+    if (activeGear.crumbleTimer < 0.8) return false;
+
+    // Max jump height is ~3.6m (vy=12, gravity=20 → peak at vy²/2g = 3.6)
+    const jumpReach = 4.0;
+    const lateralReach = 5.0; // max horizontal distance during a jump
+
+    for (const gear of this.state.gears) {
+      if (gear.id === activeGear.id) continue;
+      if (!gear.active) continue;
+      // Skip crumbling gears that are already armed (about to fall too)
+      if (gear.variant === "crumbling" && gear.crumbleArmed) continue;
+
+      const dx = gear.x - player.x;
+      const dz = gear.z - player.z;
+      const dy = getGearTopY(gear) - player.y;
+      const horizontalDist = Math.hypot(dx, dz);
+
+      if (horizontalDist <= lateralReach && dy <= jumpReach && dy >= -2) {
+        return false; // Found a reachable gear
+      }
+    }
+    return true; // No reachable gears — player is stranded
+  }
+
   private checkDeath() {
+    // Stranded detection: end game if stuck on a crumbling gear with no escape
+    if (this.state.gameState === "playing" && this.isPlayerStranded()) {
+      this.state.gameState = "dying";
+      this.deathFreezeTimer = 0.2;
+      if (this.state.comboMultiplier > 1) {
+        this.breakCombo();
+      } else {
+        this.state.comboLandings = 0;
+        this.state.comboMultiplier = 1;
+      }
+      this.events.push({ type: "death_start" });
+      return;
+    }
+
     if (this.state.player.y < this.cameraY - 12 && this.state.gameState === "playing") {
       // Shield intercepts the death
       if (this.state.player.shieldActive) {

@@ -46,9 +46,21 @@ import {
   updateStat,
   writeSaveData,
 } from "./platform";
+import { MultiplayerManager, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
 import { ClockworkClimbSimulation } from "./simulation";
 import type { GearVariant, SimAction, SimBolt, SimEvent, SimGear, SimPlayer, SimPowerUp, SimState } from "./sim-types";
+
+const GHOST_COLORS = [0x00ddff, 0xff00dd, 0x00ff88, 0xff8800];
+
+type GhostVisual = {
+  group: THREE.Group;
+  body: THREE.Mesh;
+  bodyMaterial: THREE.MeshStandardMaterial;
+  eyes: THREE.Mesh[];
+  label: HTMLDivElement;
+  colorHex: number;
+};
 
 enum GameState {
   Title,
@@ -210,6 +222,20 @@ export class Game {
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
   private readonly particles = new ParticleSystem(200);
+
+  private readonly multiplayer = new MultiplayerManager();
+  private readonly ghostMeshes: Map<string, GhostVisual> = new Map();
+  private readonly ghostGroup = new THREE.Group();
+  private multiplayerPanel: HTMLDivElement | null = null;
+  private multiplayerButton: HTMLButtonElement | null = null;
+  private multiplayerStatus: HTMLDivElement | null = null;
+  private multiplayerInviteBtn: HTMLButtonElement | null = null;
+  private multiplayerStartBtn: HTMLButtonElement | null = null;
+  private multiplayerLeaveBtn: HTMLButtonElement | null = null;
+  private multiplayerLabelLayer: HTMLDivElement | null = null;
+  private multiplayerLobbyVisible = false;
+  private multiplayerInviteUrl: string | null = null;
+  private readonly ghostTmpVec = new THREE.Vector3();
   private readonly backgroundGroup = new THREE.Group();
   private readonly titleBackdropGroup = new THREE.Group();
   private readonly speedTrailGroup = new THREE.Group();
@@ -365,6 +391,7 @@ export class Game {
 
     this.scene.add(this.backgroundGroup);
     this.scene.add(this.particles.group);
+    this.scene.add(this.ghostGroup);
     this.scene.add(this.player.mesh);
     this.player.reset(0, 2);
 
@@ -539,6 +566,7 @@ export class Game {
     this.buildBackgroundAtmosphere(this.getMaxGearHeight(state) + 24);
     this.buildTitleBackdrop();
     await this.refreshLeaderboardPanels();
+    // TODO: multiplayer UI setup (method not yet implemented)
     this.updateHud(dtZero());
     this.updateOverlayText();
     this.input.setTouchControlsVisible(false);
@@ -722,7 +750,7 @@ export class Game {
       { x: 6.8, y: 6.4, z: -14, scale: 2.7, rotationSpeed: -0.022, radius: 2.7, color: 0x5d8fb3, variant: "wind" as GearVariant },
       { x: -2.0, y: 11.8, z: -16, scale: 3.6, rotationSpeed: 0.018, radius: 3.0, color: 0x8b63d0, variant: "magnetic" as GearVariant },
       { x: 10.2, y: 16.5, z: -18, scale: 4.0, rotationSpeed: -0.015, radius: 3.5, color: 0x5aa95f, variant: "bouncy" as GearVariant },
-      { x: 0.5, y: 2.0, z: -8.5, scale: 4.6, rotationSpeed: 0.012, radius: 3.8, color: 0xffa34d, variant: "speed" as GearVariant },
+      { x: -3.5, y: -1.2, z: -18, scale: 3.2, rotationSpeed: 0.012, radius: 3.0, color: 0xffa34d, variant: "speed" as GearVariant },
     ];
 
     for (const config of configurations) {
@@ -832,7 +860,9 @@ export class Game {
     } else {
       this.speedGearTrailTimer = Math.max(0, this.speedGearTrailTimer - dt);
     }
-    const speedGearActive = this.speedGearTrailTimer > 0;
+    // Only show speed gear trail when player has meaningful velocity
+    const actualSpeed = Math.hypot(state.player.vx, state.player.vy, state.player.vz);
+    const speedGearActive = this.speedGearTrailTimer > 0 && actualSpeed > 3;
 
     const verticalSpeed = Math.abs(state.player.vy);
     const horizontalSpeed = Math.hypot(state.player.vx, state.player.vz);
