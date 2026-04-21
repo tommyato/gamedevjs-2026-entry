@@ -140,6 +140,15 @@
       will-change: transform, opacity, text-shadow;
     }
     #hud-combo.active { opacity: 1; }
+    #hud-double-jump-charges {
+      margin-top: 8px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #6ee7ff;
+      text-shadow: 0 0 12px rgba(110, 231, 255, 0.65), 0 0 24px rgba(110, 231, 255, 0.35);
+      transition: opacity 80ms ease-out;
+    }
     #hud-toast {
       position: absolute;
       top: 76px;
@@ -631,6 +640,7 @@
         </div>
         <div id="hud-status">NEXT 25m</div>
         <div id="hud-combo"></div>
+        <div id="hud-double-jump-charges" style="display:none"></div>
       </div>
       <div id="hud-controls">WASD / ARROWS TO MOVE · SPACE OR TAP TO JUMP</div>
       <button id="pause-btn" type="button" aria-label="Pause">⏸</button>

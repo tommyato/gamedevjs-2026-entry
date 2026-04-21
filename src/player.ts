@@ -20,7 +20,7 @@ export class Player {
   private scaleYImpulse = 0;
   private speedBoostTimer = 0;
   private speedBoostStrength = 1;
-  private doubleJumpAvailable = false;
+  private doubleJumpCharges = 0;
   private doubleJumpPulse = 0;
   public readonly bodyMaterial: THREE.MeshStandardMaterial;
 
@@ -147,19 +147,23 @@ export class Player {
       1 - Math.exp(-dt * 10)
     );
 
-    if (this.doubleJumpAvailable) {
+    const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
+    if (this.doubleJumpCharges > 0) {
       this.doubleJumpPulse += dt * 5.2;
       this.doubleJumpAura.visible = true;
-      const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
-      auraMaterial.opacity = 0.22 + Math.sin(this.doubleJumpPulse) * 0.08;
+      const baseOpacity = 0.15 + Math.min(this.doubleJumpCharges, 9) * 0.03;
+      const targetOpacity = baseOpacity + Math.sin(this.doubleJumpPulse) * 0.05;
+      auraMaterial.opacity = THREE.MathUtils.lerp(auraMaterial.opacity, targetOpacity, 1 - Math.exp(-dt * 6));
       this.doubleJumpAura.scale.setScalar(1 + Math.sin(this.doubleJumpPulse * 1.2) * 0.045);
       this.doubleJumpAura.rotation.z += dt * 1.2;
     } else {
       this.doubleJumpPulse = 0;
-      this.doubleJumpAura.visible = false;
-      this.doubleJumpAura.scale.setScalar(1);
-      const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
-      auraMaterial.opacity = 0;
+      auraMaterial.opacity = THREE.MathUtils.lerp(auraMaterial.opacity, 0, 1 - Math.exp(-dt * 5));
+      if (auraMaterial.opacity < 0.01) {
+        this.doubleJumpAura.visible = false;
+        auraMaterial.opacity = 0;
+        this.doubleJumpAura.scale.setScalar(1);
+      }
     }
 
     return { jumped };
@@ -195,14 +199,10 @@ export class Player {
     this.speedBoostTimer = Math.max(this.speedBoostTimer, duration);
   }
 
-  setDoubleJumpAvailable(available: boolean) {
-    this.doubleJumpAvailable = available;
-    if (!available) {
+  setDoubleJumpCharges(charges: number) {
+    this.doubleJumpCharges = charges;
+    if (charges === 0) {
       this.doubleJumpPulse = 0;
-      this.doubleJumpAura.visible = false;
-      this.doubleJumpAura.scale.setScalar(1);
-      const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
-      auraMaterial.opacity = 0;
     }
   }
 
@@ -215,7 +215,7 @@ export class Player {
     this.scaleYImpulse = 0;
     this.speedBoostTimer = 0;
     this.speedBoostStrength = 1;
-    this.doubleJumpAvailable = false;
+    this.doubleJumpCharges = 0;
     this.doubleJumpPulse = 0;
     this.visualRoot.scale.setScalar(1);
     this.visualRoot.rotation.set(0, 0, 0);

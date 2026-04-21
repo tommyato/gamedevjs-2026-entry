@@ -184,6 +184,8 @@ export class Game {
   private hudToast!: HTMLElement;
   private hudControls!: HTMLElement;
   private hudCombo!: HTMLElement;
+  private hudDoubleJumpCharges!: HTMLElement;
+  private doubleJumpFlashTimer = 0;
   private comboGlowOverlay!: HTMLDivElement;
   private scorePopLayer!: HTMLDivElement;
   private soundToggleBtn!: HTMLElement;
@@ -408,14 +410,14 @@ export class Game {
     container.appendChild(scorePopLayer);
     this.scorePopLayer = scorePopLayer;
 
-    const towerGeo = new THREE.CylinderGeometry(0.8, 0.8, 400, 12);
+    const towerGeo = new THREE.CylinderGeometry(0.8, 0.8, 20000, 12);
     const towerMat = new THREE.MeshStandardMaterial({
       color: 0x6f4a22,
       metalness: 0.8,
       roughness: 0.38,
     });
     this.towerBase = new THREE.Mesh(towerGeo, towerMat);
-    this.towerBase.position.y = 190;
+    this.towerBase.position.y = 9990;
     applyTopDownShadowToObject(this.towerBase, this.topDownShadow.uniforms);
     this.scene.add(this.towerBase);
 
@@ -442,13 +444,14 @@ export class Game {
     const hudToast = document.getElementById("hud-toast");
     const hudControls = document.getElementById("hud-controls");
     const hudCombo = document.getElementById("hud-combo");
+    const hudDoubleJumpCharges = document.getElementById("hud-double-jump-charges");
     const soundToggleBtn = document.getElementById("sound-toggle");
     const closeCallOverlay = document.getElementById("close-call-overlay");
     const tutorialOverlay = document.getElementById("tutorial-overlay");
     const tutorialControls = document.getElementById("tutorial-controls");
     const tutorialObjective = document.getElementById("tutorial-objective");
     const zoneAnnouncement = document.getElementById("zone-announcement");
-    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !soundToggleBtn || !closeCallOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective || !zoneAnnouncement) {
+    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !hudDoubleJumpCharges || !soundToggleBtn || !closeCallOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective || !zoneAnnouncement) {
       throw new Error("Missing HUD elements");
     }
 
@@ -461,6 +464,7 @@ export class Game {
     this.hudToast = hudToast;
     this.hudControls = hudControls;
     this.hudCombo = hudCombo;
+    this.hudDoubleJumpCharges = hudDoubleJumpCharges;
     this.soundToggleBtn = soundToggleBtn;
     this.closeCallOverlay = closeCallOverlay;
     this.tutorialOverlay = tutorialOverlay;
@@ -1596,7 +1600,7 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.landingCueGroup.visible = false;
-    this.player.setDoubleJumpAvailable(false);
+    this.player.setDoubleJumpCharges(0);
     stopAmbientTick();
     stopMusic();
     this.deathAnimTimer = 0.4;
@@ -1904,7 +1908,7 @@ export class Game {
     this.player.prevY = simPlayer.prevY;
     setPrivate(this.player, "speedBoostTimer", simPlayer.speedBoostTimer);
     setPrivate(this.player, "speedBoostStrength", simPlayer.speedBoostStrength);
-    this.player.setDoubleJumpAvailable(simPlayer.doubleJumpUnlocked);
+    this.player.setDoubleJumpCharges(simPlayer.doubleJumpCharges);
     this.player.update(dt, this.input, orbitAngle);
     this.player.mesh.position.set(simPlayer.x, simPlayer.y, simPlayer.z);
     this.player.velocity.set(simPlayer.vx, simPlayer.vy, simPlayer.vz);
@@ -2028,14 +2032,17 @@ export class Game {
           this.particles.spawnJumpSparks(this.landingEffectPosition);
           playJump(1.25);
           this.cameraKick = Math.max(this.cameraKick, 0.16);
+          this.doubleJumpFlashTimer = 0.5;
           break;
         case "powerup_collect":
           if (event.powerUpType === "double_jump") {
             this.landingEffectPosition.set(event.x, event.y, event.z);
             this.particles.spawnJumpSparks(this.landingEffectPosition);
             this.particles.spawnJumpSparks(this.landingEffectPosition);
+            this.showToast(`DOUBLE JUMP +3! (×${state.player.doubleJumpCharges} total)`);
+          } else {
+            this.showToast(getPowerUpDisplayName(event.powerUpType));
           }
-          this.showToast(getPowerUpDisplayName(event.powerUpType));
           playCollect(1.8);
           break;
         case "shield_save":
@@ -2526,6 +2533,19 @@ export class Game {
     this.hudBolts.textContent = String(this.boltCount);
     this.hudStatus.textContent = `HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
     this.updateComboHud(this.simState?.comboMultiplier ?? 1);
+
+    const djCharges = this.simState?.player.doubleJumpCharges ?? 0;
+    this.doubleJumpFlashTimer = Math.max(0, this.doubleJumpFlashTimer - dt);
+    if (djCharges > 0) {
+      this.hudDoubleJumpCharges.textContent = `⬆ ×${djCharges}`;
+      const flashBoost = this.doubleJumpFlashTimer > 0
+        ? 0.3 * Math.sin(this.doubleJumpFlashTimer * 40)
+        : 0;
+      this.hudDoubleJumpCharges.style.opacity = String(Math.min(1, 0.9 + flashBoost));
+      this.hudDoubleJumpCharges.style.display = "block";
+    } else {
+      this.hudDoubleJumpCharges.style.display = "none";
+    }
     this.updateComboGlow(this.simState?.comboMultiplier ?? 1);
 
     this.toastTimer = Math.max(0, this.toastTimer - dt);

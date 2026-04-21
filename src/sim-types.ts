@@ -67,8 +67,7 @@ export type SimPlayer = {
   boltMagnetTimer: number;
   slowMoTimer: number;
   shieldActive: boolean;
-  doubleJumpAvailable: boolean;
-  doubleJumpUnlocked: boolean;
+  doubleJumpCharges: number;
   lastLandedGearX: number;
   lastLandedGearY: number;
   lastLandedGearZ: number;
@@ -116,7 +115,7 @@ export type SimEvent =
   | { type: "death_start" }
   | { type: "death" }
   | { type: "jump"; x: number; y: number; z: number }
-  | { type: "double_jump"; x: number; y: number; z: number }
+  | { type: "double_jump"; x: number; y: number; z: number; remaining: number }
   | { type: "gear_block"; gearId: number; x: number; y: number; z: number; impactSpeed: number }
   | { type: "zone_change"; zoneIndex: number }
   | { type: "achievement"; id: string }
