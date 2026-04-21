@@ -1524,8 +1524,12 @@ export class Game {
     this.challengeZoneBloomBoost = 0;
     this.seenWindGear = false;
     this.seenMagnetGear = false;
+    this.seenGearFreeze = false;
     this.windParticleTimer = 0;
     this.magnetParticleTimer = 0;
+    this.gearFreezeParticleTimer = 0;
+    this.gearFreezeActive = false;
+    this.personalBestReachedThisRun = false;
     this.inChallengeZone = false;
     this.closeCallOverlay.style.opacity = "0";
     this.titleOverlay.style.overflowY = "";
@@ -1557,6 +1561,12 @@ export class Game {
     startAmbientTick();
     startMusic();
     this.landingCueGroup.visible = false;
+
+    if (this.personalBestRing) {
+      this.personalBestRing.position.set(0, this.personalBestHeight, 0);
+      this.personalBestRing.visible = this.personalBestHeight > 0;
+      (this.personalBestRing.material as THREE.MeshBasicMaterial).opacity = 0.3;
+    }
 
     this.hideMultiplayerPanel();
     if (this.multiplayerButton) {
@@ -1609,12 +1619,36 @@ export class Game {
     this.updateWorld(dt);
     this.updateCamera(dt, state);
     this.updateLandingCue(state);
+    this.updatePersonalBestRing(state.player.y);
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
     this.updateAIGhost(dt);
 
+    // Check personal best
+    if (
+      this.personalBestHeight > 0 &&
+      !this.personalBestReachedThisRun &&
+      state.player.y > this.personalBestHeight
+    ) {
+      this.personalBestReachedThisRun = true;
+      this.showToast("NEW PERSONAL BEST!");
+      this.landingEffectPosition.set(state.player.x, state.player.y, state.player.z);
+      this.particles.spawnMilestoneConfetti(this.landingEffectPosition);
+    }
+
     if (state.gameState === "gameover") {
       this.finishGame(state);
+    }
+  }
+
+  private updatePersonalBestRing(playerY: number) {
+    if (!this.personalBestRing || this.personalBestHeight <= 0) return;
+    const dist = Math.abs(playerY - this.personalBestHeight);
+    const shouldBeVisible = dist < 50;
+    this.personalBestRing.visible = shouldBeVisible;
+    if (shouldBeVisible) {
+      const pulse = 0.3 + Math.sin(this.elapsedTime * 1.8) * 0.08;
+      (this.personalBestRing.material as THREE.MeshBasicMaterial).opacity = pulse;
     }
   }
 
@@ -1638,6 +1672,21 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.landingCueGroup.visible = false;
+    if (this.personalBestRing) {
+      this.personalBestRing.visible = false;
+    }
+    // Update personal best height in localStorage
+    if (this.heightMaxReached > this.personalBestHeight) {
+      this.personalBestHeight = this.heightMaxReached;
+      localStorage.setItem("clockwork-personal-best-height", String(this.heightMaxReached));
+    }
+    // Restore gear emissives if freeze was still active at death
+    if (this.gearFreezeActive) {
+      this.gearFreezeActive = false;
+      for (const gear of this.visualGearMap.values()) {
+        gear.setFreezeEmissive(false);
+      }
+    }
     this.player.setDoubleJumpCharges(0);
     this.player.setShieldCount(0);
     stopAmbientTick();
@@ -1843,6 +1892,9 @@ export class Game {
         gear = this.createGearVisual(simGear);
         this.visualGearMap.set(simGear.id, gear);
         this.scene.add(gear.mesh);
+        if (this.gearFreezeActive) {
+          gear.setFreezeEmissive(true);
+        }
       }
       this.applySimGearToVisual(gear, simGear);
     }
@@ -2085,10 +2137,28 @@ export class Game {
           } else if (event.powerUpType === "shield") {
             this.showToast(`SHIELD +1! (${state.player.shieldCount} total)`);
             this.shieldFlashTimer = 0.5;
+          } else if (event.powerUpType === "gear_freeze") {
+            if (!this.seenGearFreeze) {
+              this.seenGearFreeze = true;
+              window.setTimeout(() => this.showToast("GEAR FREEZE — clocks stopped!"), 80);
+            }
+            this.showToast(getPowerUpDisplayName(event.powerUpType));
           } else {
             this.showToast(getPowerUpDisplayName(event.powerUpType));
           }
           playCollect(1.8);
+          break;
+        case "gear_freeze_start":
+          this.gearFreezeActive = true;
+          for (const gear of this.visualGearMap.values()) {
+            gear.setFreezeEmissive(true);
+          }
+          break;
+        case "gear_freeze_end":
+          this.gearFreezeActive = false;
+          for (const gear of this.visualGearMap.values()) {
+            gear.setFreezeEmissive(false);
+          }
           break;
         case "shield_save": {
           const remaining = event.shieldCountRemaining;
@@ -2199,6 +2269,25 @@ export class Game {
         } else {
           this.magnetParticleTimer = 0;
         }
+
+        // Spawn ice crystal particles on nearby gears during gear freeze
+        if (this.gearFreezeActive) {
+          this.gearFreezeParticleTimer -= dt;
+          if (this.gearFreezeParticleTimer <= 0) {
+            this.gearFreezeParticleTimer = 0.14;
+            for (const simGear of this.simState.gears) {
+              if (!simGear.active) continue;
+              const dx = simGear.x - this.simState.player.x;
+              const dz = simGear.z - this.simState.player.z;
+              if (dx * dx + dz * dz > 20 * 20) continue;
+              if (Math.random() > 0.35) continue;
+              const gearPos = new THREE.Vector3(simGear.x, simGear.y + simGear.height / 2, simGear.z);
+              this.particles.spawnIceCrystals(gearPos, simGear.radius);
+            }
+          }
+        } else {
+          this.gearFreezeParticleTimer = 0;
+        }
       }
     }
 
@@ -2302,7 +2391,7 @@ export class Game {
     const dropHeight = Math.max(0, player.y - landingSurface.y);
     const heightT = THREE.MathUtils.clamp(dropHeight / 8, 0, 1);
     const descentT = THREE.MathUtils.clamp(-player.vy / 12, 0, 1);
-    const cueOpacity = THREE.MathUtils.clamp(0.54 - heightT * 0.34 + descentT * 0.08, 0.14, 0.58);
+    const cueOpacity = THREE.MathUtils.clamp(0.54 - heightT * 0.34 + descentT * 0.08, 0.28, 0.58);
     const cueScale = THREE.MathUtils.lerp(0.84, 1.24, heightT);
 
     this.landingCueGroup.visible = true;
@@ -2310,6 +2399,7 @@ export class Game {
     this.landingCueGroup.scale.setScalar(cueScale);
     this.landingCueRingMaterial.opacity = cueOpacity * 0.68;
     this.landingCueCoreMaterial.opacity = cueOpacity * 0.4;
+    this.landingCueGlowMaterial.opacity = cueOpacity * 0.22;
   }
 
   private findLandingSurface(state: SimState): { y: number } | null {
@@ -3070,7 +3160,7 @@ function createPowerUpMesh(type: SimPowerUp["type"]): THREE.Mesh {
     slow_mo: 0x4488ff,
     shield: 0xff8844,
     double_jump: 0x6ee7ff,
-    gear_freeze: 0xaaddff,
+    gear_freeze: 0x88ccff,
   };
   const color = colorMap[type];
   const geo = new THREE.OctahedronGeometry(0.35);
@@ -3090,6 +3180,7 @@ function getPowerUpDisplayName(type: SimPowerUp["type"]): string {
     case "slow_mo": return "SLOW-MO! (3s)";
     case "shield": return "SHIELD +1!";
     case "double_jump": return "DOUBLE JUMP UNLOCKED!";
+    case "gear_freeze": return "GEAR FREEZE! (6s)";
   }
   return "POWER-UP!";
 }
