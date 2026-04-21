@@ -586,14 +586,6 @@ export class Game {
     await signalLoadComplete();
   }
 
-  private initAIGhost() {
-    if (!isAIGhostEnabled()) return;
-    this.aiGhost = new AIGhost("/models/clockwork-climb-v3.json");
-    this.aiGhost.load().then((ok) => {
-      if (!ok) this.aiGhost = null;
-    });
-  }
-
   private createLeaderboardPanels() {
     this.titleLeaderboardPanel = this.buildLeaderboardPanel("TOP 10 SCORES");
     this.titleLeaderboardContext = this.titleLeaderboardPanel.querySelector("[data-role='context']") as HTMLElement;
@@ -1049,6 +1041,87 @@ export class Game {
     for (const userId of existingIds) {
       if (!seen.has(userId)) {
         this.disposeGhostVisual(userId);
+      }
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // AI Ghost (RL-trained agent playing alongside)
+  // -----------------------------------------------------------------------
+
+  private initAIGhost(): void {
+    if (!isAIGhostEnabled()) return;
+    this.aiGhost = new AIGhost("model-weights.json");
+    void this.aiGhost.load().then((ok) => {
+      if (ok) console.log("[game] AI ghost ready");
+    });
+  }
+
+  private resetAIGhost(): void {
+    if (!this.aiGhost?.isReady()) return;
+    this.aiGhost.reset();
+  }
+
+  private updateAIGhost(dt: number): void {
+    if (!this.aiGhost?.isReady()) return;
+    this.aiGhost.update(dt);
+    const gs = this.aiGhost.getGhostState();
+    if (!gs || !gs.alive) return;
+
+    const AID = "__ai_ghost__";
+    if (!this.ghostMeshes.has(AID)) {
+      const c = 0xff4400;
+      const grp = new THREE.Group();
+      const geo = new THREE.CylinderGeometry(0.3, 0.3, 0.6, 12);
+      const mat = new THREE.MeshStandardMaterial({
+        color: c, emissive: c, emissiveIntensity: 0.9,
+        metalness: 0.3, roughness: 0.35, transparent: true, opacity: 0.35, depthWrite: false,
+      });
+      const body = new THREE.Mesh(geo, mat);
+      body.position.y = 0.3;
+      grp.add(body);
+      const eGeo = new THREE.SphereGeometry(0.05, 8, 8);
+      const eMat = new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.9 });
+      const lEye = new THREE.Mesh(eGeo, eMat);
+      lEye.position.set(-0.1, 0.45, 0.25);
+      grp.add(lEye);
+      const rEye = new THREE.Mesh(eGeo, eMat);
+      rEye.position.set(0.1, 0.45, 0.25);
+      grp.add(rEye);
+      this.ghostGroup.add(grp);
+
+      const lbl = document.createElement("div");
+      Object.assign(lbl.style, {
+        position: "absolute", transform: "translate(-50%, -100%)",
+        padding: "3px 8px", borderRadius: "8px",
+        background: "rgba(8,12,18,0.65)", border: "1px solid #ff4400",
+        color: "#ffcc88", fontFamily: 'ui-monospace,"Cascadia Code","Fira Code",monospace',
+        fontSize: "11px", letterSpacing: "1px", whiteSpace: "nowrap", pointerEvents: "none",
+      } as CSSStyleDeclaration);
+      lbl.textContent = "AI";
+      this.multiplayerLabelLayer?.appendChild(lbl);
+
+      this.ghostMeshes.set(AID, { group: grp, body, bodyMaterial: mat, eyes: [lEye, rEye], label: lbl, colorHex: c });
+    }
+
+    const v = this.ghostMeshes.get(AID)!;
+    v.group.position.set(gs.x, gs.y, gs.z);
+    v.group.rotation.y += dt * 0.8;
+
+    if (this.multiplayerLabelLayer) {
+      this.ghostTmpVec.set(gs.x, gs.y + 0.9, gs.z);
+      this.ghostTmpVec.project(this.camera);
+      const hw = this.multiplayerLabelLayer.clientWidth * 0.5;
+      const hh = this.multiplayerLabelLayer.clientHeight * 0.5;
+      const vis = this.ghostTmpVec.z > -1 && this.ghostTmpVec.z < 1 &&
+        Math.abs(this.ghostTmpVec.x) < 1.2 && Math.abs(this.ghostTmpVec.y) < 1.2;
+      if (vis) {
+        v.label.style.display = "block";
+        v.label.style.left = `${hw + this.ghostTmpVec.x * hw}px`;
+        v.label.style.top = `${hh - this.ghostTmpVec.y * hh}px`;
+        v.label.textContent = `AI \u00B7 ${gs.score}`;
+      } else {
+        v.label.style.display = "none";
       }
     }
   }
