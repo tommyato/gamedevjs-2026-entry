@@ -831,17 +831,15 @@ export class ClockworkClimbSimulation {
     const orbitLerp = 1 - Math.exp(-dt * 7);
 
     if (player.onGround) {
-      const heightOrbitBias = player.y * (Math.PI / 2) / 40;
       const playerDist = Math.hypot(player.x, player.z);
-      const baseAngle = heightOrbitBias + (playerDist > 0.5 ? Math.atan2(player.z, player.x) : 0);
-      let nudge = 0;
+      const baseAngle = playerDist > 0.5 ? Math.atan2(player.z, player.x) : this.orbitAngleTarget;
+      let bestNudge = 0;
       const maxNudge = 1.3;
       const nudgeStep = 0.05;
       const angleTolerance = 0.18;
       const verticalWindow = 3;
 
-      for (let step = 0; step <= maxNudge / nudgeStep; step += 1) {
-        const testAngle = baseAngle + nudge;
+      const isClear = (testAngle: number): boolean => {
         const camX = Math.cos(testAngle) * ORBIT_RADIUS;
         const camZ = Math.sin(testAngle) * ORBIT_RADIUS;
         const toPlayerX = player.x - camX;
@@ -849,38 +847,45 @@ export class ClockworkClimbSimulation {
         const toPlayerLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
         const camToPlayerAngle = Math.atan2(toPlayerZ, toPlayerX);
 
-        let clear = true;
         for (const gear of this.state.gears) {
-          if (gear.id === this.state.activeGearId) {
-            continue;
-          }
-          if (Math.abs(gear.y - player.y) > verticalWindow) {
-            continue;
-          }
+          if (gear.id === this.state.activeGearId) continue;
+          if (Math.abs(gear.y - player.y) > verticalWindow) continue;
           const toGearX = gear.x - camX;
           const toGearZ = gear.z - camZ;
           const toGearLen = Math.hypot(toGearX, toGearZ) || 1;
-          if (toGearLen >= toPlayerLen) {
-            continue;
-          }
+          if (toGearLen >= toPlayerLen) continue;
           const camToGearAngle = Math.atan2(toGearZ, toGearX);
           let angleDelta = camToGearAngle - camToPlayerAngle;
           while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
           while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
           const gearAngularHalf = Math.atan2(gear.radius, toGearLen);
           if (Math.abs(angleDelta) < angleTolerance + gearAngularHalf) {
-            clear = false;
+            return false;
+          }
+        }
+        return true;
+      };
+
+      if (!isClear(baseAngle)) {
+        // Try alternating positive/negative nudges to find closest clear angle
+        let found = false;
+        for (let step = 1; step <= maxNudge / nudgeStep; step += 1) {
+          const offset = step * nudgeStep;
+          if (isClear(baseAngle + offset)) {
+            bestNudge = offset;
+            found = true;
+            break;
+          }
+          if (isClear(baseAngle - offset)) {
+            bestNudge = -offset;
+            found = true;
             break;
           }
         }
-
-        if (clear) {
-          break;
-        }
-        nudge = Math.min(nudge + nudgeStep, maxNudge);
+        if (!found) bestNudge = maxNudge;
       }
 
-      this.orbitAngleTarget = baseAngle + nudge;
+      this.orbitAngleTarget = baseAngle + bestNudge;
     }
 
     let angleDiff = this.orbitAngleTarget - this.state.orbitAngle;
