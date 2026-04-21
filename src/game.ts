@@ -226,6 +226,8 @@ export class Game {
   private comboFovPulseTimer = 0;
   private lastComboMultiplier = 1;
   private closeCallFlashTimer = 0;
+  private nearMissSlowTimer = 0;
+  private speedGearTrailTimer = 0;
   private steamSpawnTimer = 0;
   private deathAnimTimer = 0;
   private toastTimer = 0;
@@ -820,12 +822,34 @@ export class Game {
       return;
     }
 
+    // Track when player is on or recently left a speed gear
+    const activeGear = state.activeGearId !== null
+      ? state.gears.find((g) => g.id === state.activeGearId)
+      : null;
+    const onSpeedGear = state.player.onGround && activeGear?.variant === "speed";
+    if (onSpeedGear) {
+      this.speedGearTrailTimer = 0.5;
+    } else {
+      this.speedGearTrailTimer = Math.max(0, this.speedGearTrailTimer - dt);
+    }
+    const speedGearActive = this.speedGearTrailTimer > 0;
+
     const verticalSpeed = Math.abs(state.player.vy);
     const horizontalSpeed = Math.hypot(state.player.vx, state.player.vz);
     const verticalFactor = THREE.MathUtils.clamp((verticalSpeed - 8) / 6, 0, 1);
     const horizontalFactor = THREE.MathUtils.clamp((horizontalSpeed - 5) / 5, 0, 1);
     const boostFactor = THREE.MathUtils.clamp(state.player.speedBoostTimer * 0.4 + state.player.speedBoostStrength * 0.35, 0, 1);
-    const speedFactor = Math.max(verticalFactor, horizontalFactor, boostFactor);
+    const speedGearFactor = speedGearActive ? 0.55 : 0;
+    const speedFactor = Math.max(verticalFactor, horizontalFactor, boostFactor, speedGearFactor);
+
+    // Update trail line colors: blue tint for speed gear, default cyan otherwise
+    const speedGearColor = 0x4488ff;
+    const defaultColors = [0x8ae8ff, 0xaad8ff, 0xffffff];
+    for (let index = 0; index < this.trailSegments.length; index += 1) {
+      this.trailSegments[index].line.material.color.setHex(
+        speedGearActive ? speedGearColor : defaultColors[index % defaultColors.length]
+      );
+    }
 
     if (speedFactor <= 0.02) {
       for (const segment of this.trailSegments) {
@@ -973,6 +997,8 @@ export class Game {
     this.comboFovPulseTimer = 0;
     this.lastComboMultiplier = 1;
     this.closeCallFlashTimer = 0;
+    this.nearMissSlowTimer = 0;
+    this.speedGearTrailTimer = 0;
     this.steamSpawnTimer = 0;
     this.deathAnimTimer = 0;
     this.challengeZoneBloomBoost = 0;
@@ -1024,6 +1050,11 @@ export class Game {
   }
 
   private updatePlaying(dt: number) {
+    if (this.nearMissSlowTimer > 0) {
+      this.nearMissSlowTimer = Math.max(0, this.nearMissSlowTimer - dt);
+      dt *= 0.7;
+    }
+
     const action: SimAction = {
       moveX: this.input.getMovement().x,
       moveY: this.input.getMovement().y,
@@ -1113,6 +1144,13 @@ export class Game {
     this.titleLeaderboardPanel.classList.add("hidden");
     this.buildTitleBackdrop();
     this.titleHeading.textContent = "GAME OVER";
+    Object.assign(this.titleHeading.style, {
+      background: "",
+      backgroundClip: "",
+      webkitBackgroundClip: "",
+      webkitTextFillColor: "",
+      textShadow: "",
+    });
     if (isNewBest) {
       this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
       this.titleTagline.classList.add("new-best");
@@ -1324,6 +1362,7 @@ export class Game {
           this.cameraKick = Math.min(this.cameraKick + event.landingSpeed * 0.015, 0.28);
           if (event.nearMiss) {
             this.triggerCloseCallFlash();
+            this.nearMissSlowTimer = 0.12;
           }
           this.triggerLandingShake(Math.min(Math.abs(event.landingSpeed) * 0.01, 0.15));
           break;
@@ -1341,6 +1380,8 @@ export class Game {
           this.showToast(`COMBO x${event.multiplier}!`);
           playComboLand(event.multiplier);
           this.comboFovPulseTimer = 0.3;
+          this.landingEffectPosition.set(state.player.x, state.player.y, state.player.z);
+          this.particles.spawnComboFireworks(this.landingEffectPosition, event.multiplier);
           break;
         case "combo_break":
           this.showToast("COMBO LOST");
@@ -1776,6 +1817,13 @@ export class Game {
     this.titleLeaderboardPanel.classList.remove("hidden");
     this.gameOverLeaderboardPanel.classList.add("hidden");
     this.titleHeading.textContent = "CLOCKWORK CLIMB";
+    Object.assign(this.titleHeading.style, {
+      background: "linear-gradient(180deg, #cd853f 0%, #ffd700 50%, #cd853f 100%)",
+      backgroundClip: "text",
+      webkitBackgroundClip: "text",
+      webkitTextFillColor: "transparent",
+      textShadow: "0 0 20px rgba(255,180,80,0.4), 0 0 60px rgba(255,140,40,0.15), 0 2px 4px rgba(0,0,0,0.8)",
+    });
     this.titleTagline.textContent = "GAMEDEV.JS JAM 2026 — Theme: MACHINES";
     if (this.highScore > 0) {
       this.titleBest.textContent = `BEST SCORE ${this.highScore} · BEST HEIGHT ${this.saveData.bestHeight}m · BEST COMBO x${this.saveData.bestCombo}`;

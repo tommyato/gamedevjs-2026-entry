@@ -133,6 +133,37 @@ export class ParticleSystem {
     }
   }
 
+  spawnComboFireworks(position: THREE.Vector3, multiplier: number) {
+    const count = 8 + Math.min(multiplier - 1, 7);
+    const color = multiplier >= 7 ? 0xdde8ff : multiplier >= 4 ? 0xffd700 : 0xcd7f32;
+
+    for (let index = 0; index < count; index += 1) {
+      const particle = this.acquire();
+      if (!particle) {
+        return;
+      }
+
+      particle.kind = "spark";
+      particle.life = 0;
+      particle.maxLife = 0.4 + Math.random() * 0.2;
+      particle.drag = 0.9 + Math.random() * 0.3;
+      particle.gravity = 1.8 + Math.random() * 0.8;
+      particle.mesh.visible = true;
+      particle.mesh.position.set(
+        position.x + (Math.random() - 0.5) * 0.6,
+        position.y + 0.5,
+        position.z + (Math.random() - 0.5) * 0.6
+      );
+      const theta = Math.random() * Math.PI * 2;
+      const radial = 0.8 + Math.random() * 1.4;
+      const upward = 3.5 + Math.random() * 2.0;
+      particle.velocity.set(Math.cos(theta) * radial, upward, Math.sin(theta) * radial);
+      this.scale.setScalar(0.045 + Math.random() * 0.03);
+      particle.mesh.scale.copy(this.scale);
+      this.setMaterial(particle, color, 0.95);
+    }
+  }
+
   spawnMilestoneConfetti(position: THREE.Vector3) {
     const count = 20 + Math.floor(Math.random() * 11);
     for (let index = 0; index < count; index += 1) {
