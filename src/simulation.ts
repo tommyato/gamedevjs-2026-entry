@@ -41,6 +41,17 @@ const COMBO_WINDOW = 2.5;
 const BOLT_SCORE_VALUE = 5;
 
 export class ClockworkClimbSimulation {
+  private static readonly DISCRETE_ACTIONS: SimAction[] = [
+    { moveX: 0, moveY: 0, jump: false },    // 0: idle
+    { moveX: -1, moveY: 0, jump: false },   // 1: left
+    { moveX: 1, moveY: 0, jump: false },    // 2: right
+    { moveX: 0, moveY: 1, jump: false },    // 3: forward
+    { moveX: 0, moveY: 0, jump: true },     // 4: jump
+    { moveX: -1, moveY: 0, jump: true },    // 5: left + jump
+    { moveX: 1, moveY: 0, jump: true },     // 6: right + jump
+    { moveX: 0, moveY: 1, jump: true },     // 7: forward + jump
+  ];
+
   private readonly initialSeed: number;
   private readonly fixedDt: number | null;
 
@@ -108,19 +119,22 @@ export class ClockworkClimbSimulation {
     return this.flush();
   }
 
-  step(action: SimAction, dt?: number): { state: SimState; events: SimEvent[] } {
+  step(action: SimAction | number, dt?: number): { state: SimState; events: SimEvent[] } {
+    const resolvedAction = typeof action === 'number'
+      ? ClockworkClimbSimulation.DISCRETE_ACTIONS[action] ?? { moveX: 0, moveY: 0, jump: false }
+      : action;
     const stepDt = this.fixedDt ?? (Number.isFinite(dt) ? Number(dt) : DEFAULT_FIXED_DT);
     if (stepDt <= 0) {
-      return this.flush();
+      return this.flushBridge();
     }
 
     if (this.state.gameState === "gameover" || this.state.gameState === "title") {
-      return this.flush();
+      return this.flushBridge();
     }
 
     if (this.state.gameState === "dying") {
       this.advanceDying(stepDt);
-      return this.flush();
+      return this.flushBridge();
     }
 
     this.state.elapsedTime += stepDt;
@@ -135,7 +149,7 @@ export class ClockworkClimbSimulation {
     this.updateGears(stepDt);
     this.resolveGrounding(stepDt);
     this.resolveCeilingBlock();
-    this.advancePlayer(action, stepDt);
+    this.advancePlayer(resolvedAction, stepDt);
     this.handlePoleCollision();
     this.updateBoltPositions();
     this.updatePowerUpPositions();
@@ -153,7 +167,7 @@ export class ClockworkClimbSimulation {
     this.checkAchievements();
     this.checkDeath();
 
-    return this.flush();
+    return this.flushBridge();
   }
 
   getState(): SimState {
@@ -1095,6 +1109,13 @@ export class ClockworkClimbSimulation {
       }
     }
     return nearest;
+  }
+
+  private flushBridge(): { state: SimState; events: SimEvent[] } {
+    const result = this.flush();
+    (result.state as any).gameOver = result.state.gameState === 'gameover';
+    (result.state as any).alive = result.state.gameState !== 'gameover';
+    return result;
   }
 
   private flush(): { state: SimState; events: SimEvent[] } {
