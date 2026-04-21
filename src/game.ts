@@ -219,6 +219,7 @@ export class Game {
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
   private playerShadow!: THREE.Mesh;
+  private playerGearShadow!: THREE.Mesh;
   private readonly gearShadowMap = new Map<Gear, { mesh: THREE.Mesh; lowerGear: Gear }>();
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
@@ -409,6 +410,21 @@ export class Game {
     this.playerShadow.rotation.x = -Math.PI / 2;
     this.playerShadow.visible = false;
     this.scene.add(this.playerShadow);
+
+    const playerGearShadowGeo = new THREE.CircleGeometry(0.4, 16);
+    const playerGearShadowMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.playerGearShadow = new THREE.Mesh(playerGearShadowGeo, playerGearShadowMat);
+    this.playerGearShadow.rotation.x = -Math.PI / 2;
+    this.playerGearShadow.position.set(0, 0.61, 0);
+    this.playerGearShadow.renderOrder = 5;
+    this.playerGearShadow.visible = false;
+    this.player.mesh.add(this.playerGearShadow);
 
     const hud = document.getElementById("hud");
     const titleOverlay = document.getElementById("title-overlay");
@@ -1462,6 +1478,7 @@ export class Game {
     this.titleOverlay.style.overflowY = "";
     this.player.reset(0, 2);
     this.player.resetVisuals();
+    this.playerGearShadow.visible = false;
     this.resetVisualWorld();
 
     const { state, events } = this.sim.reset();
@@ -1539,6 +1556,7 @@ export class Game {
     this.updateWorld(dt);
     this.updateCamera(dt, state);
     this.updatePlayerShadow();
+    this.updatePlayerGearShadow();
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
     this.updateAIGhost(dt);
@@ -1568,6 +1586,7 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.playerShadow.visible = false;
+    this.playerGearShadow.visible = false;
     stopAmbientTick();
     stopMusic();
     this.deathAnimTimer = 0.4;
@@ -2165,9 +2184,10 @@ export class Game {
     if (bestLower === null) return;
 
     const verticalDist = upperGear.mesh.position.y - bestLower.getTopY();
-    const opacity = THREE.MathUtils.clamp(0.75 - verticalDist * 0.025, 0.15, 0.75);
+    const opacity = THREE.MathUtils.clamp(0.55 - verticalDist * 0.025, 0.1, 0.55);
+    const shadowRadius = Math.min(upperGear.radius * 0.65, bestLower.radius * 0.7);
 
-    const shadowGeo = new THREE.CircleGeometry(upperGear.radius * 0.9, 16);
+    const shadowGeo = new THREE.CircleGeometry(shadowRadius, 16);
     const shadowMat = new THREE.MeshBasicMaterial({
       color: 0x000000,
       transparent: true,
@@ -2367,7 +2387,7 @@ export class Game {
       backgroundClip: "text",
       webkitBackgroundClip: "text",
       webkitTextFillColor: "transparent",
-      textShadow: "0 0 20px rgba(255,180,80,0.4), 0 0 60px rgba(255,140,40,0.15), 0 2px 4px rgba(0,0,0,0.8)",
+      textShadow: "0 2px 4px rgba(0,0,0,0.8), 0 0 40px rgba(255,170,68,0.3)",
     });
     this.titleTagline.textContent = "GAMEDEV.JS JAM 2026 — Theme: MACHINES";
     if (this.highScore > 0) {
@@ -2730,6 +2750,35 @@ export class Game {
     } else {
       this.playerShadow.visible = false;
     }
+  }
+
+  private updatePlayerGearShadow() {
+    let closestVerticalDistance = Infinity;
+
+    for (const gear of this.gears) {
+      const active = getPrivateBoolean(gear, "active", true);
+      if (!active) continue;
+      if (gear.mesh.position.y <= this.player.mesh.position.y) continue;
+
+      const dx = this.player.mesh.position.x - gear.mesh.position.x;
+      const dz = this.player.mesh.position.z - gear.mesh.position.z;
+      const footprintRadius = gear.radius * 0.8;
+      if (dx * dx + dz * dz >= footprintRadius * footprintRadius) continue;
+
+      const verticalDistance = gear.mesh.position.y - this.player.mesh.position.y;
+      if (verticalDistance < closestVerticalDistance) {
+        closestVerticalDistance = verticalDistance;
+      }
+    }
+
+    if (!Number.isFinite(closestVerticalDistance)) {
+      this.playerGearShadow.visible = false;
+      return;
+    }
+
+    const opacity = THREE.MathUtils.clamp(0.55 - closestVerticalDistance * 0.06, 0.15, 0.5);
+    (this.playerGearShadow.material as THREE.MeshBasicMaterial).opacity = opacity;
+    this.playerGearShadow.visible = true;
   }
 
   private triggerLandingShake(strength: number) {

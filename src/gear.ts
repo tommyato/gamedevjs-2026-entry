@@ -383,7 +383,7 @@ export class Gear {
     }
 
     const distSq = (playerPos.x - this.mesh.position.x) ** 2 + (playerPos.z - this.mesh.position.z) ** 2;
-    const combinedRadius = this.radius + playerRadius;
+    const combinedRadius = this.radius + playerRadius - 0.15;
     if (distSq >= combinedRadius * combinedRadius) {
       return { blocked: false, capY: 0 };
     }
@@ -391,7 +391,7 @@ export class Gear {
     const gearBottom = this.mesh.position.y - this.height / 2;
     const playerTop = playerPos.y + playerHeight;
 
-    if (playerPos.y < gearBottom && playerTop > gearBottom) {
+    if (playerPos.y < gearBottom && playerTop > gearBottom + 0.05) {
       return { blocked: true, capY: gearBottom - playerHeight };
     }
 

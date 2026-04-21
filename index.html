@@ -247,11 +247,24 @@
     }
     #title-overlay h1 {
       font-family: "Orbitron", ui-monospace, monospace; font-size: 56px; font-weight: 900;
-      color: #ffaa44; text-shadow: 0 0 60px rgba(255,170,68,0.4);
+      color: #ffaa44; text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 40px rgba(255,170,68,0.3);
       letter-spacing: 6px; margin-bottom: 16px; text-align: center;
     }
+    .title-copy-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: rgba(10, 8, 6, 0.65);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 16px;
+      padding: 28px 40px;
+      border: 1px solid rgba(255, 196, 120, 0.12);
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.26);
+      margin-bottom: 12px;
+    }
     #title-overlay .tagline {
-      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 14px; color: #668899;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 14px; color: #8899aa;
       letter-spacing: 4px; margin-bottom: 40px; text-align: center;
     }
     #title-best {
@@ -259,7 +272,7 @@
       font-size: 12px;
       color: #c7a271;
       letter-spacing: 3px;
-      margin-top: -26px;
+      margin-top: 8px;
       margin-bottom: 28px;
       text-align: center;
     }
@@ -526,10 +539,14 @@
         letter-spacing: 3px;
         padding: 0 24px;
       }
+      .title-copy-panel {
+        width: min(100vw - 32px, 420px);
+        padding: 24px 20px;
+      }
       #title-best {
         font-size: 11px;
         letter-spacing: 2px;
-        margin-top: -24px;
+        margin-top: 8px;
         margin-bottom: 24px;
         padding: 0 24px;
       }
@@ -628,9 +645,12 @@
       <button id="touch-jump" type="button" aria-label="Jump">JUMP</button>
     </div>
     <div id="title-overlay">
-      <h1>CLOCKWORK CLIMB</h1>
-      <div class="tagline">GAMEDEV.JS JAM 2026 — Theme: MACHINES</div>
-      <div id="title-best" class="hidden"></div>
+      <div class="title-copy-panel">
+        <h1>CLOCKWORK CLIMB</h1>
+        <div class="tagline">GAMEDEV.JS JAM 2026 — Theme: MACHINES</div>
+        <div id="title-best" class="hidden"></div>
+        <div class="prompt">PRESS SPACE OR CLICK TO CLIMB</div>
+      </div>
       <div class="game-over-card game-over-layout hidden">
         <div class="stat-row"><span class="stat-label">HEIGHT SCORE</span><span class="stat-value" id="go-height"></span></div>
         <div class="stat-row"><span class="stat-label">BOLT SCORE</span><span class="stat-value" id="go-bolts"></span></div>
@@ -640,7 +660,6 @@
         <div class="stat-row stat-total"><span class="stat-label">TOTAL SCORE</span><span class="stat-value" id="go-total"></span></div>
       </div>
       <button id="share-score-btn" class="hidden" type="button">SHARE ON X</button>
-      <div class="prompt">PRESS SPACE OR CLICK TO CLIMB</div>
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
