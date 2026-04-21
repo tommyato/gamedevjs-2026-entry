@@ -1,0 +1,1194 @@
+// ../gamedevjs-2026-entry/src/simulation.ts
+var DEFAULT_FIXED_DT = 1 / 60;
+var PLAYER_RADIUS = 0.3;
+var PLAYER_HEIGHT = 0.6;
+var PLAYER_MOVE_SPEED = 5;
+var JUMP_VELOCITY = 12;
+var PISTON_LAUNCH_VELOCITY = 18;
+var GRAVITY = 20;
+var ORBIT_RADIUS = 12;
+var COMBO_WINDOW = 2.5;
+var BOLT_SCORE_VALUE = 5;
+var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
+  static DISCRETE_ACTIONS = [
+    { moveX: 0, moveY: 0, jump: false },
+    // 0: idle
+    { moveX: -1, moveY: 0, jump: false },
+    // 1: left
+    { moveX: 1, moveY: 0, jump: false },
+    // 2: right
+    { moveX: 0, moveY: 1, jump: false },
+    // 3: forward
+    { moveX: 0, moveY: 0, jump: true },
+    // 4: jump
+    { moveX: -1, moveY: 0, jump: true },
+    // 5: left + jump
+    { moveX: 1, moveY: 0, jump: true },
+    // 6: right + jump
+    { moveX: 0, moveY: 1, jump: true }
+    // 7: forward + jump
+  ];
+  initialSeed;
+  fixedDt;
+  rng;
+  state;
+  events = [];
+  gearIdCounter = 0;
+  boltIdCounter = 0;
+  powerUpIdCounter = 0;
+  generationHeight = 0;
+  generationAngle = 0;
+  cleanupTimer = 0;
+  timeSinceLastLanding = Infinity;
+  recentComboGearIds = /* @__PURE__ */ new Set();
+  unlockedThisRun = /* @__PURE__ */ new Set();
+  orbitAngleTarget = Math.PI / 2;
+  cameraY = 8.1;
+  deathFreezeTimer = 0;
+  nextChallengeZoneHeight = 100;
+  challengeZoneEntryScore = 0;
+  windGearCount = 0;
+  bouncyGearCount = 0;
+  powerUpCount = 0;
+  completedChallengeZones = 0;
+  shieldSaveCount = 0;
+  airBoltChain = 0;
+  bestAirBoltChain = 0;
+  constructor(config = {}) {
+    this.initialSeed = Number.isFinite(config.seed) ? Number(config.seed) : Math.floor(Math.random() * 4294967296);
+    this.fixedDt = Number.isFinite(config.fixedDt) ? Number(config.fixedDt) : null;
+    this.rng = mulberry32(this.initialSeed);
+    this.state = this.createInitialState();
+  }
+  reset() {
+    this.rng = mulberry32(this.initialSeed);
+    this.events = [];
+    this.gearIdCounter = 0;
+    this.boltIdCounter = 0;
+    this.powerUpIdCounter = 0;
+    this.generationHeight = 0;
+    this.generationAngle = 0;
+    this.cleanupTimer = 0;
+    this.timeSinceLastLanding = Infinity;
+    this.recentComboGearIds.clear();
+    this.unlockedThisRun.clear();
+    this.orbitAngleTarget = Math.PI / 2;
+    this.cameraY = 8.1;
+    this.deathFreezeTimer = 0;
+    this.nextChallengeZoneHeight = 100;
+    this.challengeZoneEntryScore = 0;
+    this.windGearCount = 0;
+    this.bouncyGearCount = 0;
+    this.powerUpCount = 0;
+    this.completedChallengeZones = 0;
+    this.shieldSaveCount = 0;
+    this.airBoltChain = 0;
+    this.bestAirBoltChain = 0;
+    this.state = this.createInitialState();
+    this.state.gameState = "playing";
+    this.seedInitialLayout();
+    this.updateBoltPositions();
+    this.updatePowerUpPositions();
+    return this.flush();
+  }
+  step(action, dt) {
+    const resolvedAction = typeof action === "number" ? _ClockworkClimbSimulation.DISCRETE_ACTIONS[action] ?? { moveX: 0, moveY: 0, jump: false } : action;
+    const stepDt = this.fixedDt ?? (Number.isFinite(dt) ? Number(dt) : DEFAULT_FIXED_DT);
+    if (stepDt <= 0) {
+      return this.flushBridge();
+    }
+    if (this.state.gameState === "gameover" || this.state.gameState === "title") {
+      return this.flushBridge();
+    }
+    if (this.state.gameState === "dying") {
+      this.advanceDying(stepDt);
+      return this.flushBridge();
+    }
+    this.state.elapsedTime += stepDt;
+    this.state.gameTime += stepDt;
+    this.timeSinceLastLanding += stepDt;
+    if (this.state.comboLandings > 0 && this.timeSinceLastLanding > COMBO_WINDOW) {
+      this.breakCombo();
+    }
+    this.generateAhead();
+    this.updateGears(stepDt);
+    this.resolveGrounding(stepDt);
+    this.resolveCeilingBlock();
+    this.advancePlayer(resolvedAction, stepDt);
+    this.handlePoleCollision();
+    this.updateBoltPositions();
+    this.updatePowerUpPositions();
+    this.handleBoltCollection();
+    this.handlePowerUpCollection();
+    this.updateOrbit(stepDt);
+    this.updateScores();
+    this.updateZone();
+    this.updateChallengeZone();
+    this.cleanupTimer += stepDt;
+    if (this.cleanupTimer >= 2) {
+      this.cleanupTimer = 0;
+      this.cleanupBelow();
+    }
+    this.checkAchievements();
+    this.checkDeath();
+    return this.flushBridge();
+  }
+  getState() {
+    return cloneState(this.state);
+  }
+  getObservation() {
+    const player = this.state.player;
+    const activeGear = this.state.activeGearId === null ? null : this.state.gears.find((gear) => gear.id === this.state.activeGearId) ?? null;
+    const nearestBolt = this.findNearestAvailableBolt();
+    const heightNorm = clamp(this.state.heightMaxReached / 120, 0, 1);
+    return new Float64Array([
+      normalizeSigned(player.x, 8),
+      clamp(player.y / 120, 0, 1),
+      normalizeSigned(player.z, 8),
+      normalizeSigned(player.vx, 12),
+      normalizeSigned(player.vy, 20),
+      normalizeSigned(player.vz, 12),
+      player.onGround ? 1 : 0,
+      clamp(player.speedBoostTimer / 0.9, 0, 1),
+      activeGear ? normalizeSigned(activeGear.x - player.x, 8) : 0,
+      activeGear ? clamp((getGearTopY(activeGear) - player.y + 4) / 8, 0, 1) : 0,
+      activeGear ? normalizeSigned(activeGear.z - player.z, 8) : 0,
+      nearestBolt ? normalizeSigned(nearestBolt.x - player.x, 8) : 0,
+      nearestBolt ? clamp((nearestBolt.y - player.y + 4) / 8, 0, 1) : 0,
+      nearestBolt ? normalizeSigned(nearestBolt.z - player.z, 8) : 0,
+      clamp(this.state.comboMultiplier / 5, 0, 1),
+      clamp(this.state.boltCount / 25, 0, 1),
+      heightNorm,
+      normalizeAngle(this.state.orbitAngle),
+      clamp(player.boltMagnetTimer / 8, 0, 1),
+      clamp(player.slowMoTimer / 3, 0, 1),
+      player.shieldActive ? 1 : 0,
+      this.state.inChallengeZone ? 1 : 0
+    ]);
+  }
+  createInitialState() {
+    const player = {
+      x: 0,
+      y: 2,
+      z: 2,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      onGround: true,
+      highestY: 2,
+      prevY: 2,
+      speedBoostTimer: 0,
+      speedBoostStrength: 1,
+      boltMagnetTimer: 0,
+      slowMoTimer: 0,
+      shieldActive: false,
+      lastLandedGearX: 0,
+      lastLandedGearY: 0,
+      lastLandedGearZ: 0
+    };
+    return {
+      gameState: "title",
+      player,
+      gears: [],
+      bolts: [],
+      powerUps: [],
+      score: 0,
+      heightScore: 0,
+      heightMaxReached: 0,
+      boltCount: 0,
+      boltScore: 0,
+      comboLandings: 0,
+      comboMultiplier: 1,
+      bestCombo: 1,
+      gameTime: 0,
+      elapsedTime: 0,
+      activeGearId: null,
+      orbitAngle: Math.PI / 2,
+      nextMilestone: 25,
+      currentZoneIndex: 0,
+      inChallengeZone: false,
+      challengeZoneCenter: 0,
+      windGearCount: 0,
+      bouncyGearCount: 0,
+      powerUpCount: 0,
+      completedChallengeZones: 0,
+      shieldSaveCount: 0,
+      airBoltChain: 0,
+      bestAirBoltChain: 0
+    };
+  }
+  seedInitialLayout() {
+    const startGear = this.createGear({
+      x: 0,
+      y: -0.2,
+      z: 0,
+      radius: 2.6,
+      height: 0.4,
+      rotationSpeed: 0.28,
+      variant: "normal"
+    });
+    this.state.gears.push(startGear);
+    let height = 0;
+    let angle = this.randomRange(0, Math.PI * 2);
+    for (let index = 1; index < 40; index += 1) {
+      const band = getDifficultyBand(height);
+      height += this.randomRange(band.verticalMin, band.verticalMax);
+      angle += this.randomRange(0.75, 1.75);
+      const radius = this.randomRange(band.radiusMin, band.radiusMax);
+      const distance = this.randomRange(band.distanceMin, band.distanceMax);
+      const variant = this.pickGearVariant(height);
+      const gear = this.createGear({
+        x: Math.cos(angle) * distance,
+        y: height,
+        z: Math.sin(angle) * distance,
+        radius,
+        height: 0.3,
+        rotationSpeed: this.randomRange(band.rotationMin, band.rotationMax),
+        variant
+      });
+      this.state.gears.push(gear);
+      this.trySpawnBolt(gear);
+      this.trySpawnPowerUp(gear);
+    }
+    this.generationHeight = height;
+    this.generationAngle = angle;
+  }
+  createGear(input) {
+    return {
+      id: this.gearIdCounter++,
+      x: input.x,
+      y: input.y,
+      z: input.z,
+      radius: input.radius,
+      height: input.height,
+      rotationSpeed: input.rotationSpeed,
+      rotationDir: this.rng() > 0.5 ? 1 : -1,
+      variant: input.variant,
+      active: true,
+      currentRotation: 0,
+      crumbleArmed: false,
+      crumbleTimer: 0,
+      crumbleFallVelocity: 0,
+      crumbleFallDistance: 0,
+      reverseTimer: 0,
+      reverseInterval: 3,
+      reversePause: 0.35,
+      pistonTime: this.randomRange(0, Math.PI * 2),
+      windAngle: this.randomRange(0, Math.PI * 2),
+      windStrength: this.randomRange(2.5, 4),
+      challenge: false
+    };
+  }
+  createBolt(gear) {
+    return {
+      id: this.boltIdCounter++,
+      gearId: gear.id,
+      x: gear.x,
+      y: getGearTopY(gear) + 0.75,
+      z: gear.z,
+      available: true
+    };
+  }
+  createPowerUp(gear, type) {
+    return {
+      id: this.powerUpIdCounter++,
+      gearId: gear.id,
+      type,
+      x: gear.x,
+      y: getGearTopY(gear) + 1.25,
+      z: gear.z,
+      available: true
+    };
+  }
+  trySpawnBolt(gear) {
+    if (gear.variant === "crumbling" || this.rng() >= 0.3) {
+      return;
+    }
+    this.state.bolts.push(this.createBolt(gear));
+  }
+  trySpawnPowerUp(gear) {
+    if (gear.y < 15 || this.rng() >= 0.1) {
+      return;
+    }
+    const types = ["bolt_magnet", "slow_mo", "shield"];
+    const type = types[Math.floor(this.rng() * types.length)];
+    this.state.powerUps.push(this.createPowerUp(gear, type));
+  }
+  generateAhead() {
+    while (this.nextChallengeZoneHeight <= this.state.heightMaxReached + 65) {
+      this.generateChallengeZone(this.nextChallengeZoneHeight);
+      this.nextChallengeZoneHeight += 100;
+    }
+    let height = this.generationHeight;
+    let angle = this.generationAngle;
+    let batchesGenerated = 0;
+    while (height - this.state.heightMaxReached <= 40 && batchesGenerated < 5) {
+      for (let index = 0; index < 10; index += 1) {
+        const band = getDifficultyBand(height);
+        height += this.randomRange(band.verticalMin, band.verticalMax);
+        angle += this.randomRange(0.75, 1.75);
+        const radius = this.randomRange(band.radiusMin, band.radiusMax);
+        const distance = this.randomRange(band.distanceMin, band.distanceMax);
+        const variant = this.pickGearVariant(height);
+        const gear = this.createGear({
+          x: Math.cos(angle) * distance,
+          y: height,
+          z: Math.sin(angle) * distance,
+          radius,
+          height: 0.3,
+          rotationSpeed: this.randomRange(band.rotationMin, band.rotationMax),
+          variant
+        });
+        this.state.gears.push(gear);
+        this.trySpawnBolt(gear);
+        this.trySpawnPowerUp(gear);
+      }
+      batchesGenerated += 1;
+    }
+    this.generationHeight = height;
+    this.generationAngle = angle;
+  }
+  generateChallengeZone(centerY) {
+    const count = 8 + Math.floor(this.rng() * 5);
+    let angle = this.generationAngle;
+    for (let index = 0; index < count; index += 1) {
+      const offsetY = this.randomRange(-7, 8);
+      angle += this.randomRange(0.65, 1.55);
+      const radius = this.randomRange(1.3, 2.1);
+      const distance = this.randomRange(1.5, 2.8);
+      const variant = index < 2 ? "normal" : this.pickGearVariant(centerY);
+      const gear = this.createGear({
+        x: Math.cos(angle) * distance,
+        y: centerY + offsetY,
+        z: Math.sin(angle) * distance,
+        radius,
+        height: 0.3,
+        rotationSpeed: this.randomRange(0.45, 1.1),
+        variant
+      });
+      gear.challenge = true;
+      this.state.gears.push(gear);
+      this.state.bolts.push(this.createBolt(gear));
+      this.trySpawnPowerUp(gear);
+    }
+  }
+  pickGearVariant(height) {
+    if (height >= 55 && this.rng() < 0.14) {
+      return "piston";
+    }
+    if (height >= 20 && this.rng() < 0.09) {
+      return "bouncy";
+    }
+    const roll = this.rng();
+    if (height >= 100) {
+      if (roll < 0.18) return "reverse";
+      if (roll < 0.32) return "wind";
+      if (roll < 0.46) return "magnetic";
+      if (roll < 0.6) return "speed";
+      if (roll < 0.76) return "crumbling";
+      return "normal";
+    }
+    if (height >= 75) {
+      if (roll < 0.2) return "reverse";
+      if (roll < 0.34) return "wind";
+      if (roll < 0.48) return "magnetic";
+      if (roll < 0.62) return "speed";
+      if (roll < 0.76) return "crumbling";
+      return "normal";
+    }
+    if (height >= 50) {
+      if (roll < 0.17) return "wind";
+      if (roll < 0.33) return "magnetic";
+      if (roll < 0.48) return "speed";
+      if (roll < 0.64) return "crumbling";
+      return "normal";
+    }
+    if (height >= 40) {
+      if (roll < 0.08) return "wind";
+      if (roll < 0.2) return "magnetic";
+      if (roll < 0.38) return "speed";
+      if (roll < 0.56) return "crumbling";
+      return "normal";
+    }
+    if (height >= 35) {
+      if (roll < 0.12) return "magnetic";
+      if (roll < 0.3) return "speed";
+      if (roll < 0.5) return "crumbling";
+      return "normal";
+    }
+    if (height >= 25) {
+      if (roll < 0.24) return "speed";
+      if (roll < 0.5) return "crumbling";
+      return "normal";
+    }
+    return "normal";
+  }
+  updateGears(dt) {
+    for (const gear of this.state.gears) {
+      if (gear.variant === "piston") {
+        gear.pistonTime += dt;
+      }
+      if (gear.variant === "wind") {
+        gear.windAngle += dt * 0.4;
+      }
+      gear.reverseTimer += dt;
+      if (gear.variant === "reverse" && gear.reverseTimer >= gear.reverseInterval) {
+        gear.reverseTimer -= gear.reverseInterval;
+        gear.rotationDir *= -1;
+      }
+      gear.currentRotation += getGearAngularVelocity(gear) * dt;
+      if (!gear.crumbleArmed) {
+        continue;
+      }
+      gear.crumbleTimer += dt;
+      if (gear.crumbleTimer >= 1.5) {
+        gear.active = false;
+        gear.crumbleFallVelocity += 25 * dt;
+        gear.crumbleFallDistance += gear.crumbleFallVelocity * dt;
+      }
+    }
+  }
+  resolveGrounding(dt) {
+    const player = this.state.player;
+    let foundGround = false;
+    const wasOnGround = player.onGround;
+    const landingSpeed = Math.max(0, -player.vy);
+    if (player.vy <= 0) {
+      for (const gear of this.state.gears) {
+        const gearBottom = gear.y - gear.height / 2;
+        if (player.prevY < gearBottom - 0.05) {
+          continue;
+        }
+        const result = checkGearCollision(gear, player, PLAYER_RADIUS);
+        if (!result.onGear) {
+          continue;
+        }
+        player.onGround = true;
+        player.y = result.y;
+        player.vy = 0;
+        if (!wasOnGround) {
+          this.onPlayerLand(gear, landingSpeed);
+        }
+        player.x += result.momentumX * dt;
+        player.z += result.momentumZ * dt;
+        this.state.activeGearId = gear.id;
+        foundGround = true;
+        break;
+      }
+    }
+    if (!foundGround) {
+      player.onGround = false;
+      this.state.activeGearId = null;
+    }
+  }
+  onPlayerLand(gear, landingSpeed) {
+    this.airBoltChain = 0;
+    this.state.airBoltChain = 0;
+    this.state.player.lastLandedGearX = gear.x;
+    this.state.player.lastLandedGearY = getGearTopY(gear);
+    this.state.player.lastLandedGearZ = gear.z;
+    if (gear.variant === "crumbling" && !gear.crumbleArmed) {
+      gear.crumbleArmed = true;
+      gear.crumbleTimer = 0;
+    }
+    const nearMissDistance = Math.hypot(this.state.player.x - gear.x, this.state.player.z - gear.z);
+    this.events.push({
+      type: "gear_land",
+      gearId: gear.id,
+      variant: gear.variant,
+      landingSpeed,
+      nearMiss: nearMissDistance > gear.radius * 0.7,
+      x: this.state.player.x,
+      y: getGearTopY(gear),
+      z: this.state.player.z
+    });
+    if (gear.variant === "speed") {
+      this.state.player.speedBoostStrength = Math.max(this.state.player.speedBoostStrength, 1.55);
+      this.state.player.speedBoostTimer = Math.max(this.state.player.speedBoostTimer, 0.9);
+      this.events.push({
+        type: "speed_boost",
+        x: this.state.player.x,
+        y: this.state.player.y,
+        z: this.state.player.z
+      });
+    }
+    if (gear.variant === "wind") {
+      this.windGearCount += 1;
+      this.state.windGearCount = this.windGearCount;
+    }
+    if (gear.variant === "bouncy") {
+      this.bouncyGearCount += 1;
+      this.state.bouncyGearCount = this.bouncyGearCount;
+    }
+    this.handleComboLanding(gear.id);
+    if (gear.variant === "piston") {
+      this.state.player.vy = PISTON_LAUNCH_VELOCITY;
+      this.state.player.onGround = false;
+      this.events.push({
+        type: "piston_launch",
+        x: this.state.player.x,
+        y: this.state.player.y,
+        z: this.state.player.z
+      });
+    }
+  }
+  resolveCeilingBlock() {
+    const player = this.state.player;
+    if (player.vy <= 0) {
+      return;
+    }
+    for (const gear of this.state.gears) {
+      const block = checkBlockFromBelow(gear, player, PLAYER_HEIGHT, PLAYER_RADIUS);
+      if (!block.blocked) {
+        continue;
+      }
+      player.y = block.capY;
+      player.vy = 0;
+      this.events.push({ type: "gear_block" });
+      break;
+    }
+  }
+  advancePlayer(action, dt) {
+    const player = this.state.player;
+    player.prevY = player.y;
+    player.speedBoostTimer = Math.max(0, player.speedBoostTimer - dt);
+    player.boltMagnetTimer = Math.max(0, player.boltMagnetTimer - dt);
+    player.slowMoTimer = Math.max(0, player.slowMoTimer - dt);
+    const speedBoost = player.speedBoostTimer > 0 ? lerp(player.speedBoostStrength, 1, 1 - player.speedBoostTimer / 0.9) : 1;
+    if (player.speedBoostTimer === 0) {
+      player.speedBoostStrength = 1;
+    }
+    const speed = PLAYER_MOVE_SPEED * speedBoost;
+    const moveX = clamp(action.moveX, -1, 1);
+    const moveY = clamp(action.moveY, -1, 1);
+    const cameraYaw = this.state.orbitAngle - Math.PI / 2;
+    const sinYaw = Math.sin(cameraYaw);
+    const cosYaw = Math.cos(cameraYaw);
+    const worldX = moveX * cosYaw - moveY * sinYaw;
+    const worldZ = moveX * sinYaw + moveY * cosYaw;
+    player.vx = worldX * speed;
+    player.vz = worldZ * speed;
+    player.x += player.vx * dt;
+    player.z += player.vz * dt;
+    if (player.onGround && this.state.activeGearId !== null) {
+      const activeGear = this.state.gears.find((g) => g.id === this.state.activeGearId) ?? null;
+      if (activeGear?.variant === "wind") {
+        player.x += Math.cos(activeGear.windAngle) * activeGear.windStrength * dt;
+        player.z += Math.sin(activeGear.windAngle) * activeGear.windStrength * dt;
+      }
+      if (activeGear?.variant === "magnetic") {
+        const dx = activeGear.x - player.x;
+        const dz = activeGear.z - player.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.05) {
+          const pullStrength = 3.5;
+          player.x += dx / dist * pullStrength * dt;
+          player.z += dz / dist * pullStrength * dt;
+        }
+      }
+    }
+    if (!player.onGround) {
+      const effectiveGravity = player.slowMoTimer > 0 ? GRAVITY * 0.6 : GRAVITY;
+      player.vy -= effectiveGravity * dt;
+    } else {
+      player.vy = 0;
+    }
+    if (player.onGround && action.jump) {
+      const activeGear = this.state.activeGearId !== null ? this.state.gears.find((g) => g.id === this.state.activeGearId) ?? null : null;
+      const isBouncy = activeGear?.variant === "bouncy";
+      player.vy = JUMP_VELOCITY * (isBouncy ? 1.4 : 1);
+      player.onGround = false;
+      if (isBouncy) {
+        this.events.push({ type: "bounce_jump", x: player.x, y: player.y, z: player.z });
+      } else {
+        this.events.push({ type: "jump", x: player.x, y: player.y, z: player.z });
+      }
+    }
+    player.y += player.vy * dt;
+    if (player.y > player.highestY) {
+      player.highestY = player.y;
+    }
+  }
+  handlePoleCollision() {
+    const player = this.state.player;
+    const distFromCenter = Math.hypot(player.x, player.z);
+    const minRadius = 1.1;
+    if (distFromCenter < minRadius && distFromCenter > 1e-3) {
+      const pushOut = minRadius / distFromCenter;
+      player.x *= pushOut;
+      player.z *= pushOut;
+    }
+  }
+  updateBoltPositions() {
+    for (const bolt of this.state.bolts) {
+      const gear = this.state.gears.find((candidate) => candidate.id === bolt.gearId);
+      if (!gear) {
+        continue;
+      }
+      bolt.x = gear.x;
+      bolt.y = getGearTopY(gear) + 0.75;
+      bolt.z = gear.z;
+    }
+  }
+  updatePowerUpPositions() {
+    for (const powerUp of this.state.powerUps) {
+      const gear = this.state.gears.find((g) => g.id === powerUp.gearId);
+      if (!gear) {
+        continue;
+      }
+      powerUp.x = gear.x;
+      powerUp.y = getGearTopY(gear) + 1.25;
+      powerUp.z = gear.z;
+    }
+  }
+  handleBoltCollection() {
+    const player = this.state.player;
+    const magnetActive = player.boltMagnetTimer > 0;
+    const collectRadiusSq = magnetActive ? 4 * 4 : 0.75 * 0.75;
+    for (const bolt of this.state.bolts) {
+      if (!bolt.available) {
+        continue;
+      }
+      const dx = player.x - bolt.x;
+      const dy = player.y + 0.3 - bolt.y;
+      const dz = player.z - bolt.z;
+      if (dx * dx + dy * dy + dz * dz > collectRadiusSq) {
+        continue;
+      }
+      bolt.available = false;
+      this.state.boltCount += 1;
+      this.state.boltScore += BOLT_SCORE_VALUE;
+      if (player.onGround) {
+        this.airBoltChain = 0;
+      } else {
+        this.airBoltChain += 1;
+        this.bestAirBoltChain = Math.max(this.bestAirBoltChain, this.airBoltChain);
+      }
+      this.state.airBoltChain = this.airBoltChain;
+      this.state.bestAirBoltChain = this.bestAirBoltChain;
+      this.events.push({
+        type: "bolt_collect",
+        boltId: bolt.id,
+        totalBolts: this.state.boltCount,
+        x: bolt.x,
+        y: bolt.y,
+        z: bolt.z
+      });
+    }
+  }
+  handlePowerUpCollection() {
+    const player = this.state.player;
+    for (const powerUp of this.state.powerUps) {
+      if (!powerUp.available) {
+        continue;
+      }
+      const dx = player.x - powerUp.x;
+      const dy = player.y + 0.3 - powerUp.y;
+      const dz = player.z - powerUp.z;
+      if (dx * dx + dy * dy + dz * dz > 1 * 1) {
+        continue;
+      }
+      powerUp.available = false;
+      this.powerUpCount += 1;
+      this.state.powerUpCount = this.powerUpCount;
+      switch (powerUp.type) {
+        case "bolt_magnet":
+          player.boltMagnetTimer = 8;
+          break;
+        case "slow_mo":
+          player.slowMoTimer = 3;
+          break;
+        case "shield":
+          player.shieldActive = true;
+          break;
+      }
+      this.events.push({
+        type: "powerup_collect",
+        powerUpType: powerUp.type,
+        x: powerUp.x,
+        y: powerUp.y,
+        z: powerUp.z
+      });
+    }
+  }
+  updateOrbit(dt) {
+    const player = this.state.player;
+    const verticalLead = clamp(player.vy * 0.12, -1.2, 1.6);
+    const followLerp = 1 - Math.exp(-dt * (player.onGround ? 5.5 : 4));
+    const orbitLerp = 1 - Math.exp(-dt * 7);
+    if (player.onGround) {
+      const playerDist = Math.hypot(player.x, player.z);
+      const baseAngle = playerDist > 0.5 ? Math.atan2(player.z, player.x) : this.orbitAngleTarget;
+      let bestNudge = 0;
+      const maxNudge = 1.3;
+      const nudgeStep = 0.05;
+      const angleTolerance = 0.18;
+      const verticalWindow = 3;
+      const isClear = (testAngle) => {
+        const camX = Math.cos(testAngle) * ORBIT_RADIUS;
+        const camZ = Math.sin(testAngle) * ORBIT_RADIUS;
+        const toPlayerX = player.x - camX;
+        const toPlayerZ = player.z - camZ;
+        const toPlayerLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
+        const camToPlayerAngle = Math.atan2(toPlayerZ, toPlayerX);
+        for (const gear of this.state.gears) {
+          if (gear.id === this.state.activeGearId) continue;
+          if (Math.abs(gear.y - player.y) > verticalWindow) continue;
+          const toGearX = gear.x - camX;
+          const toGearZ = gear.z - camZ;
+          const toGearLen = Math.hypot(toGearX, toGearZ) || 1;
+          if (toGearLen >= toPlayerLen) continue;
+          const camToGearAngle = Math.atan2(toGearZ, toGearX);
+          let angleDelta = camToGearAngle - camToPlayerAngle;
+          while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
+          while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
+          const gearAngularHalf = Math.atan2(gear.radius, toGearLen);
+          if (Math.abs(angleDelta) < angleTolerance + gearAngularHalf) {
+            return false;
+          }
+        }
+        return true;
+      };
+      if (!isClear(baseAngle)) {
+        let found = false;
+        for (let step = 1; step <= maxNudge / nudgeStep; step += 1) {
+          const offset = step * nudgeStep;
+          if (isClear(baseAngle + offset)) {
+            bestNudge = offset;
+            found = true;
+            break;
+          }
+          if (isClear(baseAngle - offset)) {
+            bestNudge = -offset;
+            found = true;
+            break;
+          }
+        }
+        if (!found) bestNudge = maxNudge;
+      }
+      this.orbitAngleTarget = baseAngle + bestNudge;
+    }
+    let angleDiff = this.orbitAngleTarget - this.state.orbitAngle;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    this.state.orbitAngle += angleDiff * orbitLerp;
+    const targetCamY = player.y + 6.1 + verticalLead;
+    this.cameraY = lerp(this.cameraY, targetCamY, followLerp);
+  }
+  updateScores() {
+    const currentHeight = Math.max(0, Math.floor(this.state.player.y));
+    const previousReached = this.state.heightMaxReached;
+    if (currentHeight > this.state.heightMaxReached) {
+      const delta = currentHeight - this.state.heightMaxReached;
+      this.state.heightMaxReached = currentHeight;
+      const challengeBonus = this.state.inChallengeZone ? 2 : 1;
+      this.state.heightScore += delta * this.state.comboMultiplier * challengeBonus;
+    }
+    this.state.score = this.state.heightScore + this.state.boltScore;
+    if (this.state.heightMaxReached > previousReached && this.state.heightMaxReached >= this.state.nextMilestone) {
+      while (this.state.heightMaxReached >= this.state.nextMilestone) {
+        this.events.push({
+          type: "milestone",
+          height: this.state.nextMilestone,
+          nextMilestone: this.state.nextMilestone + 25
+        });
+        this.state.nextMilestone += 25;
+      }
+    }
+  }
+  handleComboLanding(gearId) {
+    const withinWindow = this.timeSinceLastLanding <= COMBO_WINDOW;
+    const sameGear = this.recentComboGearIds.has(gearId);
+    let progressed = false;
+    if (!sameGear) {
+      if (withinWindow || this.state.comboLandings === 0) {
+        this.state.comboLandings += 1;
+      } else {
+        this.state.comboLandings = 1;
+        this.recentComboGearIds.clear();
+      }
+      progressed = true;
+    }
+    this.recentComboGearIds.add(gearId);
+    this.timeSinceLastLanding = 0;
+    const newMultiplier = comboLandingsToMultiplier(this.state.comboLandings);
+    if (newMultiplier > 1 && newMultiplier !== this.state.comboMultiplier) {
+      this.events.push({ type: "combo_up", multiplier: newMultiplier });
+    }
+    this.state.comboMultiplier = newMultiplier;
+    this.state.bestCombo = Math.max(this.state.bestCombo, this.state.comboMultiplier);
+    if (!progressed && this.state.comboMultiplier === 1) {
+      return;
+    }
+  }
+  breakCombo() {
+    if (this.state.comboMultiplier > 1) {
+      this.events.push({ type: "combo_break" });
+    }
+    this.state.comboLandings = 0;
+    this.state.comboMultiplier = 1;
+    this.timeSinceLastLanding = Infinity;
+    this.recentComboGearIds.clear();
+  }
+  updateZone() {
+    const zoneIndex = getZoneIndex(this.state.player.y);
+    if (zoneIndex !== this.state.currentZoneIndex) {
+      this.state.currentZoneIndex = zoneIndex;
+      this.events.push({ type: "zone_change", zoneIndex });
+    }
+  }
+  updateChallengeZone() {
+    const wasInZone = this.state.inChallengeZone;
+    const nowInZone = isInChallengeZone(this.state.player.y);
+    if (!wasInZone && nowInZone) {
+      this.state.inChallengeZone = true;
+      this.state.challengeZoneCenter = getChallengeZoneCenter(this.state.player.y);
+      this.challengeZoneEntryScore = this.state.score;
+      this.events.push({
+        type: "challenge_zone_enter",
+        zoneCenter: this.state.challengeZoneCenter
+      });
+    } else if (wasInZone && !nowInZone) {
+      this.state.inChallengeZone = false;
+      const bonusScore = Math.max(0, this.state.score - this.challengeZoneEntryScore);
+      this.completedChallengeZones += 1;
+      this.state.completedChallengeZones = this.completedChallengeZones;
+      this.events.push({ type: "challenge_zone_exit", bonusScore });
+    }
+  }
+  checkAchievements() {
+    const maybeUnlock = (id, condition) => {
+      if (!condition || this.unlockedThisRun.has(id)) {
+        return;
+      }
+      this.unlockedThisRun.add(id);
+      this.events.push({ type: "achievement", id });
+    };
+    maybeUnlock("SKY_HIGH", this.state.heightMaxReached >= 50);
+    maybeUnlock("CLOUD_WALKER", this.state.heightMaxReached >= 100);
+    maybeUnlock("BOLT_COLLECTOR", this.state.boltCount >= 10);
+    maybeUnlock("BOLT_HOARDER", this.state.boltCount >= 25);
+    maybeUnlock("ENDURANCE", this.state.gameTime >= 60);
+    maybeUnlock("COMBO_STARTER", this.state.comboMultiplier >= 2);
+    maybeUnlock("COMBO_MASTER", this.state.comboMultiplier >= 5);
+    maybeUnlock("WIND_RIDER", this.state.windGearCount >= 3);
+    maybeUnlock("BOUNCE_KING", this.state.bouncyGearCount >= 5);
+    maybeUnlock("CHALLENGE_COMPLETE", this.state.completedChallengeZones >= 1);
+    maybeUnlock("IRON_WORKS", this.state.heightMaxReached >= 25);
+    maybeUnlock("GOLDEN_CLIMBER", this.state.heightMaxReached >= 75);
+    maybeUnlock("CHROME_ABYSS", this.state.heightMaxReached >= 100);
+    maybeUnlock("POWERUP_COLLECTOR", this.state.powerUpCount >= 5);
+    maybeUnlock("SHIELD_SURVIVOR", this.state.shieldSaveCount >= 1);
+  }
+  cleanupBelow() {
+    const cutoffY = this.state.player.y - 40;
+    const remainingGears = this.state.gears.filter((gear) => gear.y >= cutoffY);
+    const remainingGearIds = new Set(remainingGears.map((gear) => gear.id));
+    this.state.gears = remainingGears;
+    this.state.bolts = this.state.bolts.filter((bolt) => {
+      if (!remainingGearIds.has(bolt.gearId)) {
+        return false;
+      }
+      return bolt.y >= cutoffY || !bolt.available;
+    });
+    this.state.powerUps = this.state.powerUps.filter((powerUp) => {
+      if (!remainingGearIds.has(powerUp.gearId)) {
+        return false;
+      }
+      return powerUp.y >= cutoffY || !powerUp.available;
+    });
+  }
+  isPlayerStranded() {
+    const player = this.state.player;
+    if (!player.onGround) return false;
+    const activeGear = this.state.activeGearId !== null ? this.state.gears.find((g) => g.id === this.state.activeGearId) : null;
+    if (!activeGear || activeGear.variant !== "crumbling" || !activeGear.crumbleArmed) return false;
+    if (activeGear.crumbleTimer < 0.8) return false;
+    const jumpReach = 4;
+    const lateralReach = 5;
+    for (const gear of this.state.gears) {
+      if (gear.id === activeGear.id) continue;
+      if (!gear.active) continue;
+      if (gear.variant === "crumbling" && gear.crumbleArmed) continue;
+      const dx = gear.x - player.x;
+      const dz = gear.z - player.z;
+      const dy = getGearTopY(gear) - player.y;
+      const horizontalDist = Math.hypot(dx, dz);
+      if (horizontalDist <= lateralReach && dy <= jumpReach && dy >= -2) {
+        return false;
+      }
+    }
+    return true;
+  }
+  checkDeath() {
+    if (this.state.gameState === "playing" && this.isPlayerStranded()) {
+      this.state.gameState = "dying";
+      this.deathFreezeTimer = 0.2;
+      if (this.state.comboMultiplier > 1) {
+        this.breakCombo();
+      } else {
+        this.state.comboLandings = 0;
+        this.state.comboMultiplier = 1;
+      }
+      this.events.push({ type: "death_start" });
+      return;
+    }
+    if (this.state.player.y < this.cameraY - 12 && this.state.gameState === "playing") {
+      if (this.state.player.shieldActive) {
+        this.state.player.shieldActive = false;
+        this.shieldSaveCount += 1;
+        this.state.shieldSaveCount = this.shieldSaveCount;
+        this.state.player.x = this.state.player.lastLandedGearX;
+        this.state.player.y = this.state.player.lastLandedGearY + 1.5;
+        this.state.player.z = this.state.player.lastLandedGearZ;
+        this.state.player.vx = 0;
+        this.state.player.vy = 0;
+        this.state.player.vz = 0;
+        this.state.player.onGround = false;
+        this.events.push({
+          type: "shield_save",
+          x: this.state.player.x,
+          y: this.state.player.y,
+          z: this.state.player.z
+        });
+        return;
+      }
+      this.state.gameState = "dying";
+      this.deathFreezeTimer = 0.2;
+      if (this.state.comboMultiplier > 1) {
+        this.breakCombo();
+      } else {
+        this.state.comboLandings = 0;
+        this.state.comboMultiplier = 1;
+      }
+      this.events.push({ type: "death_start" });
+    }
+  }
+  advanceDying(dt) {
+    this.state.elapsedTime += dt;
+    this.deathFreezeTimer -= dt;
+    if (this.deathFreezeTimer > 0) {
+      return;
+    }
+    this.state.gameState = "gameover";
+    this.events.push({ type: "death" });
+  }
+  findNearestAvailableBolt() {
+    let nearest = null;
+    let nearestDistSq = Infinity;
+    for (const bolt of this.state.bolts) {
+      if (!bolt.available) {
+        continue;
+      }
+      const dx = bolt.x - this.state.player.x;
+      const dy = bolt.y - this.state.player.y;
+      const dz = bolt.z - this.state.player.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < nearestDistSq) {
+        nearest = bolt;
+        nearestDistSq = distSq;
+      }
+    }
+    return nearest;
+  }
+  flushBridge() {
+    const result = this.flush();
+    result.state.gameOver = result.state.gameState === "gameover";
+    result.state.alive = result.state.gameState !== "gameover";
+    return result;
+  }
+  flush() {
+    const state = cloneState(this.state);
+    const events = this.events.map((event) => ({ ...event }));
+    this.events = [];
+    return { state, events };
+  }
+  randomRange(min, max) {
+    return min + this.rng() * (max - min);
+  }
+};
+function getGearTopY(gear) {
+  return gear.y + gear.height / 2 + 0.12 - gear.crumbleFallDistance + getPistonOffset(gear);
+}
+function getPistonOffset(gear) {
+  if (gear.variant !== "piston") {
+    return 0;
+  }
+  return Math.sin(gear.pistonTime / 1.5 * Math.PI * 2) * 0.15;
+}
+function getGearAngularVelocity(gear) {
+  if (!gear.active) {
+    return 0;
+  }
+  if (gear.variant === "reverse") {
+    const cycleTime = gear.reverseTimer % gear.reverseInterval;
+    if (cycleTime >= gear.reverseInterval - gear.reversePause) {
+      return 0;
+    }
+  }
+  const multiplier = gear.variant === "speed" ? 2 : 1;
+  return gear.rotationSpeed * multiplier * gear.rotationDir;
+}
+function checkGearCollision(gear, player, playerRadius) {
+  if (!gear.active) {
+    return { onGear: false, y: 0, momentumX: 0, momentumZ: 0 };
+  }
+  const dx = player.x - gear.x;
+  const dz = player.z - gear.z;
+  const distSq = dx * dx + dz * dz;
+  const combinedRadius = gear.radius + playerRadius + 0.02;
+  const gearTop = getGearTopY(gear);
+  const isAbove = player.y >= gearTop - 0.2 && player.y <= gearTop + 0.2;
+  if (distSq >= combinedRadius * combinedRadius || !isAbove) {
+    return { onGear: false, y: 0, momentumX: 0, momentumZ: 0 };
+  }
+  const angularVelocity = getGearAngularVelocity(gear);
+  return {
+    onGear: true,
+    y: gearTop,
+    momentumX: dz * angularVelocity,
+    momentumZ: -dx * angularVelocity
+  };
+}
+function checkBlockFromBelow(gear, player, playerHeight, playerRadius) {
+  if (!gear.active) {
+    return { blocked: false, capY: 0 };
+  }
+  const dx = player.x - gear.x;
+  const dz = player.z - gear.z;
+  const distSq = dx * dx + dz * dz;
+  const combinedRadius = gear.radius + playerRadius;
+  if (distSq >= combinedRadius * combinedRadius) {
+    return { blocked: false, capY: 0 };
+  }
+  const gearBottom = gear.y - gear.height / 2 - gear.crumbleFallDistance;
+  const playerTop = player.y + playerHeight;
+  if (player.y < gearBottom && playerTop > gearBottom) {
+    return { blocked: true, capY: gearBottom - playerHeight };
+  }
+  return { blocked: false, capY: 0 };
+}
+function comboLandingsToMultiplier(landings) {
+  if (landings >= 8) return 5;
+  if (landings >= 6) return 4;
+  if (landings >= 4) return 3;
+  if (landings >= 2) return 2;
+  return 1;
+}
+function getDifficultyBand(height) {
+  if (height < 25) {
+    return {
+      danger: 0.05,
+      distanceMax: 2.2,
+      distanceMin: 1.4,
+      radiusMax: 2.7,
+      radiusMin: 1.9,
+      rotationMax: 0.58,
+      rotationMin: 0.28,
+      verticalMax: 2.45,
+      verticalMin: 2.15
+    };
+  }
+  if (height < 50) {
+    return {
+      danger: 0.32,
+      distanceMax: 2.9,
+      distanceMin: 1.9,
+      radiusMax: 2.2,
+      radiusMin: 1.45,
+      rotationMax: 1,
+      rotationMin: 0.62,
+      verticalMax: 2.55,
+      verticalMin: 2.2
+    };
+  }
+  if (height < 75) {
+    return {
+      danger: 0.62,
+      distanceMax: 3.4,
+      distanceMin: 2.3,
+      radiusMax: 1.8,
+      radiusMin: 1.1,
+      rotationMax: 1.55,
+      rotationMin: 1,
+      verticalMax: 2.85,
+      verticalMin: 2.4
+    };
+  }
+  if (height < 100) {
+    return {
+      danger: 0.88,
+      distanceMax: 3.7,
+      distanceMin: 2.6,
+      radiusMax: 1.5,
+      radiusMin: 1,
+      rotationMax: 2.1,
+      rotationMin: 1.35,
+      verticalMax: 2.95,
+      verticalMin: 2.45
+    };
+  }
+  return {
+    danger: 0.98,
+    distanceMax: 4,
+    distanceMin: 2.8,
+    radiusMax: 1.2,
+    radiusMin: 0.85,
+    rotationMax: 2.8,
+    rotationMin: 2,
+    verticalMax: 3,
+    verticalMin: 2.5
+  };
+}
+function getZoneIndex(height) {
+  if (height >= 100) return 4;
+  if (height >= 75) return 3;
+  if (height >= 50) return 2;
+  if (height >= 25) return 1;
+  return 0;
+}
+function isInChallengeZone(height) {
+  if (height < 90) return false;
+  const nearestZone = Math.round(height / 100) * 100;
+  if (nearestZone < 100) return false;
+  return Math.abs(height - nearestZone) <= 10;
+}
+function getChallengeZoneCenter(height) {
+  return Math.round(height / 100) * 100;
+}
+function mulberry32(seed) {
+  let current = seed >>> 0;
+  return () => {
+    current |= 0;
+    current = current + 1831565813 | 0;
+    let t = Math.imul(current ^ current >>> 15, 1 | current);
+    t ^= t + Math.imul(t ^ t >>> 7, 61 | t);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function cloneState(state) {
+  return {
+    ...state,
+    player: { ...state.player },
+    gears: state.gears.map((gear) => ({ ...gear })),
+    bolts: state.bolts.map((bolt) => ({ ...bolt })),
+    powerUps: state.powerUps.map((powerUp) => ({ ...powerUp }))
+  };
+}
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+function normalizeSigned(value, maxMagnitude) {
+  return clamp(value / maxMagnitude, -1, 1);
+}
+function normalizeAngle(value) {
+  while (value > Math.PI) value -= Math.PI * 2;
+  while (value < -Math.PI) value += Math.PI * 2;
+  return value / Math.PI;
+}
+export {
+  ClockworkClimbSimulation
+};
