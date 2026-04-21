@@ -3,6 +3,13 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { createWindUpAutomaton } from "./characters/wind-up-automaton";
 
 export function mountCharacterSandbox(container: HTMLElement): void {
+  // Hide the main game's DOM overlays (title card, HUD, etc.) so the sandbox
+  // canvas isn't occluded.
+  const gameContainer = document.getElementById("game-container");
+  if (gameContainer) {
+    gameContainer.style.display = "none";
+  }
+
   // Scene setup
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1a1a1a);
