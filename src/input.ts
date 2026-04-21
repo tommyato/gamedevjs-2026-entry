@@ -5,9 +5,23 @@ type MovementVector = {
   y: number;
 };
 
+type GamepadButtonState = {
+  space: boolean;
+  click: boolean;
+};
+
 export class Input {
   private readonly keys = new Map<string, boolean>();
   private readonly prevKeys = new Map<string, boolean>();
+  private gamepadMovement: MovementVector = { x: 0, y: 0 };
+  private readonly gamepadButtons: GamepadButtonState = {
+    space: false,
+    click: false,
+  };
+  private readonly prevGamepadButtons: GamepadButtonState = {
+    space: false,
+    click: false,
+  };
   private mouseX = 0;
   private mouseY = 0;
   private joystickVector: MovementVector = { x: 0, y: 0 };
@@ -226,13 +240,52 @@ export class Input {
   }
 
   update() {
-    // Event-driven input. Previous state is captured in endFrame().
+    this.gamepadMovement = { x: 0, y: 0 };
+    this.gamepadButtons.space = false;
+    this.gamepadButtons.click = false;
+
+    const navigatorGamepads = typeof navigator !== "undefined" && "getGamepads" in navigator
+      ? navigator.getGamepads()
+      : null;
+    const gamepad = navigatorGamepads
+      ? [navigatorGamepads[0], navigatorGamepads[1], navigatorGamepads[2], navigatorGamepads[3]]
+          .find((candidate) => candidate && candidate.connected) || null
+      : null;
+
+    if (!gamepad) {
+      return;
+    }
+
+    const leftStickX = Math.abs(gamepad.axes[0] || 0) < 0.15 ? 0 : (gamepad.axes[0] || 0);
+    const leftStickY = Math.abs(gamepad.axes[1] || 0) < 0.15 ? 0 : (gamepad.axes[1] || 0);
+
+    this.gamepadMovement.x += leftStickX;
+    this.gamepadMovement.y += leftStickY;
+
+    if (gamepad.buttons[12]?.pressed) {
+      this.gamepadMovement.y -= 1;
+    }
+    if (gamepad.buttons[13]?.pressed) {
+      this.gamepadMovement.y += 1;
+    }
+    if (gamepad.buttons[14]?.pressed) {
+      this.gamepadMovement.x -= 1;
+    }
+    if (gamepad.buttons[15]?.pressed) {
+      this.gamepadMovement.x += 1;
+    }
+
+    this.gamepadButtons.space = Boolean(gamepad.buttons[0]?.pressed || gamepad.buttons[1]?.pressed);
+    this.gamepadButtons.click = Boolean(gamepad.buttons[9]?.pressed);
   }
 
   endFrame() {
     for (const [key, value] of this.keys) {
       this.prevKeys.set(key, value);
     }
+
+    this.prevGamepadButtons.space = this.gamepadButtons.space;
+    this.prevGamepadButtons.click = this.gamepadButtons.click;
   }
 
   isDown(key: InputKey): boolean {
@@ -246,9 +299,9 @@ export class Input {
       case "down":
         return this.keys.get("s") || this.keys.get("arrowdown") || false;
       case "space":
-        return this.keys.get(" ") || false;
+        return this.keys.get(" ") || this.gamepadButtons.space || false;
       case "click":
-        return this.keys.get("click") || false;
+        return this.keys.get("click") || this.gamepadButtons.click || false;
     }
   }
 
@@ -267,9 +320,9 @@ export class Input {
       case "down":
         return this.prevKeys.get("s") || this.prevKeys.get("arrowdown") || false;
       case "space":
-        return this.prevKeys.get(" ") || false;
+        return this.prevKeys.get(" ") || this.prevGamepadButtons.space || false;
       case "click":
-        return this.prevKeys.get("click") || false;
+        return this.prevKeys.get("click") || this.prevGamepadButtons.click || false;
     }
   }
 
@@ -294,6 +347,9 @@ export class Input {
       x += this.joystickVector.x;
       y += this.joystickVector.y;
     }
+
+    x += this.gamepadMovement.x;
+    y += this.gamepadMovement.y;
 
     return {
       x: Math.max(-1, Math.min(1, x)),
