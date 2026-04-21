@@ -1904,7 +1904,7 @@ export class Game {
     this.player.prevY = simPlayer.prevY;
     setPrivate(this.player, "speedBoostTimer", simPlayer.speedBoostTimer);
     setPrivate(this.player, "speedBoostStrength", simPlayer.speedBoostStrength);
-    this.player.setDoubleJumpAvailable(simPlayer.doubleJumpAvailable);
+    this.player.setDoubleJumpAvailable(simPlayer.doubleJumpUnlocked);
     this.player.update(dt, this.input, orbitAngle);
     this.player.mesh.position.set(simPlayer.x, simPlayer.y, simPlayer.z);
     this.player.velocity.set(simPlayer.vx, simPlayer.vy, simPlayer.vz);
@@ -2982,7 +2982,7 @@ function getPowerUpDisplayName(type: SimPowerUp["type"]): string {
     case "bolt_magnet": return "BOLT MAGNET! (8s)";
     case "slow_mo": return "SLOW-MO! (3s)";
     case "shield": return "SHIELD ACTIVE!";
-    case "double_jump": return "DOUBLE JUMP! (12s)";
+    case "double_jump": return "DOUBLE JUMP UNLOCKED!";
   }
   return "POWER-UP!";
 }

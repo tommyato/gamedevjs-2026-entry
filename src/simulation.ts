@@ -44,7 +44,7 @@ const PLAYER_RADIUS = 0.3;
 const PLAYER_HEIGHT = 0.6;
 const PLAYER_MOVE_SPEED = 5;
 const JUMP_VELOCITY = 12;
-const DOUBLE_JUMP_DURATION = 12;
+// Double jump is a permanent upgrade for the rest of the run (Metroid-style)
 const HIGH_ALTITUDE_REST_GEAR_HEIGHT = 100;
 const REST_GEAR_RADIUS = 1.2;
 const REST_GEAR_ROTATION_MAX = 1.2;
@@ -266,7 +266,7 @@ export class ClockworkClimbSimulation {
       slowMoTimer: 0,
       shieldActive: false,
       doubleJumpAvailable: false,
-      doubleJumpTimer: 0,
+      doubleJumpUnlocked: false,
       lastLandedGearX: 0,
       lastLandedGearY: 0,
       lastLandedGearZ: 0,
@@ -1071,6 +1071,11 @@ export class ClockworkClimbSimulation {
     this.state.player.lastLandedGearY = getGearTopY(gear);
     this.state.player.lastLandedGearZ = gear.z;
 
+    // Recharge double jump on landing (permanent upgrade, reusable each jump)
+    if (this.state.player.doubleJumpUnlocked) {
+      this.state.player.doubleJumpAvailable = true;
+    }
+
     if (gear.variant === "crumbling" && !gear.crumbleArmed) {
       gear.crumbleArmed = true;
       gear.crumbleTimer = 0;
@@ -1157,10 +1162,8 @@ export class ClockworkClimbSimulation {
     player.speedBoostTimer = Math.max(0, player.speedBoostTimer - dt);
     player.boltMagnetTimer = Math.max(0, player.boltMagnetTimer - dt);
     player.slowMoTimer = Math.max(0, player.slowMoTimer - dt);
-    player.doubleJumpTimer = Math.max(0, player.doubleJumpTimer - dt);
-    if (player.doubleJumpTimer === 0) {
-      player.doubleJumpAvailable = false;
-    }
+    // Double jump recharges every time player lands on a gear
+    // (doubleJumpAvailable is reset to true on landing if doubleJumpUnlocked)
 
     const speedBoost = player.speedBoostTimer > 0
       ? lerp(player.speedBoostStrength, 1, 1 - player.speedBoostTimer / 0.9)
@@ -1224,8 +1227,7 @@ export class ClockworkClimbSimulation {
       }
     } else if (!player.onGround && player.doubleJumpAvailable && action.jump) {
       player.vy = JUMP_VELOCITY;
-      player.doubleJumpAvailable = false;
-      player.doubleJumpTimer = 0;
+      player.doubleJumpAvailable = false; // consumed — recharges on next landing
       this.events.push({ type: "double_jump", x: player.x, y: player.y, z: player.z });
     }
 
@@ -1337,8 +1339,8 @@ export class ClockworkClimbSimulation {
           player.shieldActive = true;
           break;
         case "double_jump":
+          player.doubleJumpUnlocked = true;
           player.doubleJumpAvailable = true;
-          player.doubleJumpTimer = DOUBLE_JUMP_DURATION;
           break;
       }
       this.events.push({
@@ -1660,7 +1662,7 @@ export class ClockworkClimbSimulation {
       this.state.gameState = "dying";
       this.deathFreezeTimer = 0.2;
       this.state.player.doubleJumpAvailable = false;
-      this.state.player.doubleJumpTimer = 0;
+      this.state.player.doubleJumpUnlocked = false;
       if (this.state.comboMultiplier > 1) {
         this.breakCombo();
       } else {

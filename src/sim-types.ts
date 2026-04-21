@@ -68,7 +68,7 @@ export type SimPlayer = {
   slowMoTimer: number;
   shieldActive: boolean;
   doubleJumpAvailable: boolean;
-  doubleJumpTimer: number;
+  doubleJumpUnlocked: boolean;
   lastLandedGearX: number;
   lastLandedGearY: number;
   lastLandedGearZ: number;
