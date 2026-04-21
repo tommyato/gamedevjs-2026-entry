@@ -1076,7 +1076,7 @@ export class ClockworkClimbSimulation {
     maybeUnlock("CLOUD_WALKER", this.state.heightMaxReached >= 100);
     maybeUnlock("BOLT_COLLECTOR", this.state.boltCount >= 10);
     maybeUnlock("BOLT_HOARDER", this.state.boltCount >= 25);
-    maybeUnlock("ENDURANCE", this.state.gameTime >= 60);
+    maybeUnlock("ENDURANCE", this.state.gameTime >= 60 && this.state.heightMaxReached >= 10);
     maybeUnlock("COMBO_STARTER", this.state.comboMultiplier >= 2);
     maybeUnlock("COMBO_MASTER", this.state.comboMultiplier >= 5);
     maybeUnlock("WIND_RIDER", this.state.windGearCount >= 3);
@@ -1112,23 +1112,24 @@ export class ClockworkClimbSimulation {
     const player = this.state.player;
     if (!player.onGround) return false;
 
-    // Check if standing on a crumbling gear that's about to fall
     const activeGear = this.state.activeGearId !== null
       ? this.state.gears.find((g) => g.id === this.state.activeGearId)
       : null;
-    if (!activeGear || activeGear.variant !== "crumbling" || !activeGear.crumbleArmed) return false;
+    if (!activeGear) return false;
 
-    // Only check once crumble is well underway
-    if (activeGear.crumbleTimer < 0.8) return false;
+    // For crumbling gears: check once crumble is underway
+    // For non-crumbling gears: check if there's no upward path at all
+    const isCrumbling = activeGear.variant === "crumbling" && activeGear.crumbleArmed;
+    if (isCrumbling && activeGear.crumbleTimer < 0.8) return false;
 
     // Max jump height is ~3.6m (vy=12, gravity=20 → peak at vy²/2g = 3.6)
     const jumpReach = 4.0;
-    const lateralReach = 5.0; // max horizontal distance during a jump
+    const lateralReach = 5.0;
 
+    let hasReachableAbove = false;
     for (const gear of this.state.gears) {
       if (gear.id === activeGear.id) continue;
       if (!gear.active) continue;
-      // Skip crumbling gears that are already armed (about to fall too)
       if (gear.variant === "crumbling" && gear.crumbleArmed) continue;
 
       const dx = gear.x - player.x;
@@ -1137,25 +1138,47 @@ export class ClockworkClimbSimulation {
       const horizontalDist = Math.hypot(dx, dz);
 
       if (horizontalDist <= lateralReach && dy <= jumpReach && dy >= -2) {
-        return false; // Found a reachable gear
+        hasReachableAbove = true;
+        break;
       }
     }
-    return true; // No reachable gears — player is stranded
+
+    if (hasReachableAbove) return false;
+
+    // For non-crumbling gears, only trigger after a grace period to avoid
+    // false positives during normal upward generation lag
+    if (!isCrumbling) {
+      // Player must have been on this gear for > 2 seconds with no path
+      if (this.timeSinceLastLanding < 2) return false;
+    }
+
+    // Stranded — spawn a rescue gear above and to the side
+    this.spawnRescueGear(player);
+    return false; // Don't kill — we just gave them a way out
+  }
+
+  private spawnRescueGear(player: SimPlayer) {
+    const angle = Math.atan2(player.z, player.x) + this.randomRange(0.8, 1.4);
+    const distance = this.randomRange(1.5, 2.5);
+    const gear = this.createGear({
+      x: Math.cos(angle) * distance,
+      y: player.y + this.randomRange(2.0, 3.0),
+      z: Math.sin(angle) * distance,
+      radius: 1.8,
+      height: 0.3,
+      rotationSpeed: 0.3,
+      variant: "normal",
+    });
+    this.state.gears.push(gear);
+    this.state.bolts.push(this.createBolt(gear));
+    this.events.push({ type: "milestone", height: Math.floor(player.y), nextMilestone: this.state.nextMilestone });
+    this.consecutiveCrumble = 0;
   }
 
   private checkDeath() {
-    // Stranded detection: end game if stuck on a crumbling gear with no escape
-    if (this.state.gameState === "playing" && this.isPlayerStranded()) {
-      this.state.gameState = "dying";
-      this.deathFreezeTimer = 0.2;
-      if (this.state.comboMultiplier > 1) {
-        this.breakCombo();
-      } else {
-        this.state.comboLandings = 0;
-        this.state.comboMultiplier = 1;
-      }
-      this.events.push({ type: "death_start" });
-      return;
+    // Stranded detection: spawns a rescue gear if stuck (no longer kills)
+    if (this.state.gameState === "playing") {
+      this.isPlayerStranded();
     }
 
     if (this.state.player.y < this.cameraY - 12 && this.state.gameState === "playing") {
