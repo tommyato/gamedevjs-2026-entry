@@ -219,8 +219,7 @@ export class Game {
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
   private playerShadow!: THREE.Mesh;
-  private playerGearShadow!: THREE.Mesh;
-  private readonly gearShadowMap = new Map<Gear, { mesh: THREE.Mesh; lowerGear: Gear }>();
+  private shadowLight!: THREE.DirectionalLight;
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
@@ -313,7 +312,8 @@ export class Game {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.5;
-    this.renderer.shadowMap.enabled = false;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.insertBefore(this.renderer.domElement, container.firstChild);
 
     this.scene = new THREE.Scene();
@@ -325,11 +325,11 @@ export class Game {
     this.camera.position.set(0, 6.8, 11.2);
     this.camera.lookAt(0, 4, 0);
 
-    const ambient = new THREE.AmbientLight(0xc7aa7a, 1.35);
+    const ambient = new THREE.AmbientLight(0xc7aa7a, 1.0);
     this.scene.add(ambient);
     this.ambientLight = ambient;
 
-    const hemisphere = new THREE.HemisphereLight(0xf2dcc2, 0x2b1a10, 1.1);
+    const hemisphere = new THREE.HemisphereLight(0xf2dcc2, 0x2b1a10, 0.85);
     this.scene.add(hemisphere);
 
     const keyLight = new THREE.DirectionalLight(0xffd6a3, 2.8);
@@ -342,6 +342,24 @@ export class Game {
     const fillLight = new THREE.DirectionalLight(0xb8703a, 1.4);
     fillLight.position.set(-7, 9, -6);
     this.scene.add(fillLight);
+
+    // Shadow light — straight down for vertical shadow projection (Super Mario Galaxy style).
+    // Follows the player each frame so the ortho frustum stays centered on the action.
+    this.shadowLight = new THREE.DirectionalLight(0xffd6a3, 1.0);
+    this.shadowLight.position.set(0, 30, 0);
+    this.shadowLight.target.position.set(0, 0, 0);
+    this.shadowLight.castShadow = true;
+    this.shadowLight.shadow.mapSize.set(2048, 2048);
+    this.shadowLight.shadow.camera.near = 0.5;
+    this.shadowLight.shadow.camera.far = 60;
+    this.shadowLight.shadow.camera.left = -12;
+    this.shadowLight.shadow.camera.right = 12;
+    this.shadowLight.shadow.camera.top = 12;
+    this.shadowLight.shadow.camera.bottom = -12;
+    this.shadowLight.shadow.bias = -0.002;
+    this.shadowLight.shadow.normalBias = 0.02;
+    this.scene.add(this.shadowLight);
+    this.scene.add(this.shadowLight.target);
 
     this.playerLight = new THREE.PointLight(0xffc06a, 12, 16, 2);
     this.playerLight.position.set(0, 4.5, 4);
@@ -389,6 +407,7 @@ export class Game {
     });
     this.towerBase = new THREE.Mesh(towerGeo, towerMat);
     this.towerBase.position.y = 190;
+    this.towerBase.receiveShadow = true;
     this.scene.add(this.towerBase);
 
     this.scene.add(this.backgroundGroup);
@@ -410,21 +429,6 @@ export class Game {
     this.playerShadow.rotation.x = -Math.PI / 2;
     this.playerShadow.visible = false;
     this.scene.add(this.playerShadow);
-
-    const playerGearShadowGeo = new THREE.CircleGeometry(0.4, 16);
-    const playerGearShadowMat = new THREE.MeshBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 0.4,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    this.playerGearShadow = new THREE.Mesh(playerGearShadowGeo, playerGearShadowMat);
-    this.playerGearShadow.rotation.x = -Math.PI / 2;
-    this.playerGearShadow.position.set(0, 0.61, 0);
-    this.playerGearShadow.renderOrder = 5;
-    this.playerGearShadow.visible = false;
-    this.player.mesh.add(this.playerGearShadow);
 
     const hud = document.getElementById("hud");
     const titleOverlay = document.getElementById("title-overlay");
@@ -1258,15 +1262,11 @@ export class Game {
     for (const mesh of this.visualPowerUpMap.values()) {
       this.scene.remove(mesh);
     }
-    for (const { mesh } of this.gearShadowMap.values()) {
-      this.scene.remove(mesh);
-    }
     this.visualGearMap.clear();
     this.visualBoltMap.clear();
     this.visualPowerUpMap.clear();
     this.gears = [];
     this.bolts = [];
-    this.gearShadowMap.clear();
     this.gearTickNextTimes.clear();
     this.backgroundGroup.clear();
     this.backgroundDecorations = [];
@@ -1478,7 +1478,6 @@ export class Game {
     this.titleOverlay.style.overflowY = "";
     this.player.reset(0, 2);
     this.player.resetVisuals();
-    this.playerGearShadow.visible = false;
     this.resetVisualWorld();
 
     const { state, events } = this.sim.reset();
@@ -1556,7 +1555,7 @@ export class Game {
     this.updateWorld(dt);
     this.updateCamera(dt, state);
     this.updatePlayerShadow();
-    this.updatePlayerGearShadow();
+    this.updateShadowLight();
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
     this.updateAIGhost(dt);
@@ -1586,7 +1585,6 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.playerShadow.visible = false;
-    this.playerGearShadow.visible = false;
     stopAmbientTick();
     stopMusic();
     this.deathAnimTimer = 0.4;
@@ -1772,8 +1770,6 @@ export class Game {
   }
 
   private syncVisuals(state: SimState) {
-    let rebuildShadows = false;
-
     const nextGearIds = new Set(state.gears.map((gear) => gear.id));
     for (const [id, gear] of this.visualGearMap) {
       if (nextGearIds.has(id)) {
@@ -1782,12 +1778,6 @@ export class Game {
       this.scene.remove(gear.mesh);
       this.visualGearMap.delete(id);
       this.gearTickNextTimes.delete(id);
-      const shadow = this.gearShadowMap.get(gear);
-      if (shadow) {
-        this.scene.remove(shadow.mesh);
-        this.gearShadowMap.delete(gear);
-      }
-      rebuildShadows = true;
     }
 
     for (const simGear of state.gears) {
@@ -1796,7 +1786,6 @@ export class Game {
         gear = this.createGearVisual(simGear);
         this.visualGearMap.set(simGear.id, gear);
         this.scene.add(gear.mesh);
-        rebuildShadows = true;
       }
       this.applySimGearToVisual(gear, simGear);
     }
@@ -1847,9 +1836,6 @@ export class Game {
     }
 
     this.player.mesh.position.set(state.player.x, state.player.y, state.player.z);
-    if (rebuildShadows) {
-      this.rebuildGearDropShadows();
-    }
     this.ensureBackgroundCoverage(state);
   }
 
@@ -2102,7 +2088,7 @@ export class Game {
       decoration.mesh.position.y = decoration.baseY + Math.sin(titleTime + decoration.bobPhase) * decoration.bobAmplitude;
     }
 
-    this.updateGearDropShadows();
+    this.updateGearShadowCasters();
     this.updateSteam(dt);
     this.particles.update(dt, this.player.mesh.position);
   }
@@ -2151,74 +2137,25 @@ export class Game {
     this.updatePlayerLight(dt);
   }
 
-  private rebuildGearDropShadows() {
-    for (const { mesh } of this.gearShadowMap.values()) {
-      this.scene.remove(mesh);
-    }
-    this.gearShadowMap.clear();
+  private updateShadowLight() {
+    const playerPos = this.player.mesh.position;
+    this.shadowLight.position.set(playerPos.x, playerPos.y + 25, playerPos.z);
+    this.shadowLight.target.position.set(playerPos.x, playerPos.y - 10, playerPos.z);
+    this.shadowLight.target.updateMatrixWorld();
+  }
+
+  private updateGearShadowCasters() {
+    // Only gears within ~15 units vertically of the player cast/receive shadows.
+    // Keeps the shadow map budget focused on what the camera can actually see.
+    const playerY = this.player.mesh.position.y;
     for (const gear of this.gears) {
-      this.addDropShadowForGear(gear);
-    }
-  }
-
-  private addDropShadowForGear(upperGear: Gear) {
-    let bestLower: Gear | null = null;
-    let bestTopY = -Infinity;
-
-    for (const lowerGear of this.gears) {
-      if (lowerGear === upperGear) continue;
-      const lowerTopY = lowerGear.getTopY();
-      if (lowerTopY >= upperGear.mesh.position.y) continue;
-
-      const dx = upperGear.mesh.position.x - lowerGear.mesh.position.x;
-      const dz = upperGear.mesh.position.z - lowerGear.mesh.position.z;
-      const overlapThreshold = lowerGear.radius + upperGear.radius * 0.5;
-      if (dx * dx + dz * dz > overlapThreshold * overlapThreshold) continue;
-
-      if (lowerTopY > bestTopY) {
-        bestTopY = lowerTopY;
-        bestLower = lowerGear;
-      }
-    }
-
-    if (bestLower === null) return;
-
-    const verticalDist = upperGear.mesh.position.y - bestLower.getTopY();
-    const opacity = THREE.MathUtils.clamp(0.55 - verticalDist * 0.025, 0.1, 0.55);
-    const shadowRadius = Math.min(upperGear.radius * 0.65, bestLower.radius * 0.7);
-
-    const shadowGeo = new THREE.CircleGeometry(shadowRadius, 16);
-    const shadowMat = new THREE.MeshBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
-    shadowMesh.rotation.x = -Math.PI / 2;
-    shadowMesh.position.set(
-      upperGear.mesh.position.x,
-      upperGear.mesh.position.y - upperGear.height / 2,
-      upperGear.mesh.position.z
-    );
-
-    this.scene.add(shadowMesh);
-    this.gearShadowMap.set(upperGear, { mesh: shadowMesh, lowerGear: bestLower });
-  }
-
-  private updateGearDropShadows() {
-    for (const [upperGear, { mesh: shadowMesh, lowerGear }] of this.gearShadowMap) {
-      const upperActive = getPrivateBoolean(upperGear, "active", true);
-      const lowerActive = getPrivateBoolean(lowerGear, "active", true);
-      if (!upperActive || !lowerActive) {
-        shadowMesh.visible = false;
-        continue;
-      }
-      shadowMesh.visible = true;
-      shadowMesh.position.x = upperGear.mesh.position.x;
-      shadowMesh.position.z = upperGear.mesh.position.z;
-      shadowMesh.position.y = upperGear.mesh.position.y - upperGear.height / 2;
+      const withinRange = Math.abs(gear.mesh.position.y - playerY) <= 15;
+      gear.mesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = withinRange;
+          child.receiveShadow = withinRange;
+        }
+      });
     }
   }
 
@@ -2647,11 +2584,11 @@ export class Game {
       bloom: number;
     };
     const zones: Zone[] = [
-      { height: 0, bg: 0x140d0a, fogDensity: 0.014, ambient: 0xc7aa7a, ambientIntensity: 1.35, bloom: 0.18 },
-      { height: 25, bg: 0x0f1318, fogDensity: 0.012, ambient: 0x8899bb, ambientIntensity: 1.5, bloom: 0.22 },
-      { height: 50, bg: 0x181b22, fogDensity: 0.010, ambient: 0xb8c4dd, ambientIntensity: 1.7, bloom: 0.26 },
-      { height: 75, bg: 0x1a1408, fogDensity: 0.008, ambient: 0xffd6a3, ambientIntensity: 2.0, bloom: 0.32 },
-      { height: 100, bg: 0x0a0a14, fogDensity: 0.006, ambient: 0xff88aa, ambientIntensity: 2.4, bloom: 0.40 },
+      { height: 0, bg: 0x140d0a, fogDensity: 0.014, ambient: 0xc7aa7a, ambientIntensity: 1.0, bloom: 0.18 },
+      { height: 25, bg: 0x0f1318, fogDensity: 0.012, ambient: 0x8899bb, ambientIntensity: 1.1, bloom: 0.22 },
+      { height: 50, bg: 0x181b22, fogDensity: 0.010, ambient: 0xb8c4dd, ambientIntensity: 1.25, bloom: 0.26 },
+      { height: 75, bg: 0x1a1408, fogDensity: 0.008, ambient: 0xffd6a3, ambientIntensity: 1.5, bloom: 0.32 },
+      { height: 100, bg: 0x0a0a14, fogDensity: 0.006, ambient: 0xff88aa, ambientIntensity: 1.8, bloom: 0.40 },
     ];
 
     let from = zones[0];
@@ -2750,35 +2687,6 @@ export class Game {
     } else {
       this.playerShadow.visible = false;
     }
-  }
-
-  private updatePlayerGearShadow() {
-    let closestVerticalDistance = Infinity;
-
-    for (const gear of this.gears) {
-      const active = getPrivateBoolean(gear, "active", true);
-      if (!active) continue;
-      if (gear.mesh.position.y <= this.player.mesh.position.y) continue;
-
-      const dx = this.player.mesh.position.x - gear.mesh.position.x;
-      const dz = this.player.mesh.position.z - gear.mesh.position.z;
-      const footprintRadius = gear.radius * 0.8;
-      if (dx * dx + dz * dz >= footprintRadius * footprintRadius) continue;
-
-      const verticalDistance = gear.mesh.position.y - this.player.mesh.position.y;
-      if (verticalDistance < closestVerticalDistance) {
-        closestVerticalDistance = verticalDistance;
-      }
-    }
-
-    if (!Number.isFinite(closestVerticalDistance)) {
-      this.playerGearShadow.visible = false;
-      return;
-    }
-
-    const opacity = THREE.MathUtils.clamp(0.55 - closestVerticalDistance * 0.06, 0.15, 0.5);
-    (this.playerGearShadow.material as THREE.MeshBasicMaterial).opacity = opacity;
-    this.playerGearShadow.visible = true;
   }
 
   private triggerLandingShake(strength: number) {

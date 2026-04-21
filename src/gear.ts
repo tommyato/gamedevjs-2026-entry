@@ -175,6 +175,13 @@ export class Gear {
     if (this.variant === "milestone") {
       this.addMilestoneEffects();
     }
+
+    this.mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
   }
 
   private addPistonDetail() {
