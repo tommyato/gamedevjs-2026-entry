@@ -1241,13 +1241,25 @@ export class Game {
     const actualSpeed = Math.hypot(state.player.vx, state.player.vy, state.player.vz);
     const speedGearActive = this.speedGearTrailTimer > 0 && actualSpeed > 3;
 
-    const verticalSpeed = Math.abs(state.player.vy);
-    const horizontalSpeed = Math.hypot(state.player.vx, state.player.vz);
-    const verticalFactor = THREE.MathUtils.clamp((verticalSpeed - 8) / 6, 0, 1);
-    const horizontalFactor = THREE.MathUtils.clamp((horizontalSpeed - 5) / 5, 0, 1);
     const boostFactor = THREE.MathUtils.clamp(state.player.speedBoostTimer * 0.4 + state.player.speedBoostStrength * 0.35, 0, 1);
     const speedGearFactor = speedGearActive ? 0.55 : 0;
-    const speedFactor = Math.max(verticalFactor, horizontalFactor, boostFactor, speedGearFactor);
+    // Only show trails when a speed effect is active (boost or speed gear) — not from normal jump/fall velocity
+    const hasSpeedEffect = boostFactor > 0.05 || speedGearFactor > 0;
+    if (!hasSpeedEffect) {
+      for (const segment of this.trailSegments) {
+        const material = segment.line.material;
+        material.opacity = Math.max(0, material.opacity - dt * 5);
+        if (material.opacity <= 0.01) {
+          segment.line.visible = false;
+        }
+      }
+      return;
+    }
+    // Scale trail intensity by velocity when a speed effect IS active
+    const verticalSpeed = Math.abs(state.player.vy);
+    const horizontalSpeed = Math.hypot(state.player.vx, state.player.vz);
+    const velocityBonus = THREE.MathUtils.clamp(Math.max((verticalSpeed - 6) / 8, (horizontalSpeed - 4) / 6), 0, 0.45);
+    const speedFactor = Math.max(boostFactor, speedGearFactor) + velocityBonus;
 
     // Update trail line colors: blue tint for speed gear, default cyan otherwise
     const speedGearColor = 0x4488ff;
