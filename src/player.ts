@@ -19,6 +19,7 @@ export class Player {
   private readonly doubleJumpAura: THREE.Mesh;
   private readonly shieldAura: THREE.Mesh;
   private scaleYImpulse = 0;
+  private scaleImpulseDecayRate = 12;
   private speedBoostTimer = 0;
   private speedBoostStrength = 1;
   private doubleJumpCharges = 0;
@@ -156,7 +157,12 @@ export class Player {
     this.visualRoot.scale.x = THREE.MathUtils.lerp(this.visualRoot.scale.x, targetScaleXZ, scaleLerp);
     this.visualRoot.scale.y = THREE.MathUtils.lerp(this.visualRoot.scale.y, targetScaleY, scaleLerp);
     this.visualRoot.scale.z = THREE.MathUtils.lerp(this.visualRoot.scale.z, targetScaleXZ, scaleLerp);
-    this.scaleYImpulse = THREE.MathUtils.lerp(this.scaleYImpulse, 0, 1 - Math.exp(-dt * 12));
+    this.scaleYImpulse = THREE.MathUtils.lerp(this.scaleYImpulse, 0, 1 - Math.exp(-dt * this.scaleImpulseDecayRate));
+    // Recover normal decay rate once the impulse has settled (bouncy launches use a
+    // slower decay for the prolonged stretch; normal jumps use the default).
+    if (Math.abs(this.scaleYImpulse) < 0.02 && this.scaleImpulseDecayRate !== 12) {
+      this.scaleImpulseDecayRate = 12;
+    }
 
     const targetLean = THREE.MathUtils.clamp(-move.x * 0.16, -0.16, 0.16);
     this.visualRoot.rotation.z = THREE.MathUtils.lerp(
@@ -226,6 +232,15 @@ export class Player {
 
   land(impactSpeed: number) {
     this.scaleYImpulse = -THREE.MathUtils.clamp(impactSpeed * 0.04, 0.12, 0.32);
+    this.scaleImpulseDecayRate = 12;
+  }
+
+  // Visual boost for launches off bouncy gears: stronger stretch (~1.45× effective peak
+  // vs ~1.25× for a normal jump) with a slower decay so the spring motion reads clearly.
+  // Playful archetype — ease-out-back feel, ~250ms.
+  bouncyLaunch() {
+    this.scaleYImpulse = 0.5;
+    this.scaleImpulseDecayRate = 5;
   }
 
   bonk(impactSpeed: number) {
@@ -258,6 +273,7 @@ export class Player {
     this.highestY = y;
     this.prevY = y;
     this.scaleYImpulse = 0;
+    this.scaleImpulseDecayRate = 12;
     this.speedBoostTimer = 0;
     this.speedBoostStrength = 1;
     this.doubleJumpCharges = 0;

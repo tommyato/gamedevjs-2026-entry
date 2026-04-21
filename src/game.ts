@@ -188,6 +188,8 @@ export class Game {
   private hudShieldCount!: HTMLElement;
   private doubleJumpFlashTimer = 0;
   private shieldFlashTimer = 0;
+  private lastDoubleJumpCharges = 0;
+  private lastShieldCount = 0;
   private shieldSaveFlashTimer = 0;
   private comboGlowOverlay!: HTMLDivElement;
   private scorePopLayer!: HTMLDivElement;
@@ -282,6 +284,8 @@ export class Game {
   private backgroundDecorations: BackgroundDecoration[] = [];
   private titleBackdropDecorations: TitleBackdropDecoration[] = [];
   private readonly gearTickNextTimes = new Map<number, number>();
+  // Per-gear squash animation time (seconds since landing) for bouncy gears.
+  private readonly bouncyGearSquashTimers = new Map<number, number>();
   private backgroundGenerationHeight = 0;
   private cameraKick = 0;
   private readonly cameraDistancePulses: CameraDistancePulse[] = [];
@@ -1313,6 +1317,7 @@ export class Game {
     this.gears = [];
     this.bolts = [];
     this.gearTickNextTimes.clear();
+    this.bouncyGearSquashTimers.clear();
     this.backgroundGroup.clear();
     this.backgroundDecorations = [];
     this.clearTitleBackdrop();
@@ -1517,6 +1522,8 @@ export class Game {
     this.cameraDistancePulses.length = 0;
     this.comboFovPulseTimer = 0;
     this.lastComboMultiplier = 1;
+    this.lastDoubleJumpCharges = 0;
+    this.lastShieldCount = 0;
     this.closeCallFlashTimer = 0;
     this.nearMissSlowTimer = 0;
     this.steamSpawnTimer = 0;
@@ -1612,6 +1619,7 @@ export class Game {
     this.handleEvents(events, state);
     this.updatePlayerVisuals(dt, state.player, state.orbitAngle);
     this.syncVisuals(state);
+    this.updateBouncyGearSquashes(dt);
     setTickRate(this.heightMaxReached);
     setMusicIntensity(this.heightMaxReached);
     this.challengeZoneBloomBoost = Math.max(0, this.challengeZoneBloomBoost - dt * 0.7);
@@ -1884,6 +1892,7 @@ export class Game {
       this.scene.remove(gear.mesh);
       this.visualGearMap.delete(id);
       this.gearTickNextTimes.delete(id);
+      this.bouncyGearSquashTimers.delete(id);
     }
 
     for (const simGear of state.gears) {
@@ -2025,6 +2034,9 @@ export class Game {
             this.nearMissSlowTimer = 0.12;
           }
           this.triggerLandingShake(Math.min(Math.abs(event.landingSpeed) * 0.01, 0.15));
+          if (event.variant === "bouncy") {
+            this.triggerBouncyGearSquash(event.gearId);
+          }
           if (event.variant === "wind" && !this.seenWindGear) {
             this.seenWindGear = true;
             // Delay the toast slightly so a combo_up in the same batch doesn't overwrite it
@@ -2119,6 +2131,7 @@ export class Game {
           this.particles.spawnJumpSparks(this.landingEffectPosition);
           playJump(1.45);
           this.cameraKick = Math.max(this.cameraKick, 0.18);
+          this.player.bouncyLaunch();
           break;
         case "double_jump":
           this.landingEffectPosition.set(event.x, event.y, event.z);
@@ -2382,9 +2395,22 @@ export class Game {
       return;
     }
 
+    // ~20% larger than the base 0.2-radius geometry so the shadow reads as grounded,
+    // not as a debug dot. Player radius is 0.3 so this remains modest.
+    const BASE_SCALE = 1.2;
+
     const landingSurface = this.findLandingSurface(state);
     if (!landingSurface) {
-      this.landingCueGroup.visible = false;
+      // No landing target below (player over a gap). Instead of hiding the cue — which
+      // strips the player of spatial awareness — project it a fixed distance below the
+      // player's feet so there is always a visual "down" reference. Render only the
+      // soft core at reduced opacity so it reads clearly as "no target" vs. "target".
+      this.landingCueGroup.visible = true;
+      this.landingCueGroup.position.set(player.x, player.y - 3.0, player.z);
+      this.landingCueGroup.scale.setScalar(BASE_SCALE);
+      this.landingCueCoreMaterial.opacity = 0.14;
+      this.landingCueRingMaterial.opacity = 0;
+      this.landingCueGlowMaterial.opacity = 0;
       return;
     }
 
@@ -2402,10 +2428,76 @@ export class Game {
 
     this.landingCueGroup.visible = true;
     this.landingCueGroup.position.set(player.x, landingSurface.y + 0.018, player.z);
-    this.landingCueGroup.scale.setScalar(1);
+    this.landingCueGroup.scale.setScalar(BASE_SCALE);
     this.landingCueCoreMaterial.opacity = coreOpacity;
     this.landingCueRingMaterial.opacity = ringOpacity;
     this.landingCueGlowMaterial.opacity = 0;
+  }
+
+  private triggerBouncyGearSquash(gearId: number) {
+    this.bouncyGearSquashTimers.set(gearId, 0);
+  }
+
+  private updateBouncyGearSquashes(dt: number) {
+    if (this.bouncyGearSquashTimers.size === 0) {
+      return;
+    }
+
+    // Three-phase bouncy squash — ~380ms total, reads as a clear "boing":
+    //   phase 1 (0 → 80ms):   1.0 → {sy: 0.7, sxz: 1.12}  squash on contact (ease-out)
+    //   phase 2 (80 → 260ms): squashed → {sy: 1.18, sxz: 0.94}  spring out with overshoot (ease-out-back)
+    //   phase 3 (260 → 380ms): overshoot → 1.0  settle (ease-out)
+    const PHASE1_END = 0.08;
+    const PHASE2_END = 0.26;
+    const PHASE3_END = 0.38;
+
+    const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
+    // ease-out-back approximation with ~15% overshoot
+    const easeOutBack = (t: number) => {
+      const c1 = 1.70158;
+      const c3 = c1 + 1;
+      return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    };
+
+    const toRemove: number[] = [];
+    for (const [gearId, elapsed] of this.bouncyGearSquashTimers) {
+      const next = elapsed + dt;
+      const gear = this.visualGearMap.get(gearId);
+      if (!gear) {
+        toRemove.push(gearId);
+        continue;
+      }
+
+      let sy: number;
+      let sxz: number;
+      if (next >= PHASE3_END) {
+        sy = 1;
+        sxz = 1;
+        toRemove.push(gearId);
+      } else if (next < PHASE1_END) {
+        const t = easeOut(next / PHASE1_END);
+        sy = 1 + (0.7 - 1) * t;
+        sxz = 1 + (1.12 - 1) * t;
+      } else if (next < PHASE2_END) {
+        const t = easeOutBack((next - PHASE1_END) / (PHASE2_END - PHASE1_END));
+        sy = 0.7 + (1.18 - 0.7) * t;
+        sxz = 1.12 + (0.94 - 1.12) * t;
+      } else {
+        const t = easeOut((next - PHASE2_END) / (PHASE3_END - PHASE2_END));
+        sy = 1.18 + (1 - 1.18) * t;
+        sxz = 0.94 + (1 - 0.94) * t;
+      }
+
+      // Crumbling branch of syncCrumbleVisuals would fight this — bouncy gears are never
+      // crumbling, so the non-crumble branch has already reset scale to 1 for us, and we
+      // can apply our squash on top each frame.
+      gear.mesh.scale.set(sxz, sy, sxz);
+
+      this.bouncyGearSquashTimers.set(gearId, next);
+    }
+    for (const id of toRemove) {
+      this.bouncyGearSquashTimers.delete(id);
+    }
   }
 
   private findLandingSurface(state: SimState): { y: number } | null {
@@ -2692,28 +2784,18 @@ export class Game {
 
     const djCharges = this.simState?.player.doubleJumpCharges ?? 0;
     this.doubleJumpFlashTimer = Math.max(0, this.doubleJumpFlashTimer - dt);
-    if (djCharges > 0) {
-      this.hudDoubleJumpCharges.textContent = `⬆ ×${djCharges}`;
-      const flashBoost = this.doubleJumpFlashTimer > 0
-        ? 0.3 * Math.sin(this.doubleJumpFlashTimer * 40)
-        : 0;
-      this.hudDoubleJumpCharges.style.opacity = String(Math.min(1, 0.9 + flashBoost));
-      this.hudDoubleJumpCharges.style.display = "block";
-    } else {
-      this.hudDoubleJumpCharges.style.display = "none";
+    this.updatePowerupSlot(this.hudDoubleJumpCharges, djCharges, this.lastDoubleJumpCharges);
+    if (djCharges !== this.lastDoubleJumpCharges) {
+      this.pulsePowerupSlot(this.hudDoubleJumpCharges);
+      this.lastDoubleJumpCharges = djCharges;
     }
 
     const shieldCount = this.simState?.player.shieldCount ?? 0;
     this.shieldFlashTimer = Math.max(0, this.shieldFlashTimer - dt);
-    if (shieldCount > 0) {
-      this.hudShieldCount.textContent = `🛡 ×${shieldCount}`;
-      const flashBoost = this.shieldFlashTimer > 0
-        ? 0.3 * Math.sin(this.shieldFlashTimer * 40)
-        : 0;
-      this.hudShieldCount.style.opacity = String(Math.min(1, 0.9 + flashBoost));
-      this.hudShieldCount.style.display = "block";
-    } else {
-      this.hudShieldCount.style.display = "none";
+    this.updatePowerupSlot(this.hudShieldCount, shieldCount, this.lastShieldCount);
+    if (shieldCount !== this.lastShieldCount) {
+      this.pulsePowerupSlot(this.hudShieldCount);
+      this.lastShieldCount = shieldCount;
     }
     this.updateComboGlow(this.simState?.comboMultiplier ?? 1);
 
@@ -2733,6 +2815,34 @@ export class Game {
     this.zoneAnnouncement.style.transform = `translate(-50%, ${zoneVisible ? (1 - zoneOpacity) * 12 : 12}px)`;
 
     this.updateScorePops(dt);
+  }
+
+  private updatePowerupSlot(slot: HTMLElement, count: number, previousCount: number) {
+    const countEl = slot.querySelector<HTMLElement>('[data-role="count"]');
+    if (count > 0) {
+      slot.classList.remove("empty");
+      if (countEl) {
+        countEl.textContent = `×${count}`;
+      }
+    } else {
+      slot.classList.add("empty");
+      if (countEl) {
+        countEl.textContent = "—";
+      }
+    }
+    void previousCount;
+  }
+
+  private pulsePowerupSlot(slot: HTMLElement) {
+    // Playful motion: ease-out-back, ~200ms, 15% overshoot.
+    slot.animate(
+      [
+        { transform: "scale(1)" },
+        { transform: "scale(1.15)" },
+        { transform: "scale(1)" },
+      ],
+      { duration: 200, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" }
+    );
   }
 
   private updateComboHud(multiplier: number) {

@@ -142,37 +142,81 @@
     #hud-combo.active { opacity: 1; }
     #hud-powerups {
       position: absolute;
-      bottom: 48px;
+      bottom: 96px;
       left: 50%;
       transform: translateX(-50%);
       display: flex;
-      gap: 18px;
-      align-items: center;
+      gap: 14px;
+      align-items: stretch;
       pointer-events: none;
+      padding: 10px 14px;
+      background: rgba(10, 8, 6, 0.82);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 196, 120, 0.15);
+      border-radius: 16px;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
     }
-    #hud-double-jump-charges {
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: 2px;
-      color: #6ee7ff;
-      text-shadow: 0 0 12px rgba(110, 231, 255, 0.65), 0 0 24px rgba(110, 231, 255, 0.35);
-      transition: opacity 80ms ease-out;
+    .hud-powerup-slot {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       padding: 6px 14px;
-      background: rgba(13, 10, 9, 0.55);
-      border: 1px solid rgba(110, 231, 255, 0.25);
-      border-radius: 10px;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.22);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      min-width: 104px;
+      transition: opacity 160ms ease-out, filter 160ms ease-out;
+      transform-origin: center;
+      will-change: transform, opacity;
+    }
+    .hud-powerup-slot.empty {
+      opacity: 0.3;
+      filter: grayscale(0.85);
+    }
+    .hud-powerup-icon {
+      font-size: 26px;
+      line-height: 1;
+      text-shadow: 0 0 12px rgba(255, 196, 120, 0.35);
+    }
+    .hud-powerup-text {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      line-height: 1;
+    }
+    .hud-powerup-label {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      color: #c7a271;
+      opacity: 0.85;
+      margin-bottom: 4px;
+    }
+    .hud-powerup-count {
+      font-family: "Orbitron", ui-monospace, monospace;
+      font-size: 28px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      line-height: 1;
     }
     #hud-shield-count {
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: 2px;
-      color: #ff9955;
-      text-shadow: 0 0 12px rgba(255, 136, 68, 0.65), 0 0 24px rgba(255, 136, 68, 0.35);
-      transition: opacity 80ms ease-out;
-      padding: 6px 14px;
-      background: rgba(13, 10, 9, 0.55);
-      border: 1px solid rgba(255, 136, 68, 0.25);
-      border-radius: 10px;
+      color: #ffc27a;
+      text-shadow: 0 0 12px rgba(255, 170, 68, 0.7), 0 0 24px rgba(255, 136, 40, 0.35);
+    }
+    #hud-shield-count.empty .hud-powerup-label,
+    #hud-shield-count.empty .hud-powerup-count {
+      color: #8a7460;
+      text-shadow: none;
+    }
+    #hud-double-jump-charges {
+      color: #6ee7ff;
+      text-shadow: 0 0 12px rgba(110, 231, 255, 0.65), 0 0 24px rgba(110, 231, 255, 0.35);
+    }
+    #hud-double-jump-charges.empty .hud-powerup-label,
+    #hud-double-jump-charges.empty .hud-powerup-count {
+      color: #6a7782;
+      text-shadow: none;
     }
     #shield-save-overlay {
       position: absolute;
@@ -574,6 +618,19 @@
         bottom: 14px;
         right: 14px;
       }
+      #hud-powerups {
+        /* Touch-jump button is 112px tall at bottom:34px — lift panel above it. */
+        bottom: 160px;
+        padding: 8px 10px;
+        gap: 10px;
+      }
+      .hud-powerup-slot {
+        min-width: 88px;
+        padding: 5px 10px;
+        gap: 8px;
+      }
+      .hud-powerup-icon { font-size: 22px; }
+      .hud-powerup-count { font-size: 24px; }
       #title-overlay h1 {
         font-size: 42px;
         letter-spacing: 4px;
@@ -678,8 +735,20 @@
         <div id="hud-combo"></div>
       </div>
       <div id="hud-powerups">
-        <div id="hud-shield-count" style="display:none"></div>
-        <div id="hud-double-jump-charges" style="display:none"></div>
+        <div id="hud-shield-count" class="hud-powerup-slot empty">
+          <span class="hud-powerup-icon">🛡</span>
+          <span class="hud-powerup-text">
+            <span class="hud-powerup-label">SHIELD</span>
+            <span class="hud-powerup-count" data-role="count">—</span>
+          </span>
+        </div>
+        <div id="hud-double-jump-charges" class="hud-powerup-slot empty">
+          <span class="hud-powerup-icon">⬆</span>
+          <span class="hud-powerup-text">
+            <span class="hud-powerup-label">JUMPS</span>
+            <span class="hud-powerup-count" data-role="count">—</span>
+          </span>
+        </div>
       </div>
       <div id="hud-controls">WASD / ARROWS TO MOVE · SPACE OR TAP TO JUMP</div>
       <button id="pause-btn" type="button" aria-label="Pause">⏸</button>
