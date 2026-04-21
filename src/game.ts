@@ -886,7 +886,7 @@ export class Game {
     this.currentZoneIndex = 0;
     this.unlockedThisRun.clear();
     this.cameraKick = 0;
-    this.orbitAngle = Math.PI / 2 + 2 * (0.45 / 2.5);
+    this.orbitAngle = Math.PI / 2;
     this.orbitAngleTarget = this.orbitAngle;
     this.isDying = false;
     this.deathFreezeTimer = 0;
@@ -1172,21 +1172,24 @@ export class Game {
 
     const verticalLead = THREE.MathUtils.clamp(this.player.velocity.y * 0.12, -1.2, 1.6);
     const followLerp = 1 - Math.exp(-dt * (this.player.onGround ? 5.5 : 4));
-    const orbitLerp = 1 - Math.exp(-dt * 5);
+    const orbitLerp = 1 - Math.exp(-dt * 7);
 
     // Only recompute orbit target when grounded — camera holds steady during jumps
     // so the player can judge trajectories without the world rotating under them.
     if (this.player.onGround) {
-      // Base angle — counterclockwise (increasing) with height. Baseline orientation
-      // at height 0 points the camera down +Z looking toward the origin, matching the
-      // previous camera's framing. We rotate counterclockwise as the player climbs.
-      const radiansPerUnit = 0.45 / 2.5; // ~0.45 rad per ~2.5m of height
-      const baseAngle = Math.PI / 2 + playerY * radiansPerUnit;
+      // Base angle tracks the player's actual angular position around the tower.
+      // This prevents the central shaft from ever occluding the player — the camera
+      // stays on the same side. When the player is at origin (starting gear), fall
+      // back to the current target to avoid atan2(0,0) degeneracy.
+      const playerDist = Math.hypot(playerX, playerZ);
+      const baseAngle = playerDist > 0.5
+        ? Math.atan2(playerZ, playerX)
+        : this.orbitAngleTarget;
 
       // Gear-avoidance nudge — if any nearby gear sits between the camera and the
       // player (in XZ projection), push the target angle further counterclockwise.
       let nudge = 0;
-      const maxNudge = 0.3;
+      const maxNudge = 0.7;
       const nudgeStep = 0.05;
       const angleTolerance = 0.18; // ~10° — how close a gear must be to the cam→player line to count as occluding
       const verticalWindow = 3;
