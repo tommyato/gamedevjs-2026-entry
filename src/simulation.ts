@@ -29,6 +29,16 @@ type BlockResult = {
   capY: number;
 };
 
+type PlacementContext = "normal" | "milestone" | "challenge";
+
+type PlacementResult = {
+  angle: number;
+  anchorId: number | null;
+  score: number;
+  x: number;
+  z: number;
+};
+
 const DEFAULT_FIXED_DT = 1 / 60;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HEIGHT = 0.6;
@@ -39,6 +49,11 @@ const GRAVITY = 20;
 const ORBIT_RADIUS = 12;
 const COMBO_WINDOW = 2.5;
 const BOLT_SCORE_VALUE = 5;
+const MAX_ROUTE_VERTICAL_STEP = 4.1;
+const NORMAL_CLEARANCE_VERTICAL_WINDOW = 1.45;
+const STACKED_VERTICAL_WINDOW = 3.1;
+const STACKED_HORIZONTAL_GAP = 1.15;
+const PATH_ANCHOR_WINDOW = 10;
 
 export class ClockworkClimbSimulation {
   private static readonly DISCRETE_ACTIONS: SimAction[] = [
@@ -178,6 +193,21 @@ export class ClockworkClimbSimulation {
     return cloneState(this.state);
   }
 
+  debugGenerateLayoutToHeight(targetHeight: number): SimState {
+    const goalHeight = Math.max(0, targetHeight);
+    let guard = 0;
+    this.state.heightMaxReached = Math.max(this.state.heightMaxReached, goalHeight);
+    while (this.generationHeight < goalHeight + 40 && guard < 12) {
+      const before = this.generationHeight;
+      this.generateAhead();
+      if (this.generationHeight <= before) {
+        break;
+      }
+      guard += 1;
+    }
+    return cloneState(this.state);
+  }
+
   getObservation(): Float64Array {
     const player = this.state.player;
     const activeGear = this.state.activeGearId === null
@@ -281,34 +311,27 @@ export class ClockworkClimbSimulation {
     for (let index = 1; index < 40; index += 1) {
       const band = getDifficultyBand(height);
       height += this.randomRange(band.verticalMin, band.verticalMax);
-      angle += this.randomRange(0.75, 1.75);
 
       // Insert milestone gear at zone boundaries (25m, 50m, 75m, 100m)
       if (this.nextMilestoneGearHeight <= 100 && height >= this.nextMilestoneGearHeight) {
-        this.spawnMilestoneGear(this.nextMilestoneGearHeight, angle);
+        angle = this.spawnMilestoneGear(this.nextMilestoneGearHeight, angle);
         this.nextMilestoneGearHeight += 25;
       }
 
       const radius = this.randomRange(band.radiusMin, band.radiusMax);
-      let gearX = 0;
-      let gearZ = 0;
-      let placed = false;
-      for (let attempt = 0; attempt < 8; attempt += 1) {
-        const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.8, 0.8);
-        const distance = this.randomRange(band.distanceMin, band.distanceMax);
-        gearX = Math.cos(tryAngle) * distance;
-        gearZ = Math.sin(tryAngle) * distance;
-        if (!this.isGearOverlapping(gearX, height, gearZ, radius)) {
-          placed = true;
-          break;
-        }
-      }
-      if (!placed) continue; // skip this gear entirely rather than overlap
+      const placement = this.findGearPlacement({
+        band,
+        context: "normal",
+        currentAngle: angle,
+        radius,
+        targetY: height,
+      });
+      if (!placement) continue;
       const variant = this.pickGearVariant(height);
       const gear = this.createGear({
-        x: gearX,
+        x: placement.x,
         y: height,
-        z: gearZ,
+        z: placement.z,
         radius,
         height: 0.3,
         rotationSpeed: this.randomRange(band.rotationMin, band.rotationMax),
@@ -317,6 +340,7 @@ export class ClockworkClimbSimulation {
       this.state.gears.push(gear);
       this.trySpawnBolt(gear);
       this.trySpawnPowerUp(gear);
+      angle = placement.angle;
     }
 
     this.generationHeight = height;
@@ -417,34 +441,27 @@ export class ClockworkClimbSimulation {
       for (let index = 0; index < 10; index += 1) {
         const band = getDifficultyBand(height);
         height += this.randomRange(band.verticalMin, band.verticalMax);
-        angle += this.randomRange(0.75, 1.75);
 
         // Insert milestone gear at zone boundaries (25m, 50m, 75m, 100m)
         if (this.nextMilestoneGearHeight <= 100 && height >= this.nextMilestoneGearHeight) {
-          this.spawnMilestoneGear(this.nextMilestoneGearHeight, angle);
+          angle = this.spawnMilestoneGear(this.nextMilestoneGearHeight, angle);
           this.nextMilestoneGearHeight += 25;
         }
 
         const radius = this.randomRange(band.radiusMin, band.radiusMax);
-        let gearX = 0;
-        let gearZ = 0;
-        let placed = false;
-        for (let attempt = 0; attempt < 8; attempt += 1) {
-          const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.8, 0.8);
-          const distance = this.randomRange(band.distanceMin, band.distanceMax);
-          gearX = Math.cos(tryAngle) * distance;
-          gearZ = Math.sin(tryAngle) * distance;
-          if (!this.isGearOverlapping(gearX, height, gearZ, radius)) {
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) continue; // skip rather than overlap
+        const placement = this.findGearPlacement({
+          band,
+          context: "normal",
+          currentAngle: angle,
+          radius,
+          targetY: height,
+        });
+        if (!placement) continue;
         const variant = this.pickGearVariant(height);
         const gear = this.createGear({
-          x: gearX,
+          x: placement.x,
           y: height,
-          z: gearZ,
+          z: placement.z,
           radius,
           height: 0.3,
           rotationSpeed: this.randomRange(band.rotationMin, band.rotationMax),
@@ -453,6 +470,7 @@ export class ClockworkClimbSimulation {
         this.state.gears.push(gear);
         this.trySpawnBolt(gear);
         this.trySpawnPowerUp(gear);
+        angle = placement.angle;
       }
       batchesGenerated += 1;
     }
@@ -461,14 +479,27 @@ export class ClockworkClimbSimulation {
     this.generationAngle = angle;
   }
 
-  private spawnMilestoneGear(targetHeight: number, currentAngle: number) {
+  private spawnMilestoneGear(targetHeight: number, currentAngle: number): number {
     // Large, safe, golden milestone gear at zone boundaries
-    const angle = currentAngle + this.randomRange(-0.3, 0.3);
-    const distance = this.randomRange(1.5, 2.5);
+    const band = getDifficultyBand(Math.max(0, targetHeight - 1));
+    const placement = this.findGearPlacement({
+      band,
+      context: "milestone",
+      currentAngle,
+      radius: 2.2,
+      targetY: targetHeight,
+    }) ?? this.findSweptPlacement({
+      context: "milestone",
+      currentAngle,
+      radius: 2.2,
+      targetY: targetHeight,
+    });
+    const angle = placement?.angle ?? normalizeRadians(currentAngle + 0.9);
+    const fallbackDistance = 4.2;
     const gear = this.createGear({
-      x: Math.cos(angle) * distance,
+      x: placement?.x ?? Math.cos(angle) * fallbackDistance,
       y: targetHeight,
-      z: Math.sin(angle) * distance,
+      z: placement?.z ?? Math.sin(angle) * fallbackDistance,
       radius: 2.2, // Larger than normal (normal is ~1.3–2.0)
       height: 0.4,
       rotationSpeed: 0.2, // Slow, stately rotation
@@ -478,39 +509,47 @@ export class ClockworkClimbSimulation {
     // Always spawn a bolt on milestone gears as a reward
     this.state.bolts.push(this.createBolt(gear));
     this.consecutiveCrumble = 0; // Reset chain counter
+    return angle;
   }
 
   private generateChallengeZone(centerY: number) {
     const count = 8 + Math.floor(this.rng() * 5); // 8–12 gears
     let angle = this.generationAngle;
+    const challengeBand: DifficultyBand = {
+      danger: 1,
+      distanceMax: 3.1,
+      distanceMin: 1.7,
+      radiusMax: 2.1,
+      radiusMin: 1.3,
+      rotationMax: 1.1,
+      rotationMin: 0.45,
+      verticalMax: 2.25,
+      verticalMin: 1.45,
+    };
 
     for (let index = 0; index < count; index += 1) {
-      const offsetY = this.randomRange(-7, 8);
-      angle += this.randomRange(0.65, 1.55);
       const radius = this.randomRange(1.3, 2.1);
-      const gearY = centerY + offsetY;
-
-      // Find a non-overlapping position (challenge zones are dense, so try harder)
-      let gearX = 0;
-      let gearZ = 0;
-      let placed = false;
-      for (let attempt = 0; attempt < 10; attempt += 1) {
-        const tryAngle = attempt === 0 ? angle : angle + this.randomRange(-0.8, 0.8);
-        const distance = this.randomRange(1.5, 2.8);
-        gearX = Math.cos(tryAngle) * distance;
-        gearZ = Math.sin(tryAngle) * distance;
-        if (!this.isGearOverlapping(gearX, gearY, gearZ, radius)) {
-          placed = true;
-          break;
-        }
-      }
-      if (!placed) continue; // skip rather than stack gears
+      const previousChallenge = this.getRecentChallengeAnchor(centerY);
+      const baseY = previousChallenge ? previousChallenge.y : centerY - 7.5;
+      const gearY = clamp(
+        baseY + this.randomRange(challengeBand.verticalMin, challengeBand.verticalMax),
+        centerY - 7.5,
+        centerY + 8,
+      );
+      const placement = this.findGearPlacement({
+        band: challengeBand,
+        context: "challenge",
+        currentAngle: angle,
+        radius,
+        targetY: gearY,
+      });
+      if (!placement) continue;
 
       const variant = index < 2 ? "normal" : this.pickGearVariant(centerY);
       const gear = this.createGear({
-        x: gearX,
+        x: placement.x,
         y: gearY,
-        z: gearZ,
+        z: placement.z,
         radius,
         height: 0.3,
         rotationSpeed: this.randomRange(0.45, 1.1),
@@ -522,6 +561,7 @@ export class ClockworkClimbSimulation {
       this.state.bolts.push(this.createBolt(gear));
       // Normal power-up chance applies
       this.trySpawnPowerUp(gear);
+      angle = placement.angle;
     }
   }
 
@@ -531,14 +571,260 @@ export class ClockworkClimbSimulation {
       const dz = z - existing.z;
       const dy = Math.abs(y - existing.y);
       const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-      const minHorizontal = (radius + existing.radius) * 1.1;
-      // Only check horizontal overlap if gears are vertically close enough to visually intersect
-      // Gear height is 0.3; if vertical gap < 1.0, they can look stacked/sandwiched
-      if (dy < 1.0 && horizontalDist < minHorizontal) {
+      const minHorizontal = (radius + existing.radius) * 1.18;
+      if (dy < NORMAL_CLEARANCE_VERTICAL_WINDOW && horizontalDist < minHorizontal) {
+        return true;
+      }
+      if (dy < STACKED_VERTICAL_WINDOW && horizontalDist < Math.max(STACKED_HORIZONTAL_GAP, Math.min(radius, existing.radius) * 0.95)) {
         return true;
       }
     }
     return false;
+  }
+
+  private findGearPlacement(input: {
+    band: DifficultyBand;
+    context: PlacementContext;
+    currentAngle: number;
+    radius: number;
+    targetY: number;
+  }): PlacementResult | null {
+    const anchors = this.getPlacementAnchors(input.targetY, input.context, input.currentAngle);
+    if (anchors.length === 0) {
+      return null;
+    }
+
+    const idealDistance = lerp(input.band.distanceMin, input.band.distanceMax, 0.52);
+    const preferredStep = input.context === "challenge"
+      ? 0.7
+      : (input.context === "milestone" ? 0.55 : 0.82);
+
+    let best: PlacementResult | null = null;
+    for (const anchor of anchors) {
+      const anchorAngle = Math.atan2(anchor.z, anchor.x);
+      const anchorDistance = Math.hypot(anchor.x, anchor.z);
+      const preferredSign = signedAngleDelta(input.currentAngle, anchorAngle) >= 0 ? 1 : -1;
+      const signOptions = [preferredSign, -preferredSign] as const;
+      const swingOptions = input.context === "challenge"
+        ? [0.42, 0.68, 0.92]
+        : (input.context === "milestone" ? [0.72, 0.98, 1.22] : [0.52, 0.78, 1.02]);
+      const stepOptions = input.context === "challenge"
+        ? [0.85, 1.0, 1.12]
+        : (input.context === "milestone" ? [1.25, 1.55, 1.85] : [0.9, 1.0, 1.14]);
+      const minAnchorSpacing = Math.max(input.band.distanceMin * 0.9, (anchor.radius + input.radius) * 0.52);
+      const maxAnchorSpacing = Math.min(
+        input.context === "milestone" ? 6.2 : 5.1,
+        input.band.distanceMax + (anchor.radius + input.radius) * (input.context === "challenge" ? 0.55 : 0.48),
+      );
+
+      for (const sign of signOptions) {
+        for (const swing of swingOptions) {
+          for (const stepScale of stepOptions) {
+            const orbitBaseAngle = anchorDistance > 0.45 ? anchorAngle : input.currentAngle;
+            const candidateAngle = normalizeRadians(orbitBaseAngle + sign * swing + this.randomRange(-0.1, 0.1));
+            const anchorStep = clamp(
+              idealDistance * stepScale + this.randomRange(-0.22, 0.22),
+              minAnchorSpacing,
+              maxAnchorSpacing,
+            );
+
+            let candidateX = anchor.x + Math.cos(candidateAngle) * anchorStep;
+            let candidateZ = anchor.z + Math.sin(candidateAngle) * anchorStep;
+            let towerDistance = Math.hypot(candidateX, candidateZ);
+            if (towerDistance < 1.45) {
+              const scale = 1.45 / Math.max(towerDistance, 0.001);
+              candidateX *= scale;
+              candidateZ *= scale;
+              towerDistance = 1.45;
+            }
+            const maxTowerDistance = Math.max(4.3, input.band.distanceMax + (input.context === "challenge" ? 1.1 : 0.9));
+            if (towerDistance > maxTowerDistance) {
+              const scale = maxTowerDistance / towerDistance;
+              candidateX *= scale;
+              candidateZ *= scale;
+              towerDistance = maxTowerDistance;
+            }
+            const clearanceScore = this.getPlacementClearanceScore(candidateX, input.targetY, candidateZ, input.radius);
+            if (clearanceScore === -Infinity) {
+              continue;
+            }
+
+            const dx = candidateX - anchor.x;
+            const dz = candidateZ - anchor.z;
+            const horizontalDistance = Math.hypot(dx, dz);
+            const verticalDistance = input.targetY - anchor.y;
+            const playableGap = horizontalDistance - anchor.radius - input.radius;
+            const maxPlayableGap = input.context === "challenge" ? 2.9 : 2.65;
+            const minHorizontalReach = Math.max(1.0, minAnchorSpacing * 0.9);
+            if (
+              verticalDistance > MAX_ROUTE_VERTICAL_STEP
+              || horizontalDistance < minHorizontalReach
+              || horizontalDistance > maxAnchorSpacing
+              || playableGap > maxPlayableGap
+            ) {
+              continue;
+            }
+
+            const idealPlayableGap = input.context === "milestone" ? 1.45 : (input.context === "challenge" ? 1.2 : 0.95);
+            const distanceScore = 1 - Math.abs(playableGap - idealPlayableGap) / 1.8;
+            const stepScore = 1 - Math.abs(swing - preferredStep);
+            const orbitProgress = 1 - Math.abs(Math.abs(signedAngleDelta(candidateAngle, anchorAngle)) - preferredStep);
+            const laneBias = towerDistance > 1.55 ? 0.2 : -0.4;
+            const score = clearanceScore + distanceScore * 1.8 + stepScore + orbitProgress * 0.8 + laneBias;
+            if (!best || score > best.score) {
+              best = {
+                angle: candidateAngle,
+                anchorId: anchor.id,
+                score,
+                x: candidateX,
+                z: candidateZ,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    if (best) {
+      return best;
+    }
+
+    const fallbackDistance = clamp(
+      anchors.reduce((sum, anchor) => sum + Math.hypot(anchor.x, anchor.z), 0) / anchors.length,
+      1.45,
+      Math.max(4.2, input.band.distanceMax + 0.4),
+    );
+    const fallbackOffsets = [0.48, 0.72, 0.96, 1.2, -0.48, -0.72, -0.96, -1.2];
+    for (const offset of fallbackOffsets) {
+      const candidateAngle = normalizeRadians(input.currentAngle + offset);
+      const candidateX = Math.cos(candidateAngle) * fallbackDistance;
+      const candidateZ = Math.sin(candidateAngle) * fallbackDistance;
+      const clearanceScore = this.getPlacementClearanceScore(candidateX, input.targetY, candidateZ, input.radius);
+      if (clearanceScore === -Infinity) {
+        continue;
+      }
+      const hasReachableAnchor = anchors.some((anchor) => {
+        const dx = candidateX - anchor.x;
+        const dz = candidateZ - anchor.z;
+        const horizontalDistance = Math.hypot(dx, dz);
+        const playableGap = horizontalDistance - anchor.radius - input.radius;
+        return input.targetY - anchor.y <= MAX_ROUTE_VERTICAL_STEP && playableGap <= 2.8 && horizontalDistance >= 1.05 && horizontalDistance <= 5.0;
+      });
+      if (!hasReachableAnchor) {
+        continue;
+      }
+      return {
+        angle: candidateAngle,
+        anchorId: anchors[0]?.id ?? null,
+        score: clearanceScore,
+        x: candidateX,
+        z: candidateZ,
+      };
+    }
+
+    return this.findSweptPlacement(input);
+  }
+
+  private getPlacementAnchors(targetY: number, context: PlacementContext, currentAngle: number): SimGear[] {
+    const preferredChallenge = context === "challenge";
+    const minY = targetY - PATH_ANCHOR_WINDOW;
+    return this.state.gears
+      .filter((gear) => gear.active && gear.y < targetY - 0.4 && gear.y >= minY)
+      .sort((a, b) => {
+        const aChallengeBias = preferredChallenge === a.challenge ? 0 : 2.5;
+        const bChallengeBias = preferredChallenge === b.challenge ? 0 : 2.5;
+        const aVertical = Math.abs((targetY - a.y) - 2.5);
+        const bVertical = Math.abs((targetY - b.y) - 2.5);
+        const aAngle = Math.abs(signedAngleDelta(currentAngle, Math.atan2(a.z, a.x)));
+        const bAngle = Math.abs(signedAngleDelta(currentAngle, Math.atan2(b.z, b.x)));
+        return (aChallengeBias + aVertical + aAngle * 0.6) - (bChallengeBias + bVertical + bAngle * 0.6);
+      })
+      .slice(0, context === "challenge" ? 7 : 6);
+  }
+
+  private getPlacementClearanceScore(x: number, y: number, z: number, radius: number): number {
+    let minScore = Infinity;
+    for (const existing of this.state.gears) {
+      const dx = x - existing.x;
+      const dz = z - existing.z;
+      const dy = Math.abs(y - existing.y);
+      const horizontalDist = Math.hypot(dx, dz);
+      const overlapThreshold = (radius + existing.radius) * 1.18;
+      const stackedThreshold = Math.max(STACKED_HORIZONTAL_GAP, Math.min(radius, existing.radius) * 0.95);
+      if (dy < NORMAL_CLEARANCE_VERTICAL_WINDOW && horizontalDist < overlapThreshold) {
+        return -Infinity;
+      }
+      if (dy < STACKED_VERTICAL_WINDOW && horizontalDist < stackedThreshold) {
+        return -Infinity;
+      }
+
+      const verticalPenaltyWindow = dy < 4 ? 1 : 0;
+      if (verticalPenaltyWindow) {
+        const clearance = horizontalDist - (radius + existing.radius) * 0.9;
+        minScore = Math.min(minScore, clearance);
+      }
+    }
+
+    return minScore === Infinity ? 5 : minScore;
+  }
+
+  private getRecentChallengeAnchor(centerY: number): SimGear | null {
+    for (let index = this.state.gears.length - 1; index >= 0; index -= 1) {
+      const gear = this.state.gears[index];
+      if (!gear.challenge) {
+        continue;
+      }
+      if (Math.abs(gear.y - centerY) <= 10) {
+        return gear;
+      }
+    }
+    return null;
+  }
+
+  private findSweptPlacement(input: {
+    context: PlacementContext;
+    currentAngle: number;
+    radius: number;
+    targetY: number;
+  }): PlacementResult | null {
+    const anchors = this.getPlacementAnchors(input.targetY, input.context, input.currentAngle);
+    const angleOffsets = input.context === "milestone"
+      ? [
+          0.55, -0.55, 0.95, -0.95, 1.35, -1.35, 1.75, -1.75,
+          2.15, -2.15, 2.55, -2.55, 2.95, -2.95,
+        ]
+      : [0.55, 0.85, 1.15, 1.45, -0.55, -0.85, -1.15, -1.45];
+    const distanceOptions = input.context === "milestone"
+      ? [3.8, 4.4, 5.0, 5.6]
+      : (input.context === "challenge" ? [2.6, 3.2, 3.8, 4.4] : [2.8, 3.4, 4.0, 4.6]);
+
+    for (const offset of angleOffsets) {
+      for (const distance of distanceOptions) {
+        const angle = normalizeRadians(input.currentAngle + offset);
+        const x = Math.cos(angle) * distance;
+        const z = Math.sin(angle) * distance;
+        if (this.getPlacementClearanceScore(x, input.targetY, z, input.radius) === -Infinity) {
+          continue;
+        }
+        const reachable = anchors.some((anchor) => {
+          const horizontalDistance = Math.hypot(x - anchor.x, z - anchor.z);
+          const playableGap = horizontalDistance - anchor.radius - input.radius;
+          return input.targetY - anchor.y <= MAX_ROUTE_VERTICAL_STEP && playableGap >= 0.15 && playableGap <= 2.8;
+        });
+        if (!reachable) {
+          continue;
+        }
+        return {
+          angle,
+          anchorId: anchors[0]?.id ?? null,
+          score: distance,
+          x,
+          z,
+        };
+      }
+    }
+
+    return null;
   }
 
   private pickGearVariant(height: number): GearVariant {
@@ -1519,8 +1805,16 @@ function normalizeSigned(value: number, maxMagnitude: number): number {
   return clamp(value / maxMagnitude, -1, 1);
 }
 
-function normalizeAngle(value: number): number {
+function normalizeRadians(value: number): number {
   while (value > Math.PI) value -= Math.PI * 2;
   while (value < -Math.PI) value += Math.PI * 2;
-  return value / Math.PI;
+  return value;
+}
+
+function signedAngleDelta(a: number, b: number): number {
+  return normalizeRadians(a - b);
+}
+
+function normalizeAngle(value: number): number {
+  return normalizeRadians(value) / Math.PI;
 }

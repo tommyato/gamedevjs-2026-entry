@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:sim": "esbuild src/simulation.ts --bundle --format=esm --outfile=dist/simulation.mjs --platform=node",
+    "verify:layout": "npm run build:sim && node scripts/verify-layout.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
