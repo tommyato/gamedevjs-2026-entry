@@ -152,6 +152,9 @@
       opacity: 0;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
       transition: opacity 120ms ease-out, transform 120ms ease-out;
+      z-index: 25;
+      pointer-events: none;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
     }
     #hud-controls {
       position: absolute;
@@ -521,6 +524,7 @@
 <body>
   <div id="game-container">
     <div id="close-call-overlay" aria-hidden="true"></div>
+    <div id="hud-toast" aria-live="polite" aria-atomic="true"></div>
     <div id="zone-announcement" aria-hidden="true"></div>
     <div id="tutorial-overlay" class="hidden" aria-hidden="true">
       <div id="tutorial-card">
@@ -554,7 +558,6 @@
         <div id="hud-status">NEXT 25m</div>
         <div id="hud-combo"></div>
       </div>
-      <div id="hud-toast"></div>
       <div id="hud-controls">WASD / ARROWS TO MOVE · SPACE OR TAP TO JUMP</div>
       <button id="pause-btn" type="button" aria-label="Pause">⏸</button>
       <button id="sound-toggle" type="button" aria-label="Toggle sound">🔊</button>

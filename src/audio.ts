@@ -430,6 +430,46 @@ export function playPistonLaunch() {
   thump.stop(t + 0.24);
 }
 
+/** C5→E5→G5 arpeggio — plays on achievement unlock */
+export function playAchievementUnlock() {
+  if (!ctx || !masterGain) {
+    return;
+  }
+  const t = ctx.currentTime;
+  // C5 = 523.25 Hz, E5 = 659.25 Hz, G5 = 783.99 Hz
+  const notes = [523.25, 659.25, 783.99];
+  const spacing = 0.15; // seconds between note starts
+  const noteDuration = 0.22; // each note duration (slight overlap)
+
+  for (let i = 0; i < notes.length; i++) {
+    const start = t + i * spacing;
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(notes[i], start);
+    // Slight pitch rise for sparkle
+    osc.frequency.exponentialRampToValueAtTime(notes[i] * 1.04, start + noteDuration);
+
+    // Harmonic partial for warmth
+    const partial = ctx.createOscillator();
+    partial.type = "sine";
+    partial.frequency.setValueAtTime(notes[i] * 2, start);
+    partial.frequency.exponentialRampToValueAtTime(notes[i] * 2.04, start + noteDuration);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.1, start + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + noteDuration);
+
+    osc.connect(gain);
+    partial.connect(gain);
+    gain.connect(masterGain);
+    osc.start(start);
+    partial.start(start);
+    osc.stop(start + noteDuration + 0.01);
+    partial.stop(start + noteDuration + 0.01);
+  }
+}
+
 export function setAudioEnabled(enabled: boolean) {
   audioEnabled = enabled;
   applyMasterVolume();

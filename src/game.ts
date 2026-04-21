@@ -5,6 +5,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import {
   getAudioEnabled,
   initAudio,
+  playAchievementUnlock,
   playClick,
   playCollect,
   playComboLand,
@@ -229,6 +230,8 @@ export class Game {
   private readonly ghostMeshes: Map<string, GhostVisual> = new Map();
   private readonly ghostGroup = new THREE.Group();
   private aiGhost: AIGhost | null = null;
+  private aiGhostEnabled: boolean = isAIGhostEnabled();
+  private aiGhostButton: HTMLButtonElement | null = null;
   private multiplayerPanel: HTMLDivElement | null = null;
   private multiplayerButton: HTMLButtonElement | null = null;
   private multiplayerStatus: HTMLDivElement | null = null;
@@ -571,6 +574,7 @@ export class Game {
     await this.refreshLeaderboardPanels();
     this.setupMultiplayerUi(container);
     this.initAIGhost();
+    this.setupAIGhostButton();
     this.updateHud(dtZero());
     this.updateOverlayText();
     this.input.setTouchControlsVisible(false);
@@ -1050,20 +1054,94 @@ export class Game {
   // -----------------------------------------------------------------------
 
   private initAIGhost(): void {
-    if (!isAIGhostEnabled()) return;
+    if (!this.aiGhostEnabled) return;
     this.aiGhost = new AIGhost("model-weights.json");
     void this.aiGhost.load().then((ok) => {
       if (ok) console.log("[game] AI ghost ready");
     });
   }
 
+  private setupAIGhostButton(): void {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = this.aiGhostEnabled ? "AI GHOST: ON" : "RACE THE AI";
+    Object.assign(btn.style, {
+      marginTop: "6px",
+      marginBottom: "18px",
+      padding: "10px 22px",
+      borderRadius: "999px",
+      border: "1px solid rgba(255, 196, 120, 0.45)",
+      background: "linear-gradient(180deg, rgba(46, 32, 14, 0.92), rgba(24, 16, 8, 0.82))",
+      boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 226, 176, 0.18)",
+      color: "#ffe1a9",
+      cursor: "pointer",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      fontSize: "13px",
+      fontWeight: "700",
+      letterSpacing: "3px",
+      pointerEvents: "auto",
+    } as CSSStyleDeclaration);
+
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.handleAIGhostButtonClick();
+    });
+
+    this.aiGhostButton = btn;
+
+    // Insert after multiplayer button if present, else after prompt text
+    const anchor = this.multiplayerButton ?? this.titlePrompt;
+    anchor.insertAdjacentElement("afterend", btn);
+  }
+
+  private async handleAIGhostButtonClick(): Promise<void> {
+    const btn = this.aiGhostButton;
+    if (!btn) return;
+
+    if (this.aiGhostEnabled) {
+      // Toggle OFF — use "AI GHOST: OFF" once the model has been initialized
+      this.aiGhostEnabled = false;
+      btn.textContent = this.aiGhost ? "AI GHOST: OFF" : "RACE THE AI";
+      // Remove ghost mesh if it exists
+      this.disposeGhostVisual("__ai_ghost__");
+      return;
+    }
+
+    // Toggle ON
+    this.aiGhostEnabled = true;
+
+    if (!this.aiGhost) {
+      this.aiGhost = new AIGhost("model-weights.json");
+    }
+
+    if (!this.aiGhost.isReady()) {
+      btn.textContent = "LOADING AI...";
+      btn.style.cursor = "default";
+      btn.style.opacity = "0.65";
+
+      const ok = await this.aiGhost.load();
+
+      btn.style.opacity = "1";
+      btn.style.cursor = "pointer";
+
+      if (!ok) {
+        this.aiGhostEnabled = false;
+        btn.textContent = "RACE THE AI";
+        return;
+      }
+    }
+
+    btn.textContent = "AI GHOST: ON";
+  }
+
   private resetAIGhost(): void {
-    if (!this.aiGhost?.isReady()) return;
+    if (!this.aiGhostEnabled || !this.aiGhost?.isReady()) return;
     this.aiGhost.reset();
   }
 
   private updateAIGhost(dt: number): void {
-    if (!this.aiGhost?.isReady()) return;
+    if (!this.aiGhostEnabled || !this.aiGhost?.isReady()) return;
     this.aiGhost.update(dt);
     const gs = this.aiGhost.getGhostState();
     if (!gs || !gs.alive) return;
@@ -1547,6 +1625,9 @@ export class Game {
     if (this.multiplayerButton) {
       this.multiplayerButton.style.display = "none";
     }
+    if (this.aiGhostButton) {
+      this.aiGhostButton.style.display = "none";
+    }
     this.clearGhostMeshes();
     this.resetAIGhost();
   }
@@ -1662,11 +1743,20 @@ export class Game {
       console.error("Failed to refresh leaderboard panels", error);
     });
 
-    if (this.score > 0) unlockAchievement("FIRST_CLIMB");
-    if (this.score >= 500) unlockAchievement("RISING_STAR");
-    if (this.score >= 2000) unlockAchievement("GEAR_MASTER");
-    if (this.saveData.totalRuns === 1 && this.score >= 500) unlockAchievement("PERFECT_START");
-    if (state.bestAirBoltChain >= 3) unlockAchievement("BOLT_CHAIN");
+    // Unlock and toast achievements earned this run
+    const earnedAchievements: string[] = [];
+    if (this.score > 0) { unlockAchievement("FIRST_CLIMB"); earnedAchievements.push("FIRST_CLIMB"); }
+    if (this.score >= 500) { unlockAchievement("RISING_STAR"); earnedAchievements.push("RISING_STAR"); }
+    if (this.score >= 2000) { unlockAchievement("GEAR_MASTER"); earnedAchievements.push("GEAR_MASTER"); }
+    if (this.saveData.totalRuns === 1 && this.score >= 500) { unlockAchievement("PERFECT_START"); earnedAchievements.push("PERFECT_START"); }
+    if (state.bestAirBoltChain >= 3) { unlockAchievement("BOLT_CHAIN"); earnedAchievements.push("BOLT_CHAIN"); }
+    earnedAchievements.forEach((id, index) => {
+      setTimeout(() => {
+        if (this.state === GameState.GameOver) {
+          this.showAchievementToast(formatAchievementId(id));
+        }
+      }, index * 2300);
+    });
 
     this.updateHud(dtZero());
     this.comboGlowOverlay.style.opacity = "0";
@@ -1722,6 +1812,9 @@ export class Game {
       if (this.multiplayerButton) {
         this.multiplayerButton.style.display = "inline-flex";
       }
+    }
+    if (this.aiGhostButton) {
+      this.aiGhostButton.style.display = "inline-flex";
     }
   }
 
@@ -2016,7 +2109,7 @@ export class Game {
           }
           break;
         case "achievement":
-          this.showToast(`ACHIEVEMENT · ${formatAchievementId(event.id)}`);
+          this.showAchievementToast(formatAchievementId(event.id));
           unlockAchievement(event.id);
           break;
         case "bounce_jump":
@@ -2600,10 +2693,24 @@ export class Game {
   }
 
   private showToast(message: string) {
+    this.hudToast.style.color = "#aef0ff";
+    this.hudToast.style.borderColor = "rgba(122, 223, 255, 0.32)";
+    this.hudToast.style.background = "rgba(10, 21, 28, 0.8)";
     this.hudToast.textContent = message;
     this.toastTimer = 1.3;
     this.hudToast.style.opacity = "1";
     this.hudToast.style.transform = "translate(-50%, 0)";
+  }
+
+  private showAchievementToast(label: string) {
+    this.hudToast.style.color = "#ffd080";
+    this.hudToast.style.borderColor = "rgba(255, 196, 120, 0.45)";
+    this.hudToast.style.background = "rgba(28, 18, 10, 0.88)";
+    this.hudToast.textContent = `⚙ ACHIEVEMENT · ${label}`;
+    this.toastTimer = 2.0;
+    this.hudToast.style.opacity = "1";
+    this.hudToast.style.transform = "translate(-50%, 0)";
+    playAchievementUnlock();
   }
 
   private showZoneAnnouncement(text: string) {
