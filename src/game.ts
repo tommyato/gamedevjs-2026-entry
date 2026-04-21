@@ -74,6 +74,31 @@ type BackgroundDecoration = {
   rotationSpeed: number;
 };
 
+type CameraDistancePulse = {
+  amount: number;
+  attack: number;
+  elapsed: number;
+  release: number;
+};
+
+type ScorePop = {
+  element: HTMLDivElement;
+  age: number;
+  duration: number;
+  left: number;
+  top: number;
+  value: number;
+};
+
+type TrailSegment = {
+  geometry: THREE.BufferGeometry;
+  line: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+  offset: number;
+  lateral: number;
+  vertical: number;
+  width: number;
+};
+
 type SaveData = {
   bestScore: number;
   bestHeight: number;
@@ -142,6 +167,8 @@ export class Game {
   private hudToast!: HTMLElement;
   private hudControls!: HTMLElement;
   private hudCombo!: HTMLElement;
+  private comboGlowOverlay!: HTMLDivElement;
+  private scorePopLayer!: HTMLDivElement;
   private soundToggleBtn!: HTMLElement;
   private closeCallOverlay!: HTMLElement;
   private tutorialOverlay!: HTMLElement;
@@ -184,18 +211,26 @@ export class Game {
   private readonly steamSpawnPosition = new THREE.Vector3();
   private readonly particles = new ParticleSystem(200);
   private readonly backgroundGroup = new THREE.Group();
+  private readonly titleBackdropGroup = new THREE.Group();
+  private readonly speedTrailGroup = new THREE.Group();
   private backgroundDecorations: BackgroundDecoration[] = [];
+  private titleBackdropDecorations: BackgroundDecoration[] = [];
+  private readonly trailSegments: TrailSegment[] = [];
   private readonly gearTickNextTimes = new Map<number, number>();
   private backgroundGenerationHeight = 0;
   private cameraKick = 0;
+  private readonly cameraDistancePulses: CameraDistancePulse[] = [];
   private readonly cameraShakeOffset = new THREE.Vector3();
   private cameraShakeTimer = 0;
   private readonly cameraShakeDuration = 0.15;
+  private comboFovPulseTimer = 0;
+  private lastComboMultiplier = 1;
   private closeCallFlashTimer = 0;
   private steamSpawnTimer = 0;
   private deathAnimTimer = 0;
   private toastTimer = 0;
   private zoneAnnouncementTimer = 0;
+  private readonly scorePops: ScorePop[] = [];
   private readonly zoneAnnouncementDuration = 2;
   private tutorialShown = false;
   private tutorialFadeTimer: number | null = null;
@@ -252,6 +287,9 @@ export class Game {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x140d0a);
     this.scene.fog = new THREE.FogExp2(0x140d0a, 0.014);
+    this.scene.add(this.titleBackdropGroup);
+    this.scene.add(this.speedTrailGroup);
+    this.buildSpeedTrails();
 
     this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 1000);
     this.camera.position.set(0, 6.8, 11.2);
@@ -291,6 +329,27 @@ export class Game {
     this.composer.addPass(this.bloomPass);
 
     this.input.init(this.renderer.domElement);
+
+    const comboGlowOverlay = document.createElement("div");
+    comboGlowOverlay.style.position = "absolute";
+    comboGlowOverlay.style.inset = "0";
+    comboGlowOverlay.style.pointerEvents = "none";
+    comboGlowOverlay.style.zIndex = "8";
+    comboGlowOverlay.style.opacity = "0";
+    comboGlowOverlay.style.mixBlendMode = "screen";
+    comboGlowOverlay.style.transition = "opacity 120ms ease-out, background 120ms ease-out";
+    comboGlowOverlay.style.background = "radial-gradient(circle at center, rgba(255,255,255,0) 58%, rgba(255, 200, 80, 0.12) 100%)";
+    container.appendChild(comboGlowOverlay);
+    this.comboGlowOverlay = comboGlowOverlay;
+
+    const scorePopLayer = document.createElement("div");
+    scorePopLayer.style.position = "absolute";
+    scorePopLayer.style.inset = "0";
+    scorePopLayer.style.pointerEvents = "none";
+    scorePopLayer.style.zIndex = "11";
+    scorePopLayer.style.overflow = "hidden";
+    container.appendChild(scorePopLayer);
+    this.scorePopLayer = scorePopLayer;
 
     const towerGeo = new THREE.CylinderGeometry(0.8, 0.8, 400, 12);
     const towerMat = new THREE.MeshStandardMaterial({
@@ -476,6 +535,7 @@ export class Game {
     this.consumeState(state);
     this.syncVisuals(state);
     this.buildBackgroundAtmosphere(this.getMaxGearHeight(state) + 24);
+    this.buildTitleBackdrop();
     await this.refreshLeaderboardPanels();
     this.updateHud(dtZero());
     this.updateOverlayText();
@@ -612,8 +672,252 @@ export class Game {
     this.gearTickNextTimes.clear();
     this.backgroundGroup.clear();
     this.backgroundDecorations = [];
+    this.clearTitleBackdrop();
     this.backgroundGenerationHeight = 0;
     this.particles.reset();
+    this.clearScorePops();
+    this.resetTrailSegments();
+    this.comboGlowOverlay.style.opacity = "0";
+  }
+
+  private buildSpeedTrails() {
+    const lineColors = [0x8ae8ff, 0xaad8ff, 0xffffff];
+    for (let index = 0; index < 5; index += 1) {
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(6);
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      const material = new THREE.LineBasicMaterial({
+        color: lineColors[index % lineColors.length],
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      const line = new THREE.Line(geometry, material) as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+      line.visible = false;
+      this.speedTrailGroup.add(line);
+      this.trailSegments.push({
+        geometry,
+        line,
+        offset: index * 0.14,
+        lateral: (index - 2) * 0.06,
+        vertical: index % 2 === 0 ? 0.05 : -0.04,
+        width: 0.18 + index * 0.04,
+      });
+    }
+  }
+
+  private resetTrailSegments() {
+    for (const segment of this.trailSegments) {
+      segment.line.visible = false;
+      segment.line.material.opacity = 0;
+    }
+  }
+
+  private buildTitleBackdrop() {
+    this.clearTitleBackdrop();
+    const configurations = [
+      { x: -7.5, y: 3.2, z: -12, scale: 3.0, rotationSpeed: 0.028, radius: 3.2, color: 0xa16a34, variant: "normal" as GearVariant },
+      { x: 6.8, y: 6.4, z: -14, scale: 2.7, rotationSpeed: -0.022, radius: 2.7, color: 0x5d8fb3, variant: "wind" as GearVariant },
+      { x: -2.0, y: 11.8, z: -16, scale: 3.6, rotationSpeed: 0.018, radius: 3.0, color: 0x8b63d0, variant: "magnetic" as GearVariant },
+      { x: 10.2, y: 16.5, z: -18, scale: 4.0, rotationSpeed: -0.015, radius: 3.5, color: 0x5aa95f, variant: "bouncy" as GearVariant },
+      { x: 0.5, y: 2.0, z: -8.5, scale: 4.6, rotationSpeed: 0.012, radius: 3.8, color: 0xffa34d, variant: "speed" as GearVariant },
+    ];
+
+    for (const config of configurations) {
+      const gear = new Gear({
+        color: config.color,
+        height: 0.5,
+        radius: config.radius,
+        rotationSpeed: 0.12,
+        variant: config.variant,
+      });
+      gear.mesh.scale.setScalar(config.scale);
+      gear.mesh.position.set(config.x, config.y, config.z);
+      gear.mesh.rotation.x = randomRange(-0.18, 0.18);
+      gear.mesh.rotation.y = randomRange(-0.4, 0.4);
+      this.styleBackdropGear(gear, 0.42);
+      this.titleBackdropGroup.add(gear.mesh);
+      this.titleBackdropDecorations.push({
+        mesh: gear.mesh,
+        rotationSpeed: config.rotationSpeed,
+      });
+    }
+  }
+
+  private clearTitleBackdrop() {
+    for (const decoration of this.titleBackdropDecorations) {
+      this.titleBackdropGroup.remove(decoration.mesh);
+    }
+    this.titleBackdropDecorations = [];
+    this.titleBackdropGroup.clear();
+  }
+
+  private setGearOpacity(gear: Gear, opacity: number) {
+    gear.mesh.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) {
+        return;
+      }
+      const material = object.material;
+      if (Array.isArray(material)) {
+        for (const entry of material) {
+          this.applyGearMaterialOpacity(entry, opacity);
+        }
+        return;
+      }
+      this.applyGearMaterialOpacity(material, opacity);
+    });
+  }
+
+  private applyGearMaterialOpacity(material: THREE.Material, opacity: number) {
+    if (!(material instanceof THREE.MeshStandardMaterial)) {
+      return;
+    }
+    material.transparent = true;
+    material.opacity = opacity;
+    material.depthWrite = false;
+  }
+
+  private styleBackdropGear(gear: Gear, opacity: number) {
+    gear.mesh.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) {
+        return;
+      }
+
+      const material = object.material;
+      if (Array.isArray(material)) {
+        object.material = material.map((entry) => this.convertBackdropMaterial(entry, opacity));
+        return;
+      }
+
+      object.material = this.convertBackdropMaterial(material, opacity);
+    });
+  }
+
+  private convertBackdropMaterial(material: THREE.Material, opacity: number) {
+    if (!(material instanceof THREE.MeshStandardMaterial)) {
+      return material;
+    }
+
+    const backdropMaterial = new THREE.MeshBasicMaterial({
+      color: material.color.clone().multiplyScalar(1.25),
+      transparent: true,
+      opacity,
+      depthWrite: false,
+    });
+    return backdropMaterial;
+  }
+
+  private updateSpeedTrails(dt: number) {
+    const state = this.simState;
+    if (!state || this.state !== GameState.Playing) {
+      for (const segment of this.trailSegments) {
+        const material = segment.line.material;
+        material.opacity = Math.max(0, material.opacity - dt * 4);
+        if (material.opacity <= 0.01) {
+          segment.line.visible = false;
+        }
+      }
+      return;
+    }
+
+    const verticalSpeed = Math.abs(state.player.vy);
+    const horizontalSpeed = Math.hypot(state.player.vx, state.player.vz);
+    const verticalFactor = THREE.MathUtils.clamp((verticalSpeed - 8) / 6, 0, 1);
+    const horizontalFactor = THREE.MathUtils.clamp((horizontalSpeed - 5) / 5, 0, 1);
+    const boostFactor = THREE.MathUtils.clamp(state.player.speedBoostTimer * 0.4 + state.player.speedBoostStrength * 0.35, 0, 1);
+    const speedFactor = Math.max(verticalFactor, horizontalFactor, boostFactor);
+
+    if (speedFactor <= 0.02) {
+      for (const segment of this.trailSegments) {
+        const material = segment.line.material;
+        material.opacity = Math.max(0, material.opacity - dt * 5);
+        if (material.opacity <= 0.01) {
+          segment.line.visible = false;
+        }
+      }
+      return;
+    }
+
+    const velocity = new THREE.Vector3(state.player.vx, state.player.vy, state.player.vz);
+    if (velocity.lengthSq() < 0.0001) {
+      velocity.set(0, -1, 0);
+    }
+    velocity.normalize();
+
+    const right = new THREE.Vector3().crossVectors(velocity, new THREE.Vector3(0, 1, 0));
+    if (right.lengthSq() < 0.0001) {
+      right.set(1, 0, 0);
+    } else {
+      right.normalize();
+    }
+    const up = new THREE.Vector3().crossVectors(right, velocity).normalize();
+    const segmentCount = Math.min(this.trailSegments.length, Math.max(3, 3 + Math.floor(speedFactor * 2)));
+    const baseLength = 1.1 + speedFactor * 2.8;
+    const opacityBase = THREE.MathUtils.clamp(speedFactor * 0.75, 0.12, 0.82);
+    const playerPosition = this.player.mesh.position;
+
+    for (let index = 0; index < this.trailSegments.length; index += 1) {
+      const segment = this.trailSegments[index];
+      const material = segment.line.material;
+      if (index >= segmentCount) {
+        material.opacity = Math.max(0, material.opacity - dt * 8);
+        if (material.opacity <= 0.01) {
+          segment.line.visible = false;
+        }
+        continue;
+      }
+
+      const backLength = baseLength + index * 0.22;
+      const lateralOffset = segment.lateral * (1 + speedFactor * 0.6);
+      const verticalOffset = segment.vertical * (1 + speedFactor * 0.4);
+      const start = new THREE.Vector3()
+        .copy(playerPosition)
+        .addScaledVector(right, lateralOffset)
+        .addScaledVector(up, verticalOffset)
+        .addScaledVector(velocity, 0.18);
+      const end = new THREE.Vector3()
+        .copy(start)
+        .addScaledVector(velocity, -backLength);
+
+      const positions = segment.geometry.getAttribute("position") as THREE.BufferAttribute;
+      positions.setXYZ(0, start.x, start.y, start.z);
+      positions.setXYZ(1, end.x, end.y, end.z);
+      positions.needsUpdate = true;
+      segment.line.visible = true;
+      material.opacity = THREE.MathUtils.lerp(material.opacity, opacityBase * (1 - index * 0.09), 1 - Math.exp(-dt * 12));
+    }
+  }
+
+  private addCameraDistancePulse(amount: number, attack: number, release: number) {
+    this.cameraDistancePulses.push({
+      amount,
+      attack,
+      elapsed: 0,
+      release,
+    });
+  }
+
+  private updateCameraDistancePulses(dt: number) {
+    let offset = 0;
+    for (let index = this.cameraDistancePulses.length - 1; index >= 0; index -= 1) {
+      const pulse = this.cameraDistancePulses[index];
+      pulse.elapsed += dt;
+      const totalDuration = pulse.attack + pulse.release;
+      if (pulse.elapsed >= totalDuration) {
+        this.cameraDistancePulses.splice(index, 1);
+        continue;
+      }
+
+      let envelope = 0;
+      if (pulse.elapsed < pulse.attack) {
+        envelope = pulse.elapsed / Math.max(pulse.attack, 0.001);
+      } else {
+        envelope = 1 - (pulse.elapsed - pulse.attack) / Math.max(pulse.release, 0.001);
+      }
+      offset += pulse.amount * THREE.MathUtils.clamp(envelope, 0, 1);
+    }
+
+    return offset;
   }
 
   private loop() {
@@ -665,6 +969,9 @@ export class Game {
     this.cameraKick = 0;
     this.cameraShakeTimer = 0;
     this.cameraShakeOffset.set(0, 0, 0);
+    this.cameraDistancePulses.length = 0;
+    this.comboFovPulseTimer = 0;
+    this.lastComboMultiplier = 1;
     this.closeCallFlashTimer = 0;
     this.steamSpawnTimer = 0;
     this.deathAnimTimer = 0;
@@ -796,9 +1103,15 @@ export class Game {
     if (state.bestAirBoltChain >= 3) unlockAchievement("BOLT_CHAIN");
 
     this.updateHud(dtZero());
+    this.comboGlowOverlay.style.opacity = "0";
+    this.clearScorePops();
+    this.resetTrailSegments();
+    this.cameraDistancePulses.length = 0;
+    this.comboFovPulseTimer = 0;
     this.titleOverlay.classList.remove("hidden");
     this.titleOverlay.classList.add("game-over");
     this.titleLeaderboardPanel.classList.add("hidden");
+    this.buildTitleBackdrop();
     this.titleHeading.textContent = "GAME OVER";
     if (isNewBest) {
       this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
@@ -843,6 +1156,7 @@ export class Game {
 
   private consumeState(state: SimState) {
     this.simState = state;
+    const previousScore = this.score;
     this.score = state.score;
     this.heightScore = state.heightScore;
     this.heightMaxReached = state.heightMaxReached;
@@ -853,6 +1167,10 @@ export class Game {
     this.currentZoneIndex = state.currentZoneIndex;
     this.bestCombo = state.bestCombo;
     this.inChallengeZone = state.inChallengeZone;
+
+    if (state.score > previousScore) {
+      this.spawnScorePop(state.score - previousScore);
+    }
   }
 
   private syncVisuals(state: SimState) {
@@ -1000,14 +1318,14 @@ export class Game {
       switch (event.type) {
         case "gear_land":
           this.landingEffectPosition.set(event.x, event.y + 0.04, event.z);
-          this.particles.spawnLandingDust(this.landingEffectPosition);
+          this.particles.spawnLandingSparks(this.landingEffectPosition, event.variant, event.landingSpeed);
           this.player.land(event.landingSpeed);
           playLand(event.landingSpeed / 12);
           this.cameraKick = Math.min(this.cameraKick + event.landingSpeed * 0.015, 0.28);
           if (event.nearMiss) {
             this.triggerCloseCallFlash();
           }
-          this.triggerLandingShake(event.variant === "crumbling" ? 0.085 : 0.05);
+          this.triggerLandingShake(Math.min(Math.abs(event.landingSpeed) * 0.01, 0.15));
           break;
         case "bolt_collect": {
           const bolt = this.visualBoltMap.get(event.boltId);
@@ -1022,6 +1340,7 @@ export class Game {
         case "combo_up":
           this.showToast(`COMBO x${event.multiplier}!`);
           playComboLand(event.multiplier);
+          this.comboFovPulseTimer = 0.3;
           break;
         case "combo_break":
           this.showToast("COMBO LOST");
@@ -1029,6 +1348,9 @@ export class Game {
         case "milestone":
           this.showToast(`CHECKPOINT ${event.height}m`);
           playMilestone(1 + event.height / 220);
+          this.particles.spawnMilestoneConfetti(this.player.mesh.position);
+          this.addCameraDistancePulse(2, 0.5, 1);
+          this.pulseMilestoneToast();
           break;
         case "piston_launch":
           this.landingEffectPosition.set(event.x, event.y, event.z);
@@ -1037,7 +1359,7 @@ export class Game {
           this.particles.spawnJumpSparks(this.landingEffectPosition);
           playPistonLaunch();
           this.showToast("PISTON LAUNCH!");
-          this.cameraKick = Math.min(this.cameraKick + 0.18, 0.34);
+          this.addCameraDistancePulse(0.5, 0.08, 0.2);
           break;
         case "speed_boost":
           this.showToast("SURGE GEAR");
@@ -1172,7 +1494,11 @@ export class Game {
     for (const decoration of this.backgroundDecorations) {
       decoration.mesh.rotation.z += decoration.rotationSpeed * dt;
     }
+    for (const decoration of this.titleBackdropDecorations) {
+      decoration.mesh.rotation.z += decoration.rotationSpeed * dt;
+    }
 
+    this.updateSpeedTrails(dt);
     this.updateGearDropShadows();
     this.updateSteam(dt);
     this.particles.update(dt, this.player.mesh.position);
@@ -1184,8 +1510,9 @@ export class Game {
     const playerZ = state.player.z;
     const verticalLead = THREE.MathUtils.clamp(state.player.vy * 0.12, -1.2, 1.6);
     const followLerp = 1 - Math.exp(-dt * (state.player.onGround ? 5.5 : 4));
+    const cameraPullback = this.updateCameraDistancePulses(dt);
 
-    const radius = 12 + Math.max(-state.player.vy * 0.08, 0);
+    const radius = 12 + Math.max(-state.player.vy * 0.08, 0) + cameraPullback;
     const targetCamX = Math.cos(state.orbitAngle) * radius;
     const targetCamZ = Math.sin(state.orbitAngle) * radius;
     const targetCamY = playerY + 6.1 + verticalLead + this.cameraKick;
@@ -1201,10 +1528,12 @@ export class Game {
     );
     this.camera.lookAt(this.cameraLookTarget);
 
-    const targetFov = THREE.MathUtils.clamp(58 + Math.max(-state.player.vy - 5, 0) * 0.45, 58, 64);
+    const comboFovPulse = this.comboFovPulseTimer > 0 ? (this.comboFovPulseTimer / 0.3) * 3 : 0;
+    const targetFov = THREE.MathUtils.clamp(58 + Math.max(-state.player.vy - 5, 0) * 0.45 + comboFovPulse, 58, 67);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, followLerp);
     this.camera.updateProjectionMatrix();
     this.cameraKick = THREE.MathUtils.lerp(this.cameraKick, 0, 1 - Math.exp(-dt * 7));
+    this.comboFovPulseTimer = Math.max(0, this.comboFovPulseTimer - dt);
 
     if (this.cameraShakeTimer > 0) {
       const shakeProgress = this.cameraShakeTimer / this.cameraShakeDuration;
@@ -1506,6 +1835,8 @@ export class Game {
     this.hudBest.textContent = `${Math.max(this.saveData.bestHeight, this.heightMaxReached)}m`;
     this.hudBolts.textContent = String(this.boltCount);
     this.hudStatus.textContent = `HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
+    this.updateComboHud(this.simState?.comboMultiplier ?? 1);
+    this.updateComboGlow(this.simState?.comboMultiplier ?? 1);
 
     this.toastTimer = Math.max(0, this.toastTimer - dt);
     const toastVisible = this.toastTimer > 0;
@@ -1521,16 +1852,121 @@ export class Game {
     const zoneOpacity = zoneVisible ? Math.min(fadeIn, fadeOut) : 0;
     this.zoneAnnouncement.style.opacity = String(zoneOpacity);
     this.zoneAnnouncement.style.transform = `translate(-50%, ${zoneVisible ? (1 - zoneOpacity) * 12 : 12}px)`;
+
+    this.updateScorePops(dt);
   }
 
   private updateComboHud(multiplier: number) {
     if (multiplier > 1) {
       this.hudCombo.textContent = `COMBO x${multiplier}`;
       this.hudCombo.classList.add("active");
+      if (multiplier > this.lastComboMultiplier) {
+        this.hudCombo.animate(
+          [
+            { transform: "scale(1)", textShadow: "0 0 12px rgba(127, 214, 255, 0.65), 0 0 24px rgba(127, 214, 255, 0.35)" },
+            { transform: "scale(1.16)", textShadow: "0 0 24px rgba(255, 255, 255, 0.92), 0 0 40px rgba(255, 212, 120, 0.7)" },
+            { transform: "scale(1)", textShadow: "0 0 18px rgba(127, 214, 255, 0.8), 0 0 32px rgba(127, 214, 255, 0.5)" },
+          ],
+          { duration: 230, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }
+        );
+      }
     } else {
       this.hudCombo.textContent = "";
       this.hudCombo.classList.remove("active");
     }
+    this.lastComboMultiplier = multiplier;
+  }
+
+  private updateComboGlow(multiplier: number) {
+    if (multiplier <= 1) {
+      this.comboGlowOverlay.style.opacity = "0";
+      return;
+    }
+
+    let color = "184, 115, 51";
+    if (multiplier >= 7) {
+      color = "242, 246, 255";
+    } else if (multiplier >= 4) {
+      color = "255, 206, 92";
+    }
+
+    const intensity = THREE.MathUtils.clamp((multiplier - 1) / 6, 0, 1);
+    const opacity = THREE.MathUtils.clamp(0.08 + intensity * 0.5, 0.08, 0.58);
+    this.comboGlowOverlay.style.background = `radial-gradient(circle at center, rgba(255,255,255,0) 55%, rgba(${color}, ${0.12 + intensity * 0.34}) 100%)`;
+    this.comboGlowOverlay.style.opacity = String(opacity);
+  }
+
+  private spawnScorePop(amount: number) {
+    if (amount <= 0) {
+      return;
+    }
+
+    while (this.scorePops.length >= 8) {
+      const expired = this.scorePops.shift();
+      if (expired) {
+        expired.element.remove();
+      }
+    }
+
+    const hudRect = this.hud.getBoundingClientRect();
+    const scoreRect = this.hudScore.getBoundingClientRect();
+    const element = document.createElement("div");
+    element.textContent = `+${amount}`;
+    element.style.position = "absolute";
+    element.style.left = `${scoreRect.left - hudRect.left + scoreRect.width * 0.5}px`;
+    element.style.top = `${scoreRect.top - hudRect.top + 8}px`;
+    element.style.transform = "translate(-50%, 0) scale(0.9)";
+    element.style.color = "#ffd35e";
+    element.style.fontSize = "18px";
+    element.style.fontWeight = "900";
+    element.style.letterSpacing = "2px";
+    element.style.textShadow = "0 0 14px rgba(255, 213, 94, 0.72), 0 0 26px rgba(255, 170, 68, 0.35)";
+    element.style.pointerEvents = "none";
+    element.style.willChange = "transform, opacity";
+    this.scorePopLayer.appendChild(element);
+
+    this.scorePops.push({
+      element,
+      age: 0,
+      duration: 0.8,
+      left: scoreRect.left - hudRect.left + scoreRect.width * 0.5,
+      top: scoreRect.top - hudRect.top + 8,
+      value: amount,
+    });
+  }
+
+  private updateScorePops(dt: number) {
+    for (let index = this.scorePops.length - 1; index >= 0; index -= 1) {
+      const pop = this.scorePops[index];
+      pop.age += dt;
+      const progress = THREE.MathUtils.clamp(pop.age / pop.duration, 0, 1);
+      const rise = progress * 44;
+      const scale = 0.9 + Math.sin(progress * Math.PI) * 0.22;
+      pop.element.style.opacity = String(1 - progress);
+      pop.element.style.transform = `translate(-50%, ${-rise}px) scale(${scale})`;
+      if (progress >= 1) {
+        pop.element.remove();
+        this.scorePops.splice(index, 1);
+      }
+    }
+  }
+
+  private pulseMilestoneToast() {
+    this.hudToast.animate(
+      [
+        { transform: "translate(-50%, 0) scale(1)" },
+        { transform: "translate(-50%, -2px) scale(1.18)" },
+        { transform: "translate(-50%, 0) scale(1)" },
+      ],
+      { duration: 340, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }
+    );
+  }
+
+  private clearScorePops() {
+    for (const pop of this.scorePops) {
+      pop.element.remove();
+    }
+    this.scorePops.length = 0;
   }
 
   private showToast(message: string) {

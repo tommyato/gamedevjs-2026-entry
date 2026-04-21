@@ -1,7 +1,7 @@
 import * as THREE from "three";
-import { Gear } from "./gear";
+import { Gear, type GearVariant } from "./gear";
 
-type ParticleKind = "dust" | "spark" | "ambient" | "steam";
+type ParticleKind = "dust" | "spark" | "ambient" | "steam" | "confetti";
 
 type Particle = {
   active: boolean;
@@ -23,6 +23,20 @@ export class ParticleSystem {
   private readonly scale = new THREE.Vector3();
   private readonly spawnCenter = new THREE.Vector3();
   private readonly sparkPosition = new THREE.Vector3();
+  private readonly upVector = new THREE.Vector3(0, 1, 0);
+
+  private readonly landingColors: Record<GearVariant, number> = {
+    normal: 0xff9548,
+    speed: 0xff9548,
+    wind: 0x67c7ff,
+    magnetic: 0xc074ff,
+    bouncy: 0x68f08a,
+    crumbling: 0xff9f5d,
+    reverse: 0xffa64a,
+    piston: 0xffc94a,
+  };
+
+  private readonly confettiColors = [0xffd35e, 0x67c7ff, 0xc074ff, 0x68f08a, 0xff8e2b, 0xffffff];
 
   constructor(maxParticles: number) {
     for (let index = 0; index < maxParticles; index += 1) {
@@ -81,29 +95,71 @@ export class ParticleSystem {
     }
   }
 
-  spawnLandingDust(position: THREE.Vector3) {
-    const count = 3 + Math.floor(Math.random() * 3);
+  spawnLandingSparks(position: THREE.Vector3, variant: GearVariant, landingSpeed: number) {
+    const impactSpeed = Math.abs(landingSpeed);
+    const count = THREE.MathUtils.clamp(8 + Math.floor(impactSpeed * 0.9), 8, 15);
+    const color = this.landingColors[variant] ?? this.landingColors.normal;
+    const speedScale = 1 + Math.min(impactSpeed * 0.08, 1.5);
+
     for (let index = 0; index < count; index += 1) {
       const particle = this.acquire();
       if (!particle) {
         return;
       }
 
-      particle.kind = "dust";
+      particle.kind = "spark";
       particle.life = 0;
-      particle.maxLife = 0.3;
-      particle.drag = 2.2;
-      particle.gravity = 3.5;
+      particle.maxLife = 0.22 + Math.random() * 0.14;
+      particle.drag = 1.3 + Math.random() * 0.4;
+      particle.gravity = 2.2 + Math.random() * 0.8;
       particle.mesh.visible = true;
       particle.mesh.position.set(
-        position.x + (Math.random() - 0.5) * 0.45,
+        position.x + (Math.random() - 0.5) * 0.3,
         position.y + 0.08,
-        position.z + (Math.random() - 0.5) * 0.45
+        position.z + (Math.random() - 0.5) * 0.3
       );
-      particle.velocity.set((Math.random() - 0.5) * 1.8, 0.7 + Math.random() * 0.5, (Math.random() - 0.5) * 1.8);
-      this.scale.setScalar(0.08 + Math.random() * 0.08);
+      const theta = Math.random() * Math.PI * 2;
+      const radial = 1.2 + Math.random() * 1.8;
+      const upward = 1.25 + Math.random() * 0.9;
+      particle.velocity.set(
+        Math.cos(theta) * radial * speedScale,
+        upward * speedScale,
+        Math.sin(theta) * radial * speedScale
+      );
+      particle.velocity.addScaledVector(this.upVector, Math.max(0.2, impactSpeed * 0.02));
+      this.scale.set(0.04 + Math.random() * 0.035, 0.04 + Math.random() * 0.035, 0.08 + Math.random() * 0.06);
       particle.mesh.scale.copy(this.scale);
-      this.setMaterial(particle, 0xd8b38a, 0.75);
+      this.setMaterial(particle, color, 0.95);
+    }
+  }
+
+  spawnMilestoneConfetti(position: THREE.Vector3) {
+    const count = 20 + Math.floor(Math.random() * 11);
+    for (let index = 0; index < count; index += 1) {
+      const particle = this.acquire();
+      if (!particle) {
+        return;
+      }
+
+      particle.kind = "confetti";
+      particle.life = 0;
+      particle.maxLife = 0.95 + Math.random() * 0.45;
+      particle.drag = 0.7 + Math.random() * 0.25;
+      particle.gravity = 1.4 + Math.random() * 0.5;
+      particle.mesh.visible = true;
+      particle.mesh.position.set(
+        position.x + (Math.random() - 0.5) * 0.8,
+        position.y + 0.35 + Math.random() * 0.45,
+        position.z + (Math.random() - 0.5) * 0.8
+      );
+      particle.velocity.set(
+        (Math.random() - 0.5) * 3.2,
+        1.8 + Math.random() * 2.4,
+        (Math.random() - 0.5) * 3.2
+      );
+      this.scale.set(0.05 + Math.random() * 0.04, 0.02 + Math.random() * 0.03, 0.05 + Math.random() * 0.04);
+      particle.mesh.scale.copy(this.scale);
+      this.setMaterial(particle, this.confettiColors[Math.floor(Math.random() * this.confettiColors.length)], 0.95);
     }
   }
 
