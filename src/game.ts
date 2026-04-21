@@ -29,15 +29,22 @@ import { Gear } from "./gear";
 import { Input } from "./input";
 import { ParticleSystem } from "./particles";
 import {
+  fetchLeaderboardScores,
+  getStat,
   isAudioEnabled,
+  loadSaveData,
   onAudioChange,
   platformInit,
+  requestStats,
   registerPauseHandlers,
   signalFirstFrame,
   signalGameReady,
   signalLoadComplete,
-  submitScore,
+  storeStats,
+  submitScores,
   unlockAchievement,
+  updateStat,
+  writeSaveData,
 } from "./platform";
 import { Player } from "./player";
 import { ClockworkClimbSimulation } from "./simulation";
@@ -67,6 +74,32 @@ type BackgroundDecoration = {
   rotationSpeed: number;
 };
 
+type SaveData = {
+  bestScore: number;
+  bestHeight: number;
+  bestCombo: number;
+  totalRuns: number;
+  totalBolts: number;
+  totalPlaytime: number;
+  audioEnabled: boolean;
+};
+
+type LeaderboardDisplayEntry = {
+  username: string;
+  score: number;
+  rank: number;
+};
+
+const DEFAULT_SAVE_DATA: SaveData = {
+  bestScore: 0,
+  bestHeight: 0,
+  bestCombo: 1,
+  totalRuns: 0,
+  totalBolts: 0,
+  totalPlaytime: 0,
+  audioEnabled: true,
+};
+
 export class Game {
   private renderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
@@ -93,8 +126,12 @@ export class Game {
   private nextMilestone = 25;
   private currentZoneIndex = 0;
   private bestCombo = 1;
+  private runStartElapsedTime = 0;
   private inChallengeZone = false;
   private challengeZoneBloomBoost = 0;
+  private saveData: SaveData = { ...DEFAULT_SAVE_DATA };
+  private titleLeaderboardEntries: LeaderboardDisplayEntry[] = [];
+  private gameOverLeaderboardEntries: LeaderboardDisplayEntry[] = [];
 
   private hud!: HTMLElement;
   private titleOverlay!: HTMLElement;
@@ -125,6 +162,12 @@ export class Game {
   private zoneAnnouncement!: HTMLElement;
   private pauseOverlay!: HTMLElement;
   private pauseBtn!: HTMLElement;
+  private titleLeaderboardPanel!: HTMLElement;
+  private titleLeaderboardContext!: HTMLElement;
+  private titleLeaderboardList!: HTMLElement;
+  private gameOverLeaderboardPanel!: HTMLElement;
+  private gameOverLeaderboardContext!: HTMLElement;
+  private gameOverLeaderboardList!: HTMLElement;
 
   private readonly player = new Player();
   private gears: Gear[] = [];
@@ -183,7 +226,14 @@ export class Game {
 
   private async init() {
     await platformInit();
-    this.highScore = parseInt(localStorage.getItem("gameHighScore") || "0", 10);
+    await requestStats();
+    this.saveData = await this.readSaveData();
+    this.highScore = this.saveData.bestScore;
+    if (!isAudioEnabled()) {
+      setAudioEnabled(false);
+    } else {
+      setAudioEnabled(this.saveData.audioEnabled);
+    }
 
     const container = document.getElementById("game-container");
     if (!container) {
@@ -346,6 +396,7 @@ export class Game {
     this.gameOverComboEl = gameOverCombo;
     this.gameOverTimeEl = gameOverTime;
     this.gameOverTotalEl = gameOverTotal;
+    this.createLeaderboardPanels();
 
     const pauseOverlay = document.getElementById("pause-overlay");
     const pauseBtn = document.getElementById("pause-btn");
@@ -425,6 +476,7 @@ export class Game {
     this.consumeState(state);
     this.syncVisuals(state);
     this.buildBackgroundAtmosphere(this.getMaxGearHeight(state) + 24);
+    await this.refreshLeaderboardPanels();
     this.updateHud(dtZero());
     this.updateOverlayText();
     this.input.setTouchControlsVisible(false);
@@ -435,9 +487,107 @@ export class Game {
       () => this.pauseAnimationLoop(),
       () => this.resumeAnimationLoop()
     );
-    setAudioEnabled(isAudioEnabled());
+    setAudioEnabled(isAudioEnabled() && this.saveData.audioEnabled);
     onAudioChange((enabled) => setAudioEnabled(enabled));
     await signalLoadComplete();
+  }
+
+  private createLeaderboardPanels() {
+    this.titleLeaderboardPanel = this.buildLeaderboardPanel("TOP 10 SCORES");
+    this.titleLeaderboardContext = this.titleLeaderboardPanel.querySelector("[data-role='context']") as HTMLElement;
+    this.titleLeaderboardList = this.titleLeaderboardPanel.querySelector("[data-role='list']") as HTMLElement;
+    this.titleLeaderboardPanel.style.position = "absolute";
+    this.titleLeaderboardPanel.style.right = "20px";
+    this.titleLeaderboardPanel.style.bottom = "24px";
+    this.titleLeaderboardPanel.style.width = "min(340px, calc(100vw - 40px))";
+    this.titleOverlay.appendChild(this.titleLeaderboardPanel);
+
+    this.gameOverLeaderboardPanel = this.buildLeaderboardPanel("RUN CONTEXT");
+    this.gameOverLeaderboardContext = this.gameOverLeaderboardPanel.querySelector("[data-role='context']") as HTMLElement;
+    this.gameOverLeaderboardList = this.gameOverLeaderboardPanel.querySelector("[data-role='list']") as HTMLElement;
+    this.gameOverLeaderboardPanel.style.marginTop = "0";
+    this.gameOverLeaderboardPanel.style.marginBottom = "20px";
+    this.gameOverLeaderboardPanel.style.width = "min(400px, calc(100vw - 40px))";
+    this.gameOverLeaderboardPanel.classList.add("hidden");
+    this.titleOverlay.insertBefore(this.gameOverLeaderboardPanel, this.shareScoreBtn);
+  }
+
+  private buildLeaderboardPanel(title: string): HTMLElement {
+    const panel = document.createElement("div");
+    panel.style.padding = "16px 18px";
+    panel.style.borderRadius = "18px";
+    panel.style.border = "1px solid rgba(255, 196, 120, 0.18)";
+    panel.style.background = "linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62))";
+    panel.style.boxShadow = "0 16px 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08)";
+    panel.style.backdropFilter = "blur(10px)";
+    panel.style.fontFamily = 'ui-monospace, "Cascadia Code", "Fira Code", monospace';
+    panel.style.color = "#f3d7b1";
+    panel.style.textAlign = "left";
+    panel.innerHTML = `
+      <div style="font-size:11px; letter-spacing:2px; color:#c7a271; margin-bottom:8px;">${title}</div>
+      <div data-role="context" style="font-size:11px; letter-spacing:2px; color:#7fd6ff; margin-bottom:10px;"></div>
+      <div data-role="list" style="display:grid; gap:6px;"></div>
+    `;
+    return panel;
+  }
+
+  private async refreshLeaderboardPanels() {
+    const entries = await fetchLeaderboardScores();
+    const normalizedEntries = entries.map((entry, index) => ({
+      username: entry.username,
+      score: entry.score,
+      rank: entry.rank ?? index + 1,
+    }));
+    this.titleLeaderboardEntries = normalizedEntries;
+    this.gameOverLeaderboardEntries = normalizedEntries;
+    this.renderLeaderboardList(
+      this.titleLeaderboardContext,
+      this.titleLeaderboardList,
+      this.titleLeaderboardEntries,
+      this.titleLeaderboardEntries.length > 0 ? "WAVEDASH OR LOCAL TOP RUNS" : "NO RUNS YET"
+    );
+    this.renderLeaderboardList(
+      this.gameOverLeaderboardContext,
+      this.gameOverLeaderboardList,
+      this.gameOverLeaderboardEntries,
+      `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
+    );
+  }
+
+  private renderLeaderboardList(
+    contextEl: HTMLElement,
+    listEl: HTMLElement,
+    entries: LeaderboardDisplayEntry[],
+    contextText: string
+  ) {
+    contextEl.textContent = contextText;
+    if (entries.length === 0) {
+      listEl.innerHTML = "<div style='font-size:12px; letter-spacing:2px; color:#8f8a85;'>NO SCORES RECORDED</div>";
+      return;
+    }
+
+    listEl.innerHTML = entries.slice(0, 10).map((entry) => (
+      `<div style="display:grid; grid-template-columns: 32px 1fr auto; gap:10px; align-items:baseline; font-size:13px; letter-spacing:1px;">
+        <span style="color:#c7a271;">#${entry.rank}</span>
+        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(entry.username)}</span>
+        <span style="color:#ffaa44; font-weight:700;">${entry.score}</span>
+      </div>`
+    )).join("");
+  }
+
+  private async readSaveData(): Promise<SaveData> {
+    const rawSave = await loadSaveData();
+    const parsedSave = parseSaveData(rawSave);
+    const statBackedSave: SaveData = {
+      bestScore: parsedSave.bestScore,
+      bestHeight: Math.max(parsedSave.bestHeight, getStat("highest_climb")),
+      bestCombo: Math.max(parsedSave.bestCombo, getStat("best_combo")),
+      totalRuns: Math.max(parsedSave.totalRuns, getStat("total_runs")),
+      totalBolts: Math.max(parsedSave.totalBolts, getStat("total_bolts")),
+      totalPlaytime: Math.max(parsedSave.totalPlaytime, getStat("total_playtime")),
+      audioEnabled: parsedSave.audioEnabled,
+    };
+    return statBackedSave;
   }
 
   private resetVisualWorld() {
@@ -509,6 +659,7 @@ export class Game {
     playClick();
     this.resumeAnimationLoop();
     this.state = GameState.Playing;
+    this.runStartElapsedTime = this.elapsedTime;
     this.toastTimer = 0;
     this.zoneAnnouncementTimer = 0;
     this.cameraKick = 0;
@@ -536,6 +687,8 @@ export class Game {
     this.titleOverlay.classList.remove("game-over");
     this.pauseOverlay.classList.add("hidden");
     this.gameOverCard.classList.add("hidden");
+    this.titleLeaderboardPanel.classList.remove("hidden");
+    this.gameOverLeaderboardPanel.classList.add("hidden");
     this.shareScoreBtn.classList.add("hidden");
     this.titleTagline.classList.remove("new-best");
     this.titleBest.classList.add("hidden");
@@ -600,23 +753,52 @@ export class Game {
     this.closeCallFlashTimer = 0;
     this.closeCallOverlay.style.opacity = "0";
 
-    void submitScore(this.score).catch((error: unknown) => {
+    const runPlaytime = Math.max(0, this.elapsedTime - this.runStartElapsedTime);
+    const isNewBest = this.score > this.saveData.bestScore;
+    const nextSaveData: SaveData = {
+      bestScore: Math.max(this.saveData.bestScore, this.score),
+      bestHeight: Math.max(this.saveData.bestHeight, this.heightMaxReached),
+      bestCombo: Math.max(this.saveData.bestCombo, this.bestCombo),
+      totalRuns: this.saveData.totalRuns + 1,
+      totalBolts: this.saveData.totalBolts + this.boltCount,
+      totalPlaytime: this.saveData.totalPlaytime + runPlaytime,
+      audioEnabled: getAudioEnabled(),
+    };
+    this.saveData = nextSaveData;
+    this.highScore = nextSaveData.bestScore;
+
+    updateStat("total_score", getStat("total_score") + this.score);
+    updateStat("total_bolts", getStat("total_bolts") + this.boltCount);
+    updateStat("total_runs", getStat("total_runs") + 1);
+    updateStat("best_combo", Math.max(getStat("best_combo"), this.bestCombo));
+    updateStat("highest_climb", Math.max(getStat("highest_climb"), this.heightMaxReached));
+    updateStat("total_playtime", getStat("total_playtime") + runPlaytime);
+    storeStats();
+
+    void writeSaveData(JSON.stringify(nextSaveData)).catch((error: unknown) => {
+      console.error("Failed to save run data", error);
+    });
+    void submitScores({
+      score: this.score,
+      height: this.heightMaxReached,
+      combo: this.bestCombo,
+    }).catch((error: unknown) => {
       console.error("Failed to submit score", error);
+    });
+    void this.refreshLeaderboardPanels().catch((error: unknown) => {
+      console.error("Failed to refresh leaderboard panels", error);
     });
 
     if (this.score > 0) unlockAchievement("FIRST_CLIMB");
     if (this.score >= 500) unlockAchievement("RISING_STAR");
     if (this.score >= 2000) unlockAchievement("GEAR_MASTER");
-
-    const isNewBest = this.score > this.highScore;
-    if (isNewBest) {
-      this.highScore = this.score;
-      localStorage.setItem("gameHighScore", String(this.highScore));
-    }
+    if (this.saveData.totalRuns === 1 && this.score >= 500) unlockAchievement("PERFECT_START");
+    if (state.bestAirBoltChain >= 3) unlockAchievement("BOLT_CHAIN");
 
     this.updateHud(dtZero());
     this.titleOverlay.classList.remove("hidden");
     this.titleOverlay.classList.add("game-over");
+    this.titleLeaderboardPanel.classList.add("hidden");
     this.titleHeading.textContent = "GAME OVER";
     if (isNewBest) {
       this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
@@ -634,7 +816,14 @@ export class Game {
     this.gameOverComboEl.textContent = `x${this.bestCombo}`;
     this.gameOverTimeEl.textContent = `${gameSeconds}s`;
     this.gameOverTotalEl.textContent = String(this.score);
+    this.renderLeaderboardList(
+      this.gameOverLeaderboardContext,
+      this.gameOverLeaderboardList,
+      this.gameOverLeaderboardEntries,
+      `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
+    );
     this.gameOverCard.classList.remove("hidden");
+    this.gameOverLeaderboardPanel.classList.remove("hidden");
     this.shareScoreBtn.classList.remove("hidden");
   }
 
@@ -882,6 +1071,7 @@ export class Game {
           }
           break;
         case "achievement":
+          this.showToast(`ACHIEVEMENT · ${formatAchievementId(event.id)}`);
           unlockAchievement(event.id);
           break;
         case "bounce_jump":
@@ -1254,10 +1444,12 @@ export class Game {
 
   private updateOverlayText() {
     this.titleOverlay.classList.remove("game-over");
+    this.titleLeaderboardPanel.classList.remove("hidden");
+    this.gameOverLeaderboardPanel.classList.add("hidden");
     this.titleHeading.textContent = "CLOCKWORK CLIMB";
     this.titleTagline.textContent = "GAMEDEV.JS JAM 2026 — Theme: MACHINES";
     if (this.highScore > 0) {
-      this.titleBest.textContent = `YOUR BEST: ${this.highScore}`;
+      this.titleBest.textContent = `BEST SCORE ${this.highScore} · BEST HEIGHT ${this.saveData.bestHeight}m · BEST COMBO x${this.saveData.bestCombo}`;
       this.titleBest.classList.remove("hidden");
     } else {
       this.titleBest.textContent = "";
@@ -1311,9 +1503,9 @@ export class Game {
 
   private updateHud(dt: number) {
     this.hudScore.textContent = String(this.score);
-    this.hudBest.textContent = String(Math.max(this.highScore, this.score));
+    this.hudBest.textContent = `${Math.max(this.saveData.bestHeight, this.heightMaxReached)}m`;
     this.hudBolts.textContent = String(this.boltCount);
-    this.hudStatus.textContent = `HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`;
+    this.hudStatus.textContent = `HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
 
     this.toastTimer = Math.max(0, this.toastTimer - dt);
     const toastVisible = this.toastTimer > 0;
@@ -1690,4 +1882,42 @@ function getPowerUpDisplayName(type: SimPowerUp["type"]): string {
     case "slow_mo": return "SLOW-MO! (3s)";
     case "shield": return "SHIELD ACTIVE!";
   }
+}
+
+function parseSaveData(rawSave: string | null): SaveData {
+  if (!rawSave) {
+    return { ...DEFAULT_SAVE_DATA };
+  }
+
+  try {
+    const parsed = JSON.parse(rawSave) as Partial<SaveData>;
+    return {
+      bestScore: finiteOr(parsed.bestScore, DEFAULT_SAVE_DATA.bestScore),
+      bestHeight: finiteOr(parsed.bestHeight, DEFAULT_SAVE_DATA.bestHeight),
+      bestCombo: Math.max(1, finiteOr(parsed.bestCombo, DEFAULT_SAVE_DATA.bestCombo)),
+      totalRuns: finiteOr(parsed.totalRuns, DEFAULT_SAVE_DATA.totalRuns),
+      totalBolts: finiteOr(parsed.totalBolts, DEFAULT_SAVE_DATA.totalBolts),
+      totalPlaytime: finiteOr(parsed.totalPlaytime, DEFAULT_SAVE_DATA.totalPlaytime),
+      audioEnabled: typeof parsed.audioEnabled === "boolean" ? parsed.audioEnabled : DEFAULT_SAVE_DATA.audioEnabled,
+    };
+  } catch {
+    return { ...DEFAULT_SAVE_DATA };
+  }
+}
+
+function finiteOr(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatAchievementId(value: string): string {
+  return value.replaceAll("_", " ");
 }

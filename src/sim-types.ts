@@ -94,6 +94,13 @@ export type SimState = {
   currentZoneIndex: number;
   inChallengeZone: boolean;
   challengeZoneCenter: number;
+  windGearCount: number;
+  bouncyGearCount: number;
+  powerUpCount: number;
+  completedChallengeZones: number;
+  shieldSaveCount: number;
+  airBoltChain: number;
+  bestAirBoltChain: number;
 };
 
 export type SimEvent =

@@ -39,6 +39,66 @@
       "identifier": "endurance",
       "display_name": "Endurance",
       "description": "Survive for 60 seconds"
+    },
+    {
+      "identifier": "combo_starter",
+      "display_name": "Combo Starter",
+      "description": "Reach a 2x combo"
+    },
+    {
+      "identifier": "combo_master",
+      "display_name": "Combo Master",
+      "description": "Reach a 5x combo"
+    },
+    {
+      "identifier": "wind_rider",
+      "display_name": "Wind Rider",
+      "description": "Land on 3 wind gears in one run"
+    },
+    {
+      "identifier": "bounce_king",
+      "display_name": "Bounce King",
+      "description": "Use 5 bouncy gears in one run"
+    },
+    {
+      "identifier": "challenge_complete",
+      "display_name": "Challenge Complete",
+      "description": "Complete a challenge zone"
+    },
+    {
+      "identifier": "iron_works",
+      "display_name": "Iron Works",
+      "description": "Reach 25 meters in height"
+    },
+    {
+      "identifier": "golden_climber",
+      "display_name": "Golden Climber",
+      "description": "Reach 75 meters in height"
+    },
+    {
+      "identifier": "chrome_abyss",
+      "display_name": "Chrome Abyss",
+      "description": "Reach 100 meters in height"
+    },
+    {
+      "identifier": "powerup_collector",
+      "display_name": "Power-Up Collector",
+      "description": "Collect 5 power-ups in one run"
+    },
+    {
+      "identifier": "shield_survivor",
+      "display_name": "Shield Survivor",
+      "description": "Be saved by a shield"
+    },
+    {
+      "identifier": "perfect_start",
+      "display_name": "Perfect Start",
+      "description": "Score 500 points on your first run"
+    },
+    {
+      "identifier": "bolt_chain",
+      "display_name": "Bolt Chain",
+      "description": "Collect 3 bolts without touching the ground"
     }
   ]
 }

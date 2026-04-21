@@ -61,6 +61,13 @@ export class ClockworkClimbSimulation {
   private deathFreezeTimer = 0;
   private nextChallengeZoneHeight = 100;
   private challengeZoneEntryScore = 0;
+  private windGearCount = 0;
+  private bouncyGearCount = 0;
+  private powerUpCount = 0;
+  private completedChallengeZones = 0;
+  private shieldSaveCount = 0;
+  private airBoltChain = 0;
+  private bestAirBoltChain = 0;
 
   constructor(config: SimulationConfig = {}) {
     this.initialSeed = Number.isFinite(config.seed) ? Number(config.seed) : Math.floor(Math.random() * 0x1_0000_0000);
@@ -86,6 +93,13 @@ export class ClockworkClimbSimulation {
     this.deathFreezeTimer = 0;
     this.nextChallengeZoneHeight = 100;
     this.challengeZoneEntryScore = 0;
+    this.windGearCount = 0;
+    this.bouncyGearCount = 0;
+    this.powerUpCount = 0;
+    this.completedChallengeZones = 0;
+    this.shieldSaveCount = 0;
+    this.airBoltChain = 0;
+    this.bestAirBoltChain = 0;
     this.state = this.createInitialState();
     this.state.gameState = "playing";
     this.seedInitialLayout();
@@ -222,6 +236,13 @@ export class ClockworkClimbSimulation {
       currentZoneIndex: 0,
       inChallengeZone: false,
       challengeZoneCenter: 0,
+      windGearCount: 0,
+      bouncyGearCount: 0,
+      powerUpCount: 0,
+      completedChallengeZones: 0,
+      shieldSaveCount: 0,
+      airBoltChain: 0,
+      bestAirBoltChain: 0,
     };
   }
 
@@ -537,6 +558,9 @@ export class ClockworkClimbSimulation {
   }
 
   private onPlayerLand(gear: SimGear, landingSpeed: number) {
+    this.airBoltChain = 0;
+    this.state.airBoltChain = 0;
+
     // Track last landing position for shield save
     this.state.player.lastLandedGearX = gear.x;
     this.state.player.lastLandedGearY = getGearTopY(gear);
@@ -568,6 +592,16 @@ export class ClockworkClimbSimulation {
         y: this.state.player.y,
         z: this.state.player.z,
       });
+    }
+
+    if (gear.variant === "wind") {
+      this.windGearCount += 1;
+      this.state.windGearCount = this.windGearCount;
+    }
+
+    if (gear.variant === "bouncy") {
+      this.bouncyGearCount += 1;
+      this.state.bouncyGearCount = this.bouncyGearCount;
     }
 
     this.handleComboLanding(gear.id);
@@ -733,6 +767,14 @@ export class ClockworkClimbSimulation {
       bolt.available = false;
       this.state.boltCount += 1;
       this.state.boltScore += BOLT_SCORE_VALUE;
+      if (player.onGround) {
+        this.airBoltChain = 0;
+      } else {
+        this.airBoltChain += 1;
+        this.bestAirBoltChain = Math.max(this.bestAirBoltChain, this.airBoltChain);
+      }
+      this.state.airBoltChain = this.airBoltChain;
+      this.state.bestAirBoltChain = this.bestAirBoltChain;
       this.events.push({
         type: "bolt_collect",
         boltId: bolt.id,
@@ -759,6 +801,8 @@ export class ClockworkClimbSimulation {
       }
 
       powerUp.available = false;
+      this.powerUpCount += 1;
+      this.state.powerUpCount = this.powerUpCount;
       switch (powerUp.type) {
         case "bolt_magnet":
           player.boltMagnetTimer = 8;
@@ -933,6 +977,8 @@ export class ClockworkClimbSimulation {
     } else if (wasInZone && !nowInZone) {
       this.state.inChallengeZone = false;
       const bonusScore = Math.max(0, this.state.score - this.challengeZoneEntryScore);
+      this.completedChallengeZones += 1;
+      this.state.completedChallengeZones = this.completedChallengeZones;
       this.events.push({ type: "challenge_zone_exit", bonusScore });
     }
   }
@@ -951,6 +997,16 @@ export class ClockworkClimbSimulation {
     maybeUnlock("BOLT_COLLECTOR", this.state.boltCount >= 10);
     maybeUnlock("BOLT_HOARDER", this.state.boltCount >= 25);
     maybeUnlock("ENDURANCE", this.state.gameTime >= 60);
+    maybeUnlock("COMBO_STARTER", this.state.comboMultiplier >= 2);
+    maybeUnlock("COMBO_MASTER", this.state.comboMultiplier >= 5);
+    maybeUnlock("WIND_RIDER", this.state.windGearCount >= 3);
+    maybeUnlock("BOUNCE_KING", this.state.bouncyGearCount >= 5);
+    maybeUnlock("CHALLENGE_COMPLETE", this.state.completedChallengeZones >= 1);
+    maybeUnlock("IRON_WORKS", this.state.heightMaxReached >= 25);
+    maybeUnlock("GOLDEN_CLIMBER", this.state.heightMaxReached >= 75);
+    maybeUnlock("CHROME_ABYSS", this.state.heightMaxReached >= 100);
+    maybeUnlock("POWERUP_COLLECTOR", this.state.powerUpCount >= 5);
+    maybeUnlock("SHIELD_SURVIVOR", this.state.shieldSaveCount >= 1);
   }
 
   private cleanupBelow() {
@@ -977,6 +1033,8 @@ export class ClockworkClimbSimulation {
       // Shield intercepts the death
       if (this.state.player.shieldActive) {
         this.state.player.shieldActive = false;
+        this.shieldSaveCount += 1;
+        this.state.shieldSaveCount = this.shieldSaveCount;
         this.state.player.x = this.state.player.lastLandedGearX;
         this.state.player.y = this.state.player.lastLandedGearY + 1.5;
         this.state.player.z = this.state.player.lastLandedGearZ;
