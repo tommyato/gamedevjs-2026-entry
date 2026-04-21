@@ -1177,19 +1177,21 @@ export class Game {
     // Only recompute orbit target when grounded — camera holds steady during jumps
     // so the player can judge trajectories without the world rotating under them.
     if (this.player.onGround) {
-      // Base angle tracks the player's actual angular position around the tower.
-      // This prevents the central shaft from ever occluding the player — the camera
-      // stays on the same side. When the player is at origin (starting gear), fall
-      // back to the current target to avoid atan2(0,0) degeneracy.
+      // Height-based orbit spiral — camera rotates ~90° per 40m of climbing.
+      // Creates a dramatic "spiralling around the tower" effect and prevents
+      // the same viewing angle from stacking gears on top of each other.
+      const heightOrbitBias = playerY * (Math.PI / 2) / 40;
+
+      // Player position tracking prevents the central shaft from occluding.
       const playerDist = Math.hypot(playerX, playerZ);
-      const baseAngle = playerDist > 0.5
+      const baseAngle = heightOrbitBias + (playerDist > 0.5
         ? Math.atan2(playerZ, playerX)
-        : this.orbitAngleTarget;
+        : 0);
 
       // Gear-avoidance nudge — if any nearby gear sits between the camera and the
       // player (in XZ projection), push the target angle further counterclockwise.
       let nudge = 0;
-      const maxNudge = 0.7;
+      const maxNudge = 1.3; // ~75° — enough to swing around occluding gears
       const nudgeStep = 0.05;
       const angleTolerance = 0.18; // ~10° — how close a gear must be to the cam→player line to count as occluding
       const verticalWindow = 3;
