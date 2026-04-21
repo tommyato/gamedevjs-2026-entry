@@ -69,8 +69,11 @@ export class Player {
     const speed = this.moveSpeed * speedBoost;
 
     // Transform input to camera-relative world space.
-    // Camera sits at orbitAngle; its forward direction (into the screen) is orbitAngle + PI.
-    const cameraYaw = cameraAngle + Math.PI;
+    // Camera sits at (cos(θ)*r, h, sin(θ)*r). Screen-right maps to the
+    // camera's right vector and screen-up (W, move.y=-1) maps to the
+    // camera's forward vector.  The standard 2D rotation with angle
+    // (θ - π/2) achieves this mapping correctly.
+    const cameraYaw = cameraAngle - Math.PI / 2;
     const sinYaw = Math.sin(cameraYaw);
     const cosYaw = Math.cos(cameraYaw);
     const worldX = move.x * cosYaw - move.y * sinYaw;
