@@ -1548,6 +1548,7 @@ export class Game {
       this.multiplayerButton.style.display = "none";
     }
     this.clearGhostMeshes();
+    this.resetAIGhost();
   }
 
   private pauseGame() {
@@ -1592,6 +1593,7 @@ export class Game {
     this.updatePlayerShadow();
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
+    this.updateAIGhost(dt);
 
     if (state.gameState === "gameover") {
       this.finishGame(state);
