@@ -6,7 +6,7 @@ export type SimAction = {
   jump: boolean;
 };
 
-export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston" | "wind" | "magnetic" | "bouncy";
+export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston" | "wind" | "magnetic" | "bouncy" | "milestone";
 
 export type SimGear = {
   id: number;

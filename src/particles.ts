@@ -34,6 +34,7 @@ export class ParticleSystem {
     crumbling: 0xff9f5d,
     reverse: 0xffa64a,
     piston: 0xffc94a,
+    milestone: 0xffd700,
   };
 
   private readonly confettiColors = [0xffd35e, 0x67c7ff, 0xc074ff, 0x68f08a, 0xff8e2b, 0xffffff];

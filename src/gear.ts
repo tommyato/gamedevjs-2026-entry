@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston" | "wind" | "magnetic" | "bouncy";
+export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston" | "wind" | "magnetic" | "bouncy" | "milestone";
 
 export type GearCollision = {
   onGear: boolean;
@@ -50,6 +50,8 @@ export class Gear {
   private pistonMesh: THREE.Mesh | null = null;
   private pistonBaseY = 0;
   private pistonTime = Math.random() * Math.PI * 2;
+  private milestoneRing: THREE.Mesh | null = null;
+  private milestoneTime = 0;
 
   constructor(options: GearOptions = {}) {
     this.radius = options.radius ?? 1.5;
@@ -69,11 +71,11 @@ export class Gear {
 
     const bodyGeo = new THREE.CylinderGeometry(this.radius, this.radius, this.height, 32);
     this.bodyMaterial = new THREE.MeshStandardMaterial({
-      color: bodyColor.clone().multiplyScalar(this.variant === "crumbling" ? 0.72 : 0.82),
-      emissive: bodyColor.clone().multiplyScalar(0.08 + danger * 0.1),
-      emissiveIntensity: 0.3,
+      color: bodyColor.clone().multiplyScalar(this.variant === "crumbling" ? 0.72 : this.variant === "milestone" ? 1.0 : 0.82),
+      emissive: this.variant === "milestone" ? new THREE.Color(0xffaa00) : bodyColor.clone().multiplyScalar(0.08 + danger * 0.1),
+      emissiveIntensity: this.variant === "milestone" ? 0.6 : 0.3,
       metalness: 0.9,
-      roughness: this.variant === "crumbling" ? 0.48 : 0.34,
+      roughness: this.variant === "crumbling" ? 0.48 : this.variant === "milestone" ? 0.18 : 0.34,
     });
     const body = new THREE.Mesh(bodyGeo, this.bodyMaterial);
     this.mesh.add(body);
@@ -106,9 +108,9 @@ export class Gear {
 
     const hubGeo = new THREE.CylinderGeometry(this.radius * 0.22, this.radius * 0.22, this.height + 0.04, 16);
     this.detailMaterial = new THREE.MeshStandardMaterial({
-      color: this.variant === "crumbling" ? 0x1d1817 : 0x2b2623,
-      emissive: this.variant === "speed" ? 0x11355e : 0x150f0a,
-      emissiveIntensity: this.variant === "speed" ? 0.5 : 0.35,
+      color: this.variant === "crumbling" ? 0x1d1817 : this.variant === "milestone" ? 0xaa8800 : 0x2b2623,
+      emissive: this.variant === "speed" ? 0x11355e : this.variant === "milestone" ? 0xffaa00 : 0x150f0a,
+      emissiveIntensity: this.variant === "speed" ? 0.5 : this.variant === "milestone" ? 0.5 : 0.35,
       metalness: 0.92,
       roughness: 0.26,
     });
@@ -170,6 +172,9 @@ export class Gear {
       this.addPistonDetail();
     }
 
+    if (this.variant === "milestone") {
+      this.addMilestoneEffects();
+    }
   }
 
   private addPistonDetail() {
@@ -198,6 +203,37 @@ export class Gear {
     const cap = new THREE.Mesh(capGeo, capMat);
     cap.position.y = 0.34;
     shaft.add(cap);
+  }
+
+  private addMilestoneEffects() {
+    // Pulsing beacon ring (animated in update())
+    const pulseRingGeo = new THREE.TorusGeometry(this.radius * 1.08, Math.max(this.radius * 0.045, 0.07), 10, 48);
+    const pulseRingMat = new THREE.MeshStandardMaterial({
+      color: 0xffd700,
+      emissive: new THREE.Color(0xffcc00),
+      emissiveIntensity: 0.9,
+      metalness: 0.6,
+      roughness: 0.12,
+      transparent: true,
+      opacity: 0.88,
+    });
+    const pulseRing = new THREE.Mesh(pulseRingGeo, pulseRingMat);
+    pulseRing.rotation.x = Math.PI / 2;
+    pulseRing.position.y = this.height / 2 + 0.08;
+    this.mesh.add(pulseRing);
+    this.milestoneRing = pulseRing;
+
+    // Subtle additive glow sphere
+    const glowGeo = new THREE.SphereGeometry(this.radius * 1.18, 16, 12);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xffdd44,
+      transparent: true,
+      opacity: 0.07,
+      side: THREE.BackSide,
+      depthWrite: false,
+    });
+    const glowSphere = new THREE.Mesh(glowGeo, glowMat);
+    this.mesh.add(glowSphere);
   }
 
   private addCrackDetails() {
@@ -264,6 +300,13 @@ export class Gear {
       this.pistonTime += dt;
       const oscillation = Math.sin((this.pistonTime / 1.5) * Math.PI * 2) * 0.15;
       this.pistonMesh.position.y = this.pistonBaseY + oscillation;
+    }
+
+    if (this.milestoneRing) {
+      this.milestoneTime += dt;
+      const pulse = 1 + Math.sin(this.milestoneTime * 2.8) * 0.07;
+      this.milestoneRing.scale.setScalar(pulse);
+      (this.milestoneRing.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.65 + Math.sin(this.milestoneTime * 2.8) * 0.32;
     }
 
     this.reverseTimer += dt;
@@ -365,6 +408,7 @@ function applyVariantTint(baseColor: THREE.Color, variant: GearVariant): THREE.C
   if (variant === "wind") return color.lerp(new THREE.Color(0x4488aa), 0.55);
   if (variant === "magnetic") return color.lerp(new THREE.Color(0x8844aa), 0.55);
   if (variant === "bouncy") return color.lerp(new THREE.Color(0x44aa44), 0.55);
+  if (variant === "milestone") return new THREE.Color(0xffd700); // pure gold, overrides base
   return color;
 }
 
@@ -375,6 +419,7 @@ function getRingColor(variant: GearVariant): { color: number; emissive: number }
     case "wind": return { color: 0x88ddff, emissive: 0x44aaff };
     case "magnetic": return { color: 0xcc88ff, emissive: 0x8844cc };
     case "bouncy": return { color: 0x88ff88, emissive: 0x44cc44 };
+    case "milestone": return { color: 0xffffff, emissive: 0xffd700 };
     default: return { color: 0xffcf8e, emissive: 0xffb14a };
   }
 }
@@ -386,6 +431,7 @@ function getAccentColor(variant: GearVariant): { color: number; emissive: number
     case "wind": return { color: 0x88ccff, emissive: 0x4499ff, emissiveIntensity: 0.40 };
     case "magnetic": return { color: 0xcc88ff, emissive: 0x9933ff, emissiveIntensity: 0.42 };
     case "bouncy": return { color: 0x88ff88, emissive: 0x44cc44, emissiveIntensity: 0.42 };
+    case "milestone": return { color: 0xffd700, emissive: 0xffaa00, emissiveIntensity: 0.6 };
     default: return { color: 0xf6b86f, emissive: 0xffa43c, emissiveIntensity: 0.35 };
   }
 }
