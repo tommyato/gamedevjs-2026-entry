@@ -963,7 +963,10 @@ export class ClockworkClimbSimulation {
     let angleDiff = this.orbitAngleTarget - this.state.orbitAngle;
     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-    this.state.orbitAngle += angleDiff * orbitLerp;
+    // Cap angular velocity to prevent wild spins on large angle jumps
+    const maxAngularStep = 2.5 * dt; // ~143°/s — smooth but responsive
+    const angularStep = angleDiff * orbitLerp;
+    this.state.orbitAngle += clamp(angularStep, -maxAngularStep, maxAngularStep);
 
     const targetCamY = player.y + 6.1 + verticalLead;
     this.cameraY = lerp(this.cameraY, targetCamY, followLerp);

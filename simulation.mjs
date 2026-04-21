@@ -1,4 +1,4 @@
-// ../gamedevjs-2026-entry/src/simulation.ts
+// src/simulation.ts
 var DEFAULT_FIXED_DT = 1 / 60;
 var PLAYER_RADIUS = 0.3;
 var PLAYER_HEIGHT = 0.6;
@@ -54,6 +54,8 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
   shieldSaveCount = 0;
   airBoltChain = 0;
   bestAirBoltChain = 0;
+  consecutiveCrumble = 0;
+  nextMilestoneGearHeight = 25;
   constructor(config = {}) {
     this.initialSeed = Number.isFinite(config.seed) ? Number(config.seed) : Math.floor(Math.random() * 4294967296);
     this.fixedDt = Number.isFinite(config.fixedDt) ? Number(config.fixedDt) : null;
@@ -84,6 +86,8 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
     this.shieldSaveCount = 0;
     this.airBoltChain = 0;
     this.bestAirBoltChain = 0;
+    this.consecutiveCrumble = 0;
+    this.nextMilestoneGearHeight = 25;
     this.state = this.createInitialState();
     this.state.gameState = "playing";
     this.seedInitialLayout();
@@ -234,6 +238,10 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
       const band = getDifficultyBand(height);
       height += this.randomRange(band.verticalMin, band.verticalMax);
       angle += this.randomRange(0.75, 1.75);
+      if (this.nextMilestoneGearHeight <= 100 && height >= this.nextMilestoneGearHeight) {
+        this.spawnMilestoneGear(this.nextMilestoneGearHeight, angle);
+        this.nextMilestoneGearHeight += 25;
+      }
       const radius = this.randomRange(band.radiusMin, band.radiusMax);
       const distance = this.randomRange(band.distanceMin, band.distanceMax);
       const variant = this.pickGearVariant(height);
@@ -301,6 +309,10 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
     };
   }
   trySpawnBolt(gear) {
+    if (gear.variant === "milestone") {
+      this.state.bolts.push(this.createBolt(gear));
+      return;
+    }
     if (gear.variant === "crumbling" || this.rng() >= 0.3) {
       return;
     }
@@ -327,6 +339,10 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
         const band = getDifficultyBand(height);
         height += this.randomRange(band.verticalMin, band.verticalMax);
         angle += this.randomRange(0.75, 1.75);
+        if (this.nextMilestoneGearHeight <= 100 && height >= this.nextMilestoneGearHeight) {
+          this.spawnMilestoneGear(this.nextMilestoneGearHeight, angle);
+          this.nextMilestoneGearHeight += 25;
+        }
         const radius = this.randomRange(band.radiusMin, band.radiusMax);
         const distance = this.randomRange(band.distanceMin, band.distanceMax);
         const variant = this.pickGearVariant(height);
@@ -347,6 +363,24 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
     }
     this.generationHeight = height;
     this.generationAngle = angle;
+  }
+  spawnMilestoneGear(targetHeight, currentAngle) {
+    const angle = currentAngle + this.randomRange(-0.3, 0.3);
+    const distance = this.randomRange(1.5, 2.5);
+    const gear = this.createGear({
+      x: Math.cos(angle) * distance,
+      y: targetHeight,
+      z: Math.sin(angle) * distance,
+      radius: 2.2,
+      // Larger than normal (normal is ~1.3–2.0)
+      height: 0.4,
+      rotationSpeed: 0.2,
+      // Slow, stately rotation
+      variant: "milestone"
+    });
+    this.state.gears.push(gear);
+    this.state.bolts.push(this.createBolt(gear));
+    this.consecutiveCrumble = 0;
   }
   generateChallengeZone(centerY) {
     const count = 8 + Math.floor(this.rng() * 5);
@@ -373,55 +407,64 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
     }
   }
   pickGearVariant(height) {
+    const blockCrumble = this.consecutiveCrumble >= 3;
     if (height >= 55 && this.rng() < 0.14) {
+      this.consecutiveCrumble = 0;
       return "piston";
     }
     if (height >= 20 && this.rng() < 0.09) {
+      this.consecutiveCrumble = 0;
       return "bouncy";
     }
     const roll = this.rng();
+    let variant;
     if (height >= 100) {
-      if (roll < 0.18) return "reverse";
-      if (roll < 0.32) return "wind";
-      if (roll < 0.46) return "magnetic";
-      if (roll < 0.6) return "speed";
-      if (roll < 0.76) return "crumbling";
-      return "normal";
+      if (roll < 0.18) variant = "reverse";
+      else if (roll < 0.32) variant = "wind";
+      else if (roll < 0.46) variant = "magnetic";
+      else if (roll < 0.6) variant = "speed";
+      else if (roll < 0.76) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 75) {
+      if (roll < 0.2) variant = "reverse";
+      else if (roll < 0.34) variant = "wind";
+      else if (roll < 0.48) variant = "magnetic";
+      else if (roll < 0.62) variant = "speed";
+      else if (roll < 0.76) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 50) {
+      if (roll < 0.17) variant = "wind";
+      else if (roll < 0.33) variant = "magnetic";
+      else if (roll < 0.48) variant = "speed";
+      else if (roll < 0.64) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 40) {
+      if (roll < 0.08) variant = "wind";
+      else if (roll < 0.2) variant = "magnetic";
+      else if (roll < 0.38) variant = "speed";
+      else if (roll < 0.56) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 35) {
+      if (roll < 0.12) variant = "magnetic";
+      else if (roll < 0.3) variant = "speed";
+      else if (roll < 0.5) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 25) {
+      if (roll < 0.24) variant = "speed";
+      else if (roll < 0.5) variant = "crumbling";
+      else variant = "normal";
+    } else {
+      variant = "normal";
     }
-    if (height >= 75) {
-      if (roll < 0.2) return "reverse";
-      if (roll < 0.34) return "wind";
-      if (roll < 0.48) return "magnetic";
-      if (roll < 0.62) return "speed";
-      if (roll < 0.76) return "crumbling";
-      return "normal";
+    if (variant === "crumbling" && blockCrumble) {
+      variant = "normal";
     }
-    if (height >= 50) {
-      if (roll < 0.17) return "wind";
-      if (roll < 0.33) return "magnetic";
-      if (roll < 0.48) return "speed";
-      if (roll < 0.64) return "crumbling";
-      return "normal";
+    if (variant === "crumbling") {
+      this.consecutiveCrumble += 1;
+    } else {
+      this.consecutiveCrumble = 0;
     }
-    if (height >= 40) {
-      if (roll < 0.08) return "wind";
-      if (roll < 0.2) return "magnetic";
-      if (roll < 0.38) return "speed";
-      if (roll < 0.56) return "crumbling";
-      return "normal";
-    }
-    if (height >= 35) {
-      if (roll < 0.12) return "magnetic";
-      if (roll < 0.3) return "speed";
-      if (roll < 0.5) return "crumbling";
-      return "normal";
-    }
-    if (height >= 25) {
-      if (roll < 0.24) return "speed";
-      if (roll < 0.5) return "crumbling";
-      return "normal";
-    }
-    return "normal";
+    return variant;
   }
   updateGears(dt) {
     for (const gear of this.state.gears) {
@@ -771,7 +814,9 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
     let angleDiff = this.orbitAngleTarget - this.state.orbitAngle;
     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-    this.state.orbitAngle += angleDiff * orbitLerp;
+    const maxAngularStep = 2.5 * dt;
+    const angularStep = angleDiff * orbitLerp;
+    this.state.orbitAngle += clamp(angularStep, -maxAngularStep, maxAngularStep);
     const targetCamY = player.y + 6.1 + verticalLead;
     this.cameraY = lerp(this.cameraY, targetCamY, followLerp);
   }
