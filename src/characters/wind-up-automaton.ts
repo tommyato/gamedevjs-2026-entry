@@ -8,33 +8,23 @@ export type WindUpAutomaton = {
 export function createWindUpAutomaton(): WindUpAutomaton {
   const group = new THREE.Group();
 
-  // Body - brass/copper cylinder capsule
+  // Body — plain brass cylinder (no capsule, no gear chest detail)
   const bodyRadius = 0.3;
   const bodyHeight = 0.9;
-  const bodyGeo = new THREE.CapsuleGeometry(bodyRadius, bodyHeight - 2 * bodyRadius, 12, 8);
+  const bodyY = 0.55; // raised to leave room for feet below
+
+  const bodyGeo = new THREE.CylinderGeometry(bodyRadius, bodyRadius, bodyHeight, 20, 1);
   const bodyMat = new THREE.MeshStandardMaterial({
     color: 0xb8823a, // aged brass
     metalness: 0.8,
     roughness: 0.35,
   });
   const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = bodyHeight / 2;
+  body.position.y = bodyY;
   group.add(body);
 
-  // Head - slightly smaller sphere/rounded cube
-  const headRadius = 0.22;
-  const headGeo = new THREE.SphereGeometry(headRadius, 16, 12);
-  const headMat = new THREE.MeshStandardMaterial({
-    color: 0xc89440, // brighter brass
-    metalness: 0.8,
-    roughness: 0.35,
-  });
-  const head = new THREE.Mesh(headGeo, headMat);
-  head.position.y = bodyHeight + headRadius * 0.8;
-  group.add(head);
-
-  // Glowing eyes (warm amber/white)
-  const eyeGeo = new THREE.SphereGeometry(0.04, 8, 8);
+  // Glowing amber eyes — embedded in upper front of cylinder
+  const eyeGeo = new THREE.SphereGeometry(0.045, 8, 8);
   const eyeMat = new THREE.MeshStandardMaterial({
     color: 0xffd98a,
     emissive: 0xffd98a,
@@ -43,17 +33,54 @@ export function createWindUpAutomaton(): WindUpAutomaton {
     roughness: 0.15,
   });
 
+  const eyeY = bodyY + bodyHeight * 0.28;
+  const eyeZ = bodyRadius * 0.88; // slightly inside front surface for embedded look
+
   const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-  leftEye.position.set(-0.08, bodyHeight + headRadius * 0.8, headRadius * 0.8);
+  leftEye.position.set(-0.085, eyeY, eyeZ);
   group.add(leftEye);
 
   const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-  rightEye.position.set(0.08, bodyHeight + headRadius * 0.8, headRadius * 0.8);
+  rightEye.position.set(0.085, eyeY, eyeZ);
   group.add(rightEye);
 
-  // Wind-up key on the back (signature feature)
+  // Feet — flat coin-shaped discs, darker bronze, symmetrical under body
+  const footRadius = 0.15;
+  const footHeight = 0.07;
+  const footGeo = new THREE.CylinderGeometry(footRadius, footRadius, footHeight, 16);
+  const footMat = new THREE.MeshStandardMaterial({
+    color: 0x6b4422, // dark bronze
+    metalness: 0.85,
+    roughness: 0.4,
+  });
+
+  const footY = footHeight / 2; // sits flat on ground plane
+
+  const leftFoot = new THREE.Mesh(footGeo, footMat);
+  leftFoot.position.set(-0.1, footY, 0);
+  group.add(leftFoot);
+
+  const rightFoot = new THREE.Mesh(footGeo, footMat);
+  rightFoot.position.set(0.1, footY, 0);
+  group.add(rightFoot);
+
+  // Front button — decorative brass rivet/push-button at chest height
+  const buttonGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.04, 12);
+  const buttonMat = new THREE.MeshStandardMaterial({
+    color: 0xffcc44, // polished bright brass
+    emissive: 0xaa7700,
+    emissiveIntensity: 0.25,
+    metalness: 0.95,
+    roughness: 0.15,
+  });
+  const button = new THREE.Mesh(buttonGeo, buttonMat);
+  button.rotation.x = Math.PI / 2; // axis points forward so flat face faces viewer
+  button.position.set(0, bodyY - bodyHeight * 0.05, bodyRadius + 0.02);
+  group.add(button);
+
+  // Wind-up key on the back (signature feature — unchanged)
   const keyGroup = new THREE.Group();
-  
+
   // Key shaft
   const keyShaftGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.18, 8);
   const keyMat = new THREE.MeshStandardMaterial({
@@ -65,66 +92,16 @@ export function createWindUpAutomaton(): WindUpAutomaton {
   keyShaft.rotation.x = Math.PI / 2;
   keyGroup.add(keyShaft);
 
-  // Key handle - T-shaped (two lobes)
+  // Key handle — torus loop
   const handleGeo = new THREE.TorusGeometry(0.08, 0.02, 8, 12);
   const keyHandle = new THREE.Mesh(handleGeo, keyMat);
   keyHandle.position.z = -0.09;
   keyHandle.rotation.x = Math.PI / 2;
   keyGroup.add(keyHandle);
 
-  // Position key on the back
-  keyGroup.position.set(0, bodyHeight / 2, -bodyRadius - 0.09);
+  // Position key on the back at mid-body height
+  keyGroup.position.set(0, bodyY, -bodyRadius - 0.09);
   group.add(keyGroup);
-
-  // Arms - stubby capsule arms
-  const armRadius = 0.08;
-  const armLength = 0.3;
-  const armGeo = new THREE.CapsuleGeometry(armRadius, armLength - 2 * armRadius, 6, 4);
-  const armMat = new THREE.MeshStandardMaterial({
-    color: 0xb8823a,
-    metalness: 0.8,
-    roughness: 0.35,
-  });
-
-  const leftArm = new THREE.Mesh(armGeo, armMat);
-  leftArm.position.set(-bodyRadius - 0.05, bodyHeight * 0.7, 0);
-  leftArm.rotation.z = Math.PI / 6;
-  group.add(leftArm);
-
-  const rightArm = new THREE.Mesh(armGeo, armMat);
-  rightArm.position.set(bodyRadius + 0.05, bodyHeight * 0.7, 0);
-  rightArm.rotation.z = -Math.PI / 6;
-  group.add(rightArm);
-
-  // Legs - short cylindrical legs
-  const legRadius = 0.1;
-  const legHeight = 0.25;
-  const legGeo = new THREE.CylinderGeometry(legRadius, legRadius * 0.8, legHeight, 8);
-  const legMat = new THREE.MeshStandardMaterial({
-    color: 0xb8823a,
-    metalness: 0.8,
-    roughness: 0.35,
-  });
-
-  const leftLeg = new THREE.Mesh(legGeo, legMat);
-  leftLeg.position.set(-bodyRadius * 0.4, legHeight / 2, 0);
-  group.add(leftLeg);
-
-  const rightLeg = new THREE.Mesh(legGeo, legMat);
-  rightLeg.position.set(bodyRadius * 0.4, legHeight / 2, 0);
-  group.add(rightLeg);
-
-  // Optional: Gear detail on chest
-  const gearGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.03, 8);
-  const gearMat = new THREE.MeshStandardMaterial({
-    color: 0x8a5a22,
-    metalness: 0.9,
-    roughness: 0.3,
-  });
-  const gearDetail = new THREE.Mesh(gearGeo, gearMat);
-  gearDetail.position.set(0, bodyHeight * 0.5, bodyRadius + 0.01);
-  gearDetail.rotation.x = Math.PI / 2;
-  group.add(gearDetail);
 
   // Animation state
   let keyRotation = 0;

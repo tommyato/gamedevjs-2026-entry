@@ -110,7 +110,7 @@ export function mountCharacterSandbox(container: HTMLElement): void {
   label.style.fontFamily = "monospace";
   label.style.fontSize = "11px";
   label.style.pointerEvents = "none";
-  label.textContent = "Character sandbox — wind-up automaton v1";
+  label.textContent = "Character sandbox — wind-up automaton v2";
   container.appendChild(label);
 
   // Resize handler
