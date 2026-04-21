@@ -79,6 +79,8 @@ export class ClockworkClimbSimulation {
   private shieldSaveCount = 0;
   private airBoltChain = 0;
   private bestAirBoltChain = 0;
+  private consecutiveCrumble = 0;
+  private nextMilestoneGearHeight = 25;
 
   constructor(config: SimulationConfig = {}) {
     this.initialSeed = Number.isFinite(config.seed) ? Number(config.seed) : Math.floor(Math.random() * 0x1_0000_0000);
@@ -111,6 +113,8 @@ export class ClockworkClimbSimulation {
     this.shieldSaveCount = 0;
     this.airBoltChain = 0;
     this.bestAirBoltChain = 0;
+    this.consecutiveCrumble = 0;
+    this.nextMilestoneGearHeight = 25;
     this.state = this.createInitialState();
     this.state.gameState = "playing";
     this.seedInitialLayout();
@@ -278,6 +282,13 @@ export class ClockworkClimbSimulation {
       const band = getDifficultyBand(height);
       height += this.randomRange(band.verticalMin, band.verticalMax);
       angle += this.randomRange(0.75, 1.75);
+
+      // Insert milestone gear at zone boundaries (25m, 50m, 75m, 100m)
+      if (this.nextMilestoneGearHeight <= 100 && height >= this.nextMilestoneGearHeight) {
+        this.spawnMilestoneGear(this.nextMilestoneGearHeight, angle);
+        this.nextMilestoneGearHeight += 25;
+      }
+
       const radius = this.randomRange(band.radiusMin, band.radiusMax);
       const distance = this.randomRange(band.distanceMin, band.distanceMax);
       const variant = this.pickGearVariant(height);
@@ -358,6 +369,11 @@ export class ClockworkClimbSimulation {
   }
 
   private trySpawnBolt(gear: SimGear) {
+    if (gear.variant === "milestone") {
+      // Milestone gears always have a bolt
+      this.state.bolts.push(this.createBolt(gear));
+      return;
+    }
     if (gear.variant === "crumbling" || this.rng() >= 0.3) {
       return;
     }
@@ -389,6 +405,13 @@ export class ClockworkClimbSimulation {
         const band = getDifficultyBand(height);
         height += this.randomRange(band.verticalMin, band.verticalMax);
         angle += this.randomRange(0.75, 1.75);
+
+        // Insert milestone gear at zone boundaries (25m, 50m, 75m, 100m)
+        if (this.nextMilestoneGearHeight <= 100 && height >= this.nextMilestoneGearHeight) {
+          this.spawnMilestoneGear(this.nextMilestoneGearHeight, angle);
+          this.nextMilestoneGearHeight += 25;
+        }
+
         const radius = this.randomRange(band.radiusMin, band.radiusMax);
         const distance = this.randomRange(band.distanceMin, band.distanceMax);
         const variant = this.pickGearVariant(height);
@@ -410,6 +433,25 @@ export class ClockworkClimbSimulation {
 
     this.generationHeight = height;
     this.generationAngle = angle;
+  }
+
+  private spawnMilestoneGear(targetHeight: number, currentAngle: number) {
+    // Large, safe, golden milestone gear at zone boundaries
+    const angle = currentAngle + this.randomRange(-0.3, 0.3);
+    const distance = this.randomRange(1.5, 2.5);
+    const gear = this.createGear({
+      x: Math.cos(angle) * distance,
+      y: targetHeight,
+      z: Math.sin(angle) * distance,
+      radius: 2.2, // Larger than normal (normal is ~1.3–2.0)
+      height: 0.4,
+      rotationSpeed: 0.2, // Slow, stately rotation
+      variant: "milestone",
+    });
+    this.state.gears.push(gear);
+    // Always spawn a bolt on milestone gears as a reward
+    this.state.bolts.push(this.createBolt(gear));
+    this.consecutiveCrumble = 0; // Reset chain counter
   }
 
   private generateChallengeZone(centerY: number) {
@@ -441,63 +483,79 @@ export class ClockworkClimbSimulation {
   }
 
   private pickGearVariant(height: number): GearVariant {
+    // Chain breaker: after 3 consecutive crumbling gears, force a safe one
+    const blockCrumble = this.consecutiveCrumble >= 3;
+
     // Piston: independent check at 55m+
     if (height >= 55 && this.rng() < 0.14) {
+      this.consecutiveCrumble = 0;
       return "piston";
     }
     // Bouncy: starts at 20m
     if (height >= 20 && this.rng() < 0.09) {
+      this.consecutiveCrumble = 0;
       return "bouncy";
     }
 
     const roll = this.rng();
+    let variant: GearVariant;
 
     if (height >= 100) {
       // Ultra-hard: all variants, heavy on the hard ones
-      if (roll < 0.18) return "reverse";
-      if (roll < 0.32) return "wind";
-      if (roll < 0.46) return "magnetic";
-      if (roll < 0.60) return "speed";
-      if (roll < 0.76) return "crumbling";
-      return "normal";
-    }
-    if (height >= 75) {
-      if (roll < 0.20) return "reverse";
-      if (roll < 0.34) return "wind";
-      if (roll < 0.48) return "magnetic";
-      if (roll < 0.62) return "speed";
-      if (roll < 0.76) return "crumbling";
-      return "normal";
-    }
-    if (height >= 50) {
-      if (roll < 0.17) return "wind";
-      if (roll < 0.33) return "magnetic";
-      if (roll < 0.48) return "speed";
-      if (roll < 0.64) return "crumbling";
-      return "normal";
-    }
-    if (height >= 40) {
+      if (roll < 0.18) variant = "reverse";
+      else if (roll < 0.32) variant = "wind";
+      else if (roll < 0.46) variant = "magnetic";
+      else if (roll < 0.60) variant = "speed";
+      else if (roll < 0.76) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 75) {
+      if (roll < 0.20) variant = "reverse";
+      else if (roll < 0.34) variant = "wind";
+      else if (roll < 0.48) variant = "magnetic";
+      else if (roll < 0.62) variant = "speed";
+      else if (roll < 0.76) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 50) {
+      if (roll < 0.17) variant = "wind";
+      else if (roll < 0.33) variant = "magnetic";
+      else if (roll < 0.48) variant = "speed";
+      else if (roll < 0.64) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 40) {
       // Wind starts to appear
-      if (roll < 0.08) return "wind";
-      if (roll < 0.20) return "magnetic";
-      if (roll < 0.38) return "speed";
-      if (roll < 0.56) return "crumbling";
-      return "normal";
-    }
-    if (height >= 35) {
+      if (roll < 0.08) variant = "wind";
+      else if (roll < 0.20) variant = "magnetic";
+      else if (roll < 0.38) variant = "speed";
+      else if (roll < 0.56) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 35) {
       // Magnetic starts to appear
-      if (roll < 0.12) return "magnetic";
-      if (roll < 0.30) return "speed";
-      if (roll < 0.50) return "crumbling";
-      return "normal";
-    }
-    if (height >= 25) {
+      if (roll < 0.12) variant = "magnetic";
+      else if (roll < 0.30) variant = "speed";
+      else if (roll < 0.50) variant = "crumbling";
+      else variant = "normal";
+    } else if (height >= 25) {
       // More aggressive crumbling + speed
-      if (roll < 0.24) return "speed";
-      if (roll < 0.50) return "crumbling";
-      return "normal";
+      if (roll < 0.24) variant = "speed";
+      else if (roll < 0.50) variant = "crumbling";
+      else variant = "normal";
+    } else {
+      variant = "normal";
     }
-    return "normal";
+
+    // Chain breaker enforcement
+    if (variant === "crumbling" && blockCrumble) {
+      variant = "normal";
+    }
+
+    // Track consecutive crumbling
+    if (variant === "crumbling") {
+      this.consecutiveCrumble += 1;
+    } else {
+      this.consecutiveCrumble = 0;
+    }
+
+    return variant;
   }
 
   private updateGears(dt: number) {

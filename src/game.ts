@@ -47,6 +47,7 @@ import {
   updateStat,
   writeSaveData,
 } from "./platform";
+import { AIGhost, isAIGhostEnabled } from "./ai-ghost";
 import { MultiplayerManager, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
 import { ClockworkClimbSimulation } from "./simulation";
@@ -227,6 +228,7 @@ export class Game {
   private readonly multiplayer = new MultiplayerManager();
   private readonly ghostMeshes: Map<string, GhostVisual> = new Map();
   private readonly ghostGroup = new THREE.Group();
+  private aiGhost: AIGhost | null = null;
   private multiplayerPanel: HTMLDivElement | null = null;
   private multiplayerButton: HTMLButtonElement | null = null;
   private multiplayerStatus: HTMLDivElement | null = null;
@@ -568,6 +570,7 @@ export class Game {
     this.buildTitleBackdrop();
     await this.refreshLeaderboardPanels();
     this.setupMultiplayerUi(container);
+    this.initAIGhost();
     this.updateHud(dtZero());
     this.updateOverlayText();
     this.input.setTouchControlsVisible(false);
@@ -581,6 +584,14 @@ export class Game {
     setAudioEnabled(isAudioEnabled() && this.saveData.audioEnabled);
     onAudioChange((enabled) => setAudioEnabled(enabled));
     await signalLoadComplete();
+  }
+
+  private initAIGhost() {
+    if (!isAIGhostEnabled()) return;
+    this.aiGhost = new AIGhost("/models/clockwork-climb-v3.json");
+    this.aiGhost.load().then((ok) => {
+      if (!ok) this.aiGhost = null;
+    });
   }
 
   private createLeaderboardPanels() {
@@ -1794,6 +1805,7 @@ export class Game {
       wind: 0x4488aa,
       magnetic: 0x8844aa,
       bouncy: 0x44aa44,
+      milestone: 0xdaa520, // Golden
     };
     const baseColor = variantBaseColors[simGear.variant as GearVariant] ?? palette[simGear.id % palette.length];
     const band = getDifficultyBand(simGear.y);
