@@ -41,7 +41,7 @@ import {
 } from "./platform";
 import { Player } from "./player";
 import { ClockworkClimbSimulation } from "./simulation";
-import type { GearVariant, SimAction, SimBolt, SimEvent, SimGear, SimPlayer, SimState } from "./sim-types";
+import type { GearVariant, SimAction, SimBolt, SimEvent, SimGear, SimPlayer, SimPowerUp, SimState } from "./sim-types";
 
 enum GameState {
   Title,
@@ -93,6 +93,8 @@ export class Game {
   private nextMilestone = 25;
   private currentZoneIndex = 0;
   private bestCombo = 1;
+  private inChallengeZone = false;
+  private challengeZoneBloomBoost = 0;
 
   private hud!: HTMLElement;
   private titleOverlay!: HTMLElement;
@@ -129,6 +131,7 @@ export class Game {
   private bolts: BoltCollectible[] = [];
   private readonly visualGearMap = new Map<number, Gear>();
   private readonly visualBoltMap = new Map<number, BoltCollectible>();
+  private readonly visualPowerUpMap = new Map<number, THREE.Mesh>();
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
   private playerShadow!: THREE.Mesh;
@@ -160,6 +163,7 @@ export class Game {
     "IRON WORKS",
     "SILVER SPIRES",
     "GOLDEN HEIGHTS",
+    "CHROME ABYSS",
   ] as const;
 
   private readonly sceneBackgroundColor = new THREE.Color(0x140d0a);
@@ -443,11 +447,15 @@ export class Game {
     for (const bolt of this.visualBoltMap.values()) {
       this.scene.remove(bolt.mesh);
     }
+    for (const mesh of this.visualPowerUpMap.values()) {
+      this.scene.remove(mesh);
+    }
     for (const { mesh } of this.gearShadowMap.values()) {
       this.scene.remove(mesh);
     }
     this.visualGearMap.clear();
     this.visualBoltMap.clear();
+    this.visualPowerUpMap.clear();
     this.gears = [];
     this.bolts = [];
     this.gearShadowMap.clear();
@@ -509,6 +517,8 @@ export class Game {
     this.closeCallFlashTimer = 0;
     this.steamSpawnTimer = 0;
     this.deathAnimTimer = 0;
+    this.challengeZoneBloomBoost = 0;
+    this.inChallengeZone = false;
     this.closeCallOverlay.style.opacity = "0";
     this.player.reset(0, 2);
     this.player.resetVisuals();
@@ -567,6 +577,7 @@ export class Game {
     this.syncVisuals(state);
     setTickRate(this.heightMaxReached);
     setMusicIntensity(this.heightMaxReached);
+    this.challengeZoneBloomBoost = Math.max(0, this.challengeZoneBloomBoost - dt * 0.7);
     this.updateEnvironment(state.player.y);
     this.updateWorld(dt);
     this.updateCamera(dt, state);
@@ -652,6 +663,7 @@ export class Game {
     this.nextMilestone = state.nextMilestone;
     this.currentZoneIndex = state.currentZoneIndex;
     this.bestCombo = state.bestCombo;
+    this.inChallengeZone = state.inChallengeZone;
   }
 
   private syncVisuals(state: SimState) {
@@ -709,6 +721,26 @@ export class Game {
     }
     this.bolts = state.bolts.map((bolt) => this.visualBoltMap.get(bolt.id)).filter((bolt): bolt is BoltCollectible => bolt !== undefined);
 
+    // Sync power-up visuals
+    const nextPowerUpIds = new Set(state.powerUps.map((p) => p.id));
+    for (const [id, mesh] of this.visualPowerUpMap) {
+      if (nextPowerUpIds.has(id)) {
+        continue;
+      }
+      this.scene.remove(mesh);
+      this.visualPowerUpMap.delete(id);
+    }
+    for (const simPowerUp of state.powerUps) {
+      let mesh = this.visualPowerUpMap.get(simPowerUp.id);
+      if (!mesh) {
+        mesh = createPowerUpMesh(simPowerUp.type);
+        this.visualPowerUpMap.set(simPowerUp.id, mesh);
+        this.scene.add(mesh);
+      }
+      mesh.visible = simPowerUp.available;
+      mesh.position.set(simPowerUp.x, simPowerUp.y, simPowerUp.z);
+    }
+
     this.player.mesh.position.set(state.player.x, state.player.y, state.player.z);
     if (rebuildShadows) {
       this.rebuildGearDropShadows();
@@ -718,9 +750,15 @@ export class Game {
 
   private createGearVisual(simGear: SimGear): Gear {
     const palette = [0x8c6239, 0xb87333, 0xa67c52, 0x7c5a2c];
+    const variantBaseColors: Partial<Record<GearVariant, number>> = {
+      wind: 0x4488aa,
+      magnetic: 0x8844aa,
+      bouncy: 0x44aa44,
+    };
+    const baseColor = variantBaseColors[simGear.variant as GearVariant] ?? palette[simGear.id % palette.length];
     const band = getDifficultyBand(simGear.y);
     const gear = new Gear({
-      color: palette[simGear.id % palette.length],
+      color: baseColor,
       danger: band.danger,
       height: simGear.height,
       radius: simGear.radius,
@@ -840,11 +878,44 @@ export class Game {
           break;
         case "zone_change":
           if (this.state === GameState.Playing) {
-            this.showZoneAnnouncement(event.zoneIndex);
+            this.showZoneAnnouncement(this.zoneNames[event.zoneIndex] ?? "???");
           }
           break;
         case "achievement":
           unlockAchievement(event.id);
+          break;
+        case "bounce_jump":
+          this.landingEffectPosition.set(event.x, event.y, event.z);
+          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          playJump(1.45);
+          this.cameraKick = Math.max(this.cameraKick, 0.18);
+          break;
+        case "powerup_collect":
+          this.showToast(getPowerUpDisplayName(event.powerUpType));
+          playCollect(1.8);
+          break;
+        case "shield_save":
+          this.particles.spawnDeathBurst(this.player.mesh.position);
+          this.cameraShakeOffset.set(
+            randomRange(-0.14, 0.14),
+            randomRange(-0.08, 0.08),
+            randomRange(-0.14, 0.14)
+          );
+          this.cameraShakeTimer = this.cameraShakeDuration;
+          this.showToast("SHIELD SAVED YOU!");
+          this.triggerCloseCallFlash();
+          playHit();
+          break;
+        case "challenge_zone_enter":
+          this.showZoneAnnouncement("⚙ CHALLENGE ZONE!");
+          this.challengeZoneBloomBoost = 0.18;
+          break;
+        case "challenge_zone_exit":
+          if (event.bonusScore > 0) {
+            this.showToast(`ZONE BONUS +${event.bonusScore}`);
+          }
           break;
       }
     }
@@ -890,6 +961,22 @@ export class Game {
 
     for (const bolt of this.bolts) {
       bolt.update(dt, this.elapsedTime);
+    }
+
+    // Animate power-up visuals
+    if (this.simState) {
+      for (const [id, mesh] of this.visualPowerUpMap) {
+        if (!mesh.visible) continue;
+        const simPowerUp = this.simState.powerUps.find((p) => p.id === id);
+        if (simPowerUp) {
+          mesh.position.set(
+            simPowerUp.x,
+            simPowerUp.y + Math.sin(this.elapsedTime * 3 + id * 0.7) * 0.12,
+            simPowerUp.z
+          );
+        }
+        mesh.rotation.y += dt * 2.5;
+      }
     }
 
     for (const decoration of this.backgroundDecorations) {
@@ -1261,8 +1348,8 @@ export class Game {
     this.hudToast.style.transform = "translate(-50%, 0)";
   }
 
-  private showZoneAnnouncement(zoneIndex: number) {
-    this.zoneAnnouncement.textContent = this.zoneNames[zoneIndex];
+  private showZoneAnnouncement(text: string) {
+    this.zoneAnnouncement.textContent = text;
     this.zoneAnnouncementTimer = this.zoneAnnouncementDuration;
     this.zoneAnnouncement.style.opacity = "1";
     this.zoneAnnouncement.style.transform = "translate(-50%, 0)";
@@ -1282,6 +1369,7 @@ export class Game {
       { height: 25, bg: 0x0f1318, fogDensity: 0.012, ambient: 0x8899bb, ambientIntensity: 1.5, bloom: 0.22 },
       { height: 50, bg: 0x181b22, fogDensity: 0.010, ambient: 0xb8c4dd, ambientIntensity: 1.7, bloom: 0.26 },
       { height: 75, bg: 0x1a1408, fogDensity: 0.008, ambient: 0xffd6a3, ambientIntensity: 2.0, bloom: 0.32 },
+      { height: 100, bg: 0x0a0a14, fogDensity: 0.006, ambient: 0xff88aa, ambientIntensity: 2.4, bloom: 0.40 },
     ];
 
     let from = zones[0];
@@ -1337,7 +1425,7 @@ export class Game {
     this.ambientLight.color.copy(this.currentAmbientColor);
     this.ambientLight.intensity = THREE.MathUtils.lerp(from.ambientIntensity, to.ambientIntensity, t);
 
-    this.bloomPass.strength = THREE.MathUtils.lerp(from.bloom, to.bloom, t);
+    this.bloomPass.strength = THREE.MathUtils.lerp(from.bloom, to.bloom, t) + this.challengeZoneBloomBoost;
   }
 
   private updatePlayerLight(dt: number) {
@@ -1510,40 +1598,54 @@ function getDifficultyBand(height: number): DifficultyBand {
   }
   if (height < 50) {
     return {
-      danger: 0.28,
-      distanceMax: 2.8,
-      distanceMin: 1.8,
-      radiusMax: 2.35,
-      radiusMin: 1.5,
-      rotationMax: 0.95,
-      rotationMin: 0.58,
-      verticalMax: 2.6,
-      verticalMin: 2.25,
+      danger: 0.32,
+      distanceMax: 2.9,
+      distanceMin: 1.9,
+      radiusMax: 2.2,
+      radiusMin: 1.45,
+      rotationMax: 1.0,
+      rotationMin: 0.62,
+      verticalMax: 2.55,
+      verticalMin: 2.2,
     };
   }
   if (height < 75) {
     return {
-      danger: 0.58,
-      distanceMax: 3.25,
-      distanceMin: 2.2,
-      radiusMax: 1.9,
-      radiusMin: 1.2,
-      rotationMax: 1.5,
-      rotationMin: 0.95,
-      verticalMax: 2.8,
-      verticalMin: 2.35,
+      danger: 0.62,
+      distanceMax: 3.4,
+      distanceMin: 2.3,
+      radiusMax: 1.8,
+      radiusMin: 1.1,
+      rotationMax: 1.55,
+      rotationMin: 1.0,
+      verticalMax: 2.85,
+      verticalMin: 2.4,
     };
   }
+  if (height < 100) {
+    return {
+      danger: 0.88,
+      distanceMax: 3.7,
+      distanceMin: 2.6,
+      radiusMax: 1.5,
+      radiusMin: 1.0,
+      rotationMax: 2.1,
+      rotationMin: 1.35,
+      verticalMax: 2.95,
+      verticalMin: 2.45,
+    };
+  }
+  // 100m+ ultra-hard
   return {
-    danger: 0.9,
-    distanceMax: 3.6,
-    distanceMin: 2.5,
-    radiusMax: 1.55,
-    radiusMin: 1.02,
-    rotationMax: 2.05,
-    rotationMin: 1.3,
-    verticalMax: 2.9,
-    verticalMin: 2.4,
+    danger: 0.98,
+    distanceMax: 4.0,
+    distanceMin: 2.8,
+    radiusMax: 1.2,
+    radiusMin: 0.85,
+    rotationMax: 2.8,
+    rotationMin: 2.0,
+    verticalMax: 3.0,
+    verticalMin: 2.5,
   };
 }
 
@@ -1562,4 +1664,30 @@ function getPrivateBoolean(target: object, key: string, fallback: boolean): bool
 
 function dtZero(): number {
   return 0;
+}
+
+function createPowerUpMesh(type: SimPowerUp["type"]): THREE.Mesh {
+  const colorMap: Record<SimPowerUp["type"], number> = {
+    bolt_magnet: 0xffcc00,
+    slow_mo: 0x4488ff,
+    shield: 0xff8844,
+  };
+  const color = colorMap[type];
+  const geo = new THREE.OctahedronGeometry(0.35);
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.65,
+    metalness: 0.6,
+    roughness: 0.22,
+  });
+  return new THREE.Mesh(geo, mat);
+}
+
+function getPowerUpDisplayName(type: SimPowerUp["type"]): string {
+  switch (type) {
+    case "bolt_magnet": return "BOLT MAGNET! (8s)";
+    case "slow_mo": return "SLOW-MO! (3s)";
+    case "shield": return "SHIELD ACTIVE!";
+  }
 }

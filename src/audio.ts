@@ -98,7 +98,7 @@ export function playClick() {
   playTone(800, 0.05, "square", 0.05);
 }
 
-export function playJump() {
+export function playJump(pitchMultiplier: number = 1) {
   if (!ctx || !masterGain) {
     return;
   }
@@ -106,8 +106,8 @@ export function playJump() {
   const t = ctx.currentTime;
   const osc = ctx.createOscillator();
   osc.type = "triangle";
-  osc.frequency.setValueAtTime(260, t);
-  osc.frequency.exponentialRampToValueAtTime(520, t + 0.12);
+  osc.frequency.setValueAtTime(260 * pitchMultiplier, t);
+  osc.frequency.exponentialRampToValueAtTime(520 * pitchMultiplier, t + 0.12);
 
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0.08, t);

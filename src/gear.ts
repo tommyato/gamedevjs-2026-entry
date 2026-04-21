@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston";
+export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston" | "wind" | "magnetic" | "bouncy";
 
 export type GearCollision = {
   onGear: boolean;
@@ -91,9 +91,10 @@ export class Gear {
     this.mesh.add(topSurface);
 
     const landingRingGeo = new THREE.TorusGeometry(Math.max(this.radius * 0.72, 0.6), Math.max(this.radius * 0.06, 0.08), 10, 40);
+    const ringColor = getRingColor(this.variant);
     const landingRingMat = new THREE.MeshStandardMaterial({
-      color: this.variant === "speed" ? 0x95dfff : this.variant === "reverse" ? 0xff8876 : 0xffcf8e,
-      emissive: this.variant === "speed" ? 0x57b9ff : this.variant === "reverse" ? 0xff5a44 : 0xffb14a,
+      color: ringColor.color,
+      emissive: ringColor.emissive,
       emissiveIntensity: 0.5 + danger * 0.15,
       metalness: 0.55,
       roughness: 0.3,
@@ -116,10 +117,11 @@ export class Gear {
     this.mesh.add(hub);
 
     const spokeGeo = new THREE.BoxGeometry(this.radius * 1.15, 0.08, Math.max(this.radius * 0.1, 0.16));
+    const accentColor = getAccentColor(this.variant);
     this.accentMaterial = new THREE.MeshStandardMaterial({
-      color: this.variant === "speed" ? 0xb7efff : this.variant === "reverse" ? 0xff8c7a : 0xf6b86f,
-      emissive: this.variant === "speed" ? 0x4ab8ff : this.variant === "reverse" ? 0xff694f : 0xffa43c,
-      emissiveIntensity: this.variant === "reverse" ? 0.45 : 0.35,
+      color: accentColor.color,
+      emissive: accentColor.emissive,
+      emissiveIntensity: accentColor.emissiveIntensity,
       metalness: 0.72,
       roughness: 0.24,
     });
@@ -350,17 +352,34 @@ export class Gear {
 
 function applyVariantTint(baseColor: THREE.Color, variant: GearVariant): THREE.Color {
   const color = baseColor.clone();
-  if (variant === "crumbling") {
-    return color.multiplyScalar(0.82);
-  }
-  if (variant === "speed") {
-    return color.lerp(new THREE.Color(0x49a6ff), 0.42);
-  }
-  if (variant === "reverse") {
-    return color.lerp(new THREE.Color(0xff6852), 0.5);
-  }
-  if (variant === "piston") {
-    return color.lerp(new THREE.Color(0x66cc66), 0.3);
-  }
+  if (variant === "crumbling") return color.multiplyScalar(0.82);
+  if (variant === "speed") return color.lerp(new THREE.Color(0x49a6ff), 0.42);
+  if (variant === "reverse") return color.lerp(new THREE.Color(0xff6852), 0.5);
+  if (variant === "piston") return color.lerp(new THREE.Color(0x66cc66), 0.3);
+  if (variant === "wind") return color.lerp(new THREE.Color(0x4488aa), 0.55);
+  if (variant === "magnetic") return color.lerp(new THREE.Color(0x8844aa), 0.55);
+  if (variant === "bouncy") return color.lerp(new THREE.Color(0x44aa44), 0.55);
   return color;
+}
+
+function getRingColor(variant: GearVariant): { color: number; emissive: number } {
+  switch (variant) {
+    case "speed": return { color: 0x95dfff, emissive: 0x57b9ff };
+    case "reverse": return { color: 0xff8876, emissive: 0xff5a44 };
+    case "wind": return { color: 0x88ddff, emissive: 0x44aaff };
+    case "magnetic": return { color: 0xcc88ff, emissive: 0x8844cc };
+    case "bouncy": return { color: 0x88ff88, emissive: 0x44cc44 };
+    default: return { color: 0xffcf8e, emissive: 0xffb14a };
+  }
+}
+
+function getAccentColor(variant: GearVariant): { color: number; emissive: number; emissiveIntensity: number } {
+  switch (variant) {
+    case "speed": return { color: 0xb7efff, emissive: 0x4ab8ff, emissiveIntensity: 0.35 };
+    case "reverse": return { color: 0xff8c7a, emissive: 0xff694f, emissiveIntensity: 0.45 };
+    case "wind": return { color: 0x88ccff, emissive: 0x4499ff, emissiveIntensity: 0.40 };
+    case "magnetic": return { color: 0xcc88ff, emissive: 0x9933ff, emissiveIntensity: 0.42 };
+    case "bouncy": return { color: 0x88ff88, emissive: 0x44cc44, emissiveIntensity: 0.42 };
+    default: return { color: 0xf6b86f, emissive: 0xffa43c, emissiveIntensity: 0.35 };
+  }
 }

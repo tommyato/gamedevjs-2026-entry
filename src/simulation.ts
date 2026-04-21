@@ -1,4 +1,4 @@
-import type { GearVariant, SimAction, SimBolt, SimEvent, SimGear, SimPlayer, SimState } from "./sim-types";
+import type { GearVariant, SimAction, SimBolt, SimEvent, SimGear, SimPlayer, SimPowerUp, SimState } from "./sim-types";
 
 type DifficultyBand = {
   danger: number;
@@ -49,6 +49,7 @@ export class ClockworkClimbSimulation {
   private events: SimEvent[] = [];
   private gearIdCounter = 0;
   private boltIdCounter = 0;
+  private powerUpIdCounter = 0;
   private generationHeight = 0;
   private generationAngle = 0;
   private cleanupTimer = 0;
@@ -58,6 +59,8 @@ export class ClockworkClimbSimulation {
   private orbitAngleTarget = Math.PI / 2;
   private cameraY = 8.1;
   private deathFreezeTimer = 0;
+  private nextChallengeZoneHeight = 100;
+  private challengeZoneEntryScore = 0;
 
   constructor(config: SimulationConfig = {}) {
     this.initialSeed = Number.isFinite(config.seed) ? Number(config.seed) : Math.floor(Math.random() * 0x1_0000_0000);
@@ -71,6 +74,7 @@ export class ClockworkClimbSimulation {
     this.events = [];
     this.gearIdCounter = 0;
     this.boltIdCounter = 0;
+    this.powerUpIdCounter = 0;
     this.generationHeight = 0;
     this.generationAngle = 0;
     this.cleanupTimer = 0;
@@ -80,10 +84,13 @@ export class ClockworkClimbSimulation {
     this.orbitAngleTarget = Math.PI / 2;
     this.cameraY = 8.1;
     this.deathFreezeTimer = 0;
+    this.nextChallengeZoneHeight = 100;
+    this.challengeZoneEntryScore = 0;
     this.state = this.createInitialState();
     this.state.gameState = "playing";
     this.seedInitialLayout();
     this.updateBoltPositions();
+    this.updatePowerUpPositions();
     return this.flush();
   }
 
@@ -117,10 +124,13 @@ export class ClockworkClimbSimulation {
     this.advancePlayer(action, stepDt);
     this.handlePoleCollision();
     this.updateBoltPositions();
+    this.updatePowerUpPositions();
     this.handleBoltCollection();
+    this.handlePowerUpCollection();
     this.updateOrbit(stepDt);
     this.updateScores();
     this.updateZone();
+    this.updateChallengeZone();
     this.cleanupTimer += stepDt;
     if (this.cleanupTimer >= 2) {
       this.cleanupTimer = 0;
@@ -162,6 +172,10 @@ export class ClockworkClimbSimulation {
       clamp(this.state.boltCount / 25, 0, 1),
       heightNorm,
       normalizeAngle(this.state.orbitAngle),
+      clamp(player.boltMagnetTimer / 8, 0, 1),
+      clamp(player.slowMoTimer / 3, 0, 1),
+      player.shieldActive ? 1 : 0,
+      this.state.inChallengeZone ? 1 : 0,
     ]);
   }
 
@@ -178,6 +192,12 @@ export class ClockworkClimbSimulation {
       prevY: 2,
       speedBoostTimer: 0,
       speedBoostStrength: 1,
+      boltMagnetTimer: 0,
+      slowMoTimer: 0,
+      shieldActive: false,
+      lastLandedGearX: 0,
+      lastLandedGearY: 0,
+      lastLandedGearZ: 0,
     };
 
     return {
@@ -185,6 +205,7 @@ export class ClockworkClimbSimulation {
       player,
       gears: [],
       bolts: [],
+      powerUps: [],
       score: 0,
       heightScore: 0,
       heightMaxReached: 0,
@@ -199,6 +220,8 @@ export class ClockworkClimbSimulation {
       orbitAngle: Math.PI / 2,
       nextMilestone: 25,
       currentZoneIndex: 0,
+      inChallengeZone: false,
+      challengeZoneCenter: 0,
     };
   }
 
@@ -234,6 +257,7 @@ export class ClockworkClimbSimulation {
       });
       this.state.gears.push(gear);
       this.trySpawnBolt(gear);
+      this.trySpawnPowerUp(gear);
     }
 
     this.generationHeight = height;
@@ -269,6 +293,9 @@ export class ClockworkClimbSimulation {
       reverseInterval: 3,
       reversePause: 0.35,
       pistonTime: this.randomRange(0, Math.PI * 2),
+      windAngle: this.randomRange(0, Math.PI * 2),
+      windStrength: this.randomRange(2.5, 4.0),
+      challenge: false,
     };
   }
 
@@ -283,6 +310,18 @@ export class ClockworkClimbSimulation {
     };
   }
 
+  private createPowerUp(gear: SimGear, type: SimPowerUp["type"]): SimPowerUp {
+    return {
+      id: this.powerUpIdCounter++,
+      gearId: gear.id,
+      type,
+      x: gear.x,
+      y: getGearTopY(gear) + 1.25,
+      z: gear.z,
+      available: true,
+    };
+  }
+
   private trySpawnBolt(gear: SimGear) {
     if (gear.variant === "crumbling" || this.rng() >= 0.3) {
       return;
@@ -290,7 +329,22 @@ export class ClockworkClimbSimulation {
     this.state.bolts.push(this.createBolt(gear));
   }
 
+  private trySpawnPowerUp(gear: SimGear) {
+    if (gear.y < 15 || this.rng() >= 0.10) {
+      return;
+    }
+    const types: SimPowerUp["type"][] = ["bolt_magnet", "slow_mo", "shield"];
+    const type = types[Math.floor(this.rng() * types.length)];
+    this.state.powerUps.push(this.createPowerUp(gear, type));
+  }
+
   private generateAhead() {
+    // Generate any challenge zones that are now within lookahead range
+    while (this.nextChallengeZoneHeight <= this.state.heightMaxReached + 65) {
+      this.generateChallengeZone(this.nextChallengeZoneHeight);
+      this.nextChallengeZoneHeight += 100;
+    }
+
     let height = this.generationHeight;
     let angle = this.generationAngle;
     let batchesGenerated = 0;
@@ -314,6 +368,7 @@ export class ClockworkClimbSimulation {
         });
         this.state.gears.push(gear);
         this.trySpawnBolt(gear);
+        this.trySpawnPowerUp(gear);
       }
       batchesGenerated += 1;
     }
@@ -322,19 +377,90 @@ export class ClockworkClimbSimulation {
     this.generationAngle = angle;
   }
 
+  private generateChallengeZone(centerY: number) {
+    const count = 8 + Math.floor(this.rng() * 5); // 8–12 gears
+    let angle = this.generationAngle;
+
+    for (let index = 0; index < count; index += 1) {
+      const offsetY = this.randomRange(-7, 8);
+      angle += this.randomRange(0.65, 1.55);
+      const radius = this.randomRange(1.3, 2.1);
+      const distance = this.randomRange(1.5, 2.8);
+      const variant = index < 2 ? "normal" : this.pickGearVariant(centerY);
+      const gear = this.createGear({
+        x: Math.cos(angle) * distance,
+        y: centerY + offsetY,
+        z: Math.sin(angle) * distance,
+        radius,
+        height: 0.3,
+        rotationSpeed: this.randomRange(0.45, 1.1),
+        variant,
+      });
+      gear.challenge = true;
+      this.state.gears.push(gear);
+      // Always spawn a bolt on challenge gears
+      this.state.bolts.push(this.createBolt(gear));
+      // Normal power-up chance applies
+      this.trySpawnPowerUp(gear);
+    }
+  }
+
   private pickGearVariant(height: number): GearVariant {
-    if (height >= 55 && this.rng() < 0.15) {
+    // Piston: independent check at 55m+
+    if (height >= 55 && this.rng() < 0.14) {
       return "piston";
     }
+    // Bouncy: starts at 20m
+    if (height >= 20 && this.rng() < 0.09) {
+      return "bouncy";
+    }
+
     const roll = this.rng();
-    if (height >= 75 && roll < 0.22) {
-      return "reverse";
+
+    if (height >= 100) {
+      // Ultra-hard: all variants, heavy on the hard ones
+      if (roll < 0.18) return "reverse";
+      if (roll < 0.32) return "wind";
+      if (roll < 0.46) return "magnetic";
+      if (roll < 0.60) return "speed";
+      if (roll < 0.76) return "crumbling";
+      return "normal";
     }
-    if (height >= 45 && roll < 0.38) {
-      return "speed";
+    if (height >= 75) {
+      if (roll < 0.20) return "reverse";
+      if (roll < 0.34) return "wind";
+      if (roll < 0.48) return "magnetic";
+      if (roll < 0.62) return "speed";
+      if (roll < 0.76) return "crumbling";
+      return "normal";
     }
-    if (height >= 30 && roll < 0.54) {
-      return "crumbling";
+    if (height >= 50) {
+      if (roll < 0.17) return "wind";
+      if (roll < 0.33) return "magnetic";
+      if (roll < 0.48) return "speed";
+      if (roll < 0.64) return "crumbling";
+      return "normal";
+    }
+    if (height >= 40) {
+      // Wind starts to appear
+      if (roll < 0.08) return "wind";
+      if (roll < 0.20) return "magnetic";
+      if (roll < 0.38) return "speed";
+      if (roll < 0.56) return "crumbling";
+      return "normal";
+    }
+    if (height >= 35) {
+      // Magnetic starts to appear
+      if (roll < 0.12) return "magnetic";
+      if (roll < 0.30) return "speed";
+      if (roll < 0.50) return "crumbling";
+      return "normal";
+    }
+    if (height >= 25) {
+      // More aggressive crumbling + speed
+      if (roll < 0.24) return "speed";
+      if (roll < 0.50) return "crumbling";
+      return "normal";
     }
     return "normal";
   }
@@ -343,6 +469,10 @@ export class ClockworkClimbSimulation {
     for (const gear of this.state.gears) {
       if (gear.variant === "piston") {
         gear.pistonTime += dt;
+      }
+
+      if (gear.variant === "wind") {
+        gear.windAngle += dt * 0.4; // Slowly rotate wind direction
       }
 
       gear.reverseTimer += dt;
@@ -407,6 +537,11 @@ export class ClockworkClimbSimulation {
   }
 
   private onPlayerLand(gear: SimGear, landingSpeed: number) {
+    // Track last landing position for shield save
+    this.state.player.lastLandedGearX = gear.x;
+    this.state.player.lastLandedGearY = getGearTopY(gear);
+    this.state.player.lastLandedGearZ = gear.z;
+
     if (gear.variant === "crumbling" && !gear.crumbleArmed) {
       gear.crumbleArmed = true;
       gear.crumbleTimer = 0;
@@ -472,6 +607,9 @@ export class ClockworkClimbSimulation {
     const player = this.state.player;
     player.prevY = player.y;
     player.speedBoostTimer = Math.max(0, player.speedBoostTimer - dt);
+    player.boltMagnetTimer = Math.max(0, player.boltMagnetTimer - dt);
+    player.slowMoTimer = Math.max(0, player.slowMoTimer - dt);
+
     const speedBoost = player.speedBoostTimer > 0
       ? lerp(player.speedBoostStrength, 1, 1 - player.speedBoostTimer / 0.9)
       : 1;
@@ -493,16 +631,45 @@ export class ClockworkClimbSimulation {
     player.x += player.vx * dt;
     player.z += player.vz * dt;
 
+    // Apply gear-specific forces while grounded
+    if (player.onGround && this.state.activeGearId !== null) {
+      const activeGear = this.state.gears.find((g) => g.id === this.state.activeGearId) ?? null;
+      if (activeGear?.variant === "wind") {
+        player.x += Math.cos(activeGear.windAngle) * activeGear.windStrength * dt;
+        player.z += Math.sin(activeGear.windAngle) * activeGear.windStrength * dt;
+      }
+      if (activeGear?.variant === "magnetic") {
+        const dx = activeGear.x - player.x;
+        const dz = activeGear.z - player.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.05) {
+          const pullStrength = 3.5;
+          player.x += (dx / dist) * pullStrength * dt;
+          player.z += (dz / dist) * pullStrength * dt;
+        }
+      }
+    }
+
     if (!player.onGround) {
-      player.vy -= GRAVITY * dt;
+      const effectiveGravity = player.slowMoTimer > 0 ? GRAVITY * 0.6 : GRAVITY;
+      player.vy -= effectiveGravity * dt;
     } else {
       player.vy = 0;
     }
 
     if (player.onGround && action.jump) {
-      player.vy = JUMP_VELOCITY;
+      const activeGear = this.state.activeGearId !== null
+        ? this.state.gears.find((g) => g.id === this.state.activeGearId) ?? null
+        : null;
+      const isBouncy = activeGear?.variant === "bouncy";
+      player.vy = JUMP_VELOCITY * (isBouncy ? 1.4 : 1);
       player.onGround = false;
-      this.events.push({ type: "jump", x: player.x, y: player.y, z: player.z });
+      if (isBouncy) {
+        // bounce_jump supersedes jump — handler includes all effects
+        this.events.push({ type: "bounce_jump", x: player.x, y: player.y, z: player.z });
+      } else {
+        this.events.push({ type: "jump", x: player.x, y: player.y, z: player.z });
+      }
     }
 
     player.y += player.vy * dt;
@@ -534,8 +701,23 @@ export class ClockworkClimbSimulation {
     }
   }
 
+  private updatePowerUpPositions() {
+    for (const powerUp of this.state.powerUps) {
+      const gear = this.state.gears.find((g) => g.id === powerUp.gearId);
+      if (!gear) {
+        continue;
+      }
+      powerUp.x = gear.x;
+      powerUp.y = getGearTopY(gear) + 1.25;
+      powerUp.z = gear.z;
+    }
+  }
+
   private handleBoltCollection() {
     const player = this.state.player;
+    const magnetActive = player.boltMagnetTimer > 0;
+    const collectRadiusSq = magnetActive ? 4 * 4 : 0.75 * 0.75;
+
     for (const bolt of this.state.bolts) {
       if (!bolt.available) {
         continue;
@@ -544,7 +726,7 @@ export class ClockworkClimbSimulation {
       const dx = player.x - bolt.x;
       const dy = player.y + 0.3 - bolt.y;
       const dz = player.z - bolt.z;
-      if (dx * dx + dy * dy + dz * dz > 0.75 * 0.75) {
+      if (dx * dx + dy * dy + dz * dz > collectRadiusSq) {
         continue;
       }
 
@@ -558,6 +740,42 @@ export class ClockworkClimbSimulation {
         x: bolt.x,
         y: bolt.y,
         z: bolt.z,
+      });
+    }
+  }
+
+  private handlePowerUpCollection() {
+    const player = this.state.player;
+    for (const powerUp of this.state.powerUps) {
+      if (!powerUp.available) {
+        continue;
+      }
+
+      const dx = player.x - powerUp.x;
+      const dy = player.y + 0.3 - powerUp.y;
+      const dz = player.z - powerUp.z;
+      if (dx * dx + dy * dy + dz * dz > 1.0 * 1.0) {
+        continue;
+      }
+
+      powerUp.available = false;
+      switch (powerUp.type) {
+        case "bolt_magnet":
+          player.boltMagnetTimer = 8;
+          break;
+        case "slow_mo":
+          player.slowMoTimer = 3;
+          break;
+        case "shield":
+          player.shieldActive = true;
+          break;
+      }
+      this.events.push({
+        type: "powerup_collect",
+        powerUpType: powerUp.type,
+        x: powerUp.x,
+        y: powerUp.y,
+        z: powerUp.z,
       });
     }
   }
@@ -636,7 +854,8 @@ export class ClockworkClimbSimulation {
     if (currentHeight > this.state.heightMaxReached) {
       const delta = currentHeight - this.state.heightMaxReached;
       this.state.heightMaxReached = currentHeight;
-      this.state.heightScore += delta * this.state.comboMultiplier;
+      const challengeBonus = this.state.inChallengeZone ? 2 : 1;
+      this.state.heightScore += delta * this.state.comboMultiplier * challengeBonus;
     }
     this.state.score = this.state.heightScore + this.state.boltScore;
 
@@ -699,6 +918,25 @@ export class ClockworkClimbSimulation {
     }
   }
 
+  private updateChallengeZone() {
+    const wasInZone = this.state.inChallengeZone;
+    const nowInZone = isInChallengeZone(this.state.player.y);
+
+    if (!wasInZone && nowInZone) {
+      this.state.inChallengeZone = true;
+      this.state.challengeZoneCenter = getChallengeZoneCenter(this.state.player.y);
+      this.challengeZoneEntryScore = this.state.score;
+      this.events.push({
+        type: "challenge_zone_enter",
+        zoneCenter: this.state.challengeZoneCenter,
+      });
+    } else if (wasInZone && !nowInZone) {
+      this.state.inChallengeZone = false;
+      const bonusScore = Math.max(0, this.state.score - this.challengeZoneEntryScore);
+      this.events.push({ type: "challenge_zone_exit", bonusScore });
+    }
+  }
+
   private checkAchievements() {
     const maybeUnlock = (id: string, condition: boolean) => {
       if (!condition || this.unlockedThisRun.has(id)) {
@@ -726,10 +964,35 @@ export class ClockworkClimbSimulation {
       }
       return bolt.y >= cutoffY || !bolt.available;
     });
+    this.state.powerUps = this.state.powerUps.filter((powerUp) => {
+      if (!remainingGearIds.has(powerUp.gearId)) {
+        return false;
+      }
+      return powerUp.y >= cutoffY || !powerUp.available;
+    });
   }
 
   private checkDeath() {
     if (this.state.player.y < this.cameraY - 12 && this.state.gameState === "playing") {
+      // Shield intercepts the death
+      if (this.state.player.shieldActive) {
+        this.state.player.shieldActive = false;
+        this.state.player.x = this.state.player.lastLandedGearX;
+        this.state.player.y = this.state.player.lastLandedGearY + 1.5;
+        this.state.player.z = this.state.player.lastLandedGearZ;
+        this.state.player.vx = 0;
+        this.state.player.vy = 0;
+        this.state.player.vz = 0;
+        this.state.player.onGround = false;
+        this.events.push({
+          type: "shield_save",
+          x: this.state.player.x,
+          y: this.state.player.y,
+          z: this.state.player.z,
+        });
+        return;
+      }
+
       this.state.gameState = "dying";
       this.deathFreezeTimer = 0.2;
       if (this.state.comboMultiplier > 1) {
@@ -878,48 +1141,74 @@ function getDifficultyBand(height: number): DifficultyBand {
   }
   if (height < 50) {
     return {
-      danger: 0.28,
-      distanceMax: 2.8,
-      distanceMin: 1.8,
-      radiusMax: 2.35,
-      radiusMin: 1.5,
-      rotationMax: 0.95,
-      rotationMin: 0.58,
-      verticalMax: 2.6,
-      verticalMin: 2.25,
+      danger: 0.32,
+      distanceMax: 2.9,
+      distanceMin: 1.9,
+      radiusMax: 2.2,
+      radiusMin: 1.45,
+      rotationMax: 1.0,
+      rotationMin: 0.62,
+      verticalMax: 2.55,
+      verticalMin: 2.2,
     };
   }
   if (height < 75) {
     return {
-      danger: 0.58,
-      distanceMax: 3.25,
-      distanceMin: 2.2,
-      radiusMax: 1.9,
-      radiusMin: 1.2,
-      rotationMax: 1.5,
-      rotationMin: 0.95,
-      verticalMax: 2.8,
-      verticalMin: 2.35,
+      danger: 0.62,
+      distanceMax: 3.4,
+      distanceMin: 2.3,
+      radiusMax: 1.8,
+      radiusMin: 1.1,
+      rotationMax: 1.55,
+      rotationMin: 1.0,
+      verticalMax: 2.85,
+      verticalMin: 2.4,
     };
   }
+  if (height < 100) {
+    return {
+      danger: 0.88,
+      distanceMax: 3.7,
+      distanceMin: 2.6,
+      radiusMax: 1.5,
+      radiusMin: 1.0,
+      rotationMax: 2.1,
+      rotationMin: 1.35,
+      verticalMax: 2.95,
+      verticalMin: 2.45,
+    };
+  }
+  // 100m+ ultra-hard band
   return {
-    danger: 0.9,
-    distanceMax: 3.6,
-    distanceMin: 2.5,
-    radiusMax: 1.55,
-    radiusMin: 1.02,
-    rotationMax: 2.05,
-    rotationMin: 1.3,
-    verticalMax: 2.9,
-    verticalMin: 2.4,
+    danger: 0.98,
+    distanceMax: 4.0,
+    distanceMin: 2.8,
+    radiusMax: 1.2,
+    radiusMin: 0.85,
+    rotationMax: 2.8,
+    rotationMin: 2.0,
+    verticalMax: 3.0,
+    verticalMin: 2.5,
   };
 }
 
 function getZoneIndex(height: number): number {
+  if (height >= 100) return 4;
   if (height >= 75) return 3;
   if (height >= 50) return 2;
   if (height >= 25) return 1;
   return 0;
+}
+
+function isInChallengeZone(height: number): boolean {
+  if (height < 90) return false;
+  const nearestZone = Math.round(height / 100) * 100;
+  if (nearestZone < 100) return false;
+  return Math.abs(height - nearestZone) <= 10;
+}
+
+function getChallengeZoneCenter(height: number): number {
+  return Math.round(height / 100) * 100;
 }
 
 function mulberry32(seed: number): () => number {
@@ -939,6 +1228,7 @@ function cloneState(state: SimState): SimState {
     player: { ...state.player },
     gears: state.gears.map((gear) => ({ ...gear })),
     bolts: state.bolts.map((bolt) => ({ ...bolt })),
+    powerUps: state.powerUps.map((powerUp) => ({ ...powerUp })),
   };
 }
 

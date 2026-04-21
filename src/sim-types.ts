@@ -6,7 +6,7 @@ export type SimAction = {
   jump: boolean;
 };
 
-export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston";
+export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston" | "wind" | "magnetic" | "bouncy";
 
 export type SimGear = {
   id: number;
@@ -28,11 +28,24 @@ export type SimGear = {
   reverseInterval: number;
   reversePause: number;
   pistonTime: number;
+  windAngle: number;
+  windStrength: number;
+  challenge: boolean;
 };
 
 export type SimBolt = {
   id: number;
   gearId: number;
+  x: number;
+  y: number;
+  z: number;
+  available: boolean;
+};
+
+export type SimPowerUp = {
+  id: number;
+  gearId: number;
+  type: "bolt_magnet" | "slow_mo" | "shield";
   x: number;
   y: number;
   z: number;
@@ -51,6 +64,12 @@ export type SimPlayer = {
   prevY: number;
   speedBoostTimer: number;
   speedBoostStrength: number;
+  boltMagnetTimer: number;
+  slowMoTimer: number;
+  shieldActive: boolean;
+  lastLandedGearX: number;
+  lastLandedGearY: number;
+  lastLandedGearZ: number;
 };
 
 export type SimState = {
@@ -58,6 +77,7 @@ export type SimState = {
   player: SimPlayer;
   gears: SimGear[];
   bolts: SimBolt[];
+  powerUps: SimPowerUp[];
   score: number;
   heightScore: number;
   heightMaxReached: number;
@@ -72,6 +92,8 @@ export type SimState = {
   orbitAngle: number;
   nextMilestone: number;
   currentZoneIndex: number;
+  inChallengeZone: boolean;
+  challengeZoneCenter: number;
 };
 
 export type SimEvent =
@@ -87,4 +109,9 @@ export type SimEvent =
   | { type: "jump"; x: number; y: number; z: number }
   | { type: "gear_block" }
   | { type: "zone_change"; zoneIndex: number }
-  | { type: "achievement"; id: string };
+  | { type: "achievement"; id: string }
+  | { type: "bounce_jump"; x: number; y: number; z: number }
+  | { type: "powerup_collect"; powerUpType: "bolt_magnet" | "slow_mo" | "shield"; x: number; y: number; z: number }
+  | { type: "shield_save"; x: number; y: number; z: number }
+  | { type: "challenge_zone_enter"; zoneCenter: number }
+  | { type: "challenge_zone_exit"; bonusScore: number };
