@@ -134,6 +134,44 @@ export class ParticleSystem {
     }
   }
 
+  spawnGearBonkSparks(position: THREE.Vector3, impactSpeed: number) {
+    const strength = Math.max(0, impactSpeed);
+    const count = THREE.MathUtils.clamp(4 + Math.floor(strength * 0.45), 4, 8);
+    const color = strength > 8 ? 0xffd05a : 0xff9548;
+    const speedScale = 0.6 + Math.min(strength * 0.08, 1);
+
+    for (let index = 0; index < count; index += 1) {
+      const particle = this.acquire();
+      if (!particle) {
+        return;
+      }
+
+      particle.kind = "spark";
+      particle.life = 0;
+      particle.maxLife = 0.18 + Math.random() * 0.08;
+      particle.drag = 1.55 + Math.random() * 0.35;
+      particle.gravity = 2.6 + Math.random() * 0.8;
+      particle.mesh.visible = true;
+      particle.mesh.position.set(
+        position.x + (Math.random() - 0.5) * 0.28,
+        position.y - 0.02,
+        position.z + (Math.random() - 0.5) * 0.28
+      );
+      const theta = Math.random() * Math.PI * 2;
+      const radial = 0.7 + Math.random() * 1.1;
+      const upward = 0.6 + Math.random() * 0.45;
+      particle.velocity.set(
+        Math.cos(theta) * radial * speedScale,
+        upward * speedScale,
+        Math.sin(theta) * radial * speedScale
+      );
+      particle.velocity.y -= 0.25;
+      this.scale.set(0.035 + Math.random() * 0.02, 0.035 + Math.random() * 0.02, 0.08 + Math.random() * 0.04);
+      particle.mesh.scale.copy(this.scale);
+      this.setMaterial(particle, color, 0.95);
+    }
+  }
+
   spawnComboFireworks(position: THREE.Vector3, multiplier: number) {
     const count = 8 + Math.min(multiplier - 1, 7);
     const color = multiplier >= 7 ? 0xdde8ff : multiplier >= 4 ? 0xffd700 : 0xcd7f32;
@@ -192,6 +230,45 @@ export class ParticleSystem {
       this.scale.set(0.05 + Math.random() * 0.04, 0.02 + Math.random() * 0.03, 0.05 + Math.random() * 0.04);
       particle.mesh.scale.copy(this.scale);
       this.setMaterial(particle, this.confettiColors[Math.floor(Math.random() * this.confettiColors.length)], 0.95);
+    }
+  }
+
+  spawnWindGust(gearPosition: THREE.Vector3, gearRadius: number, windAngle: number) {
+    // Emit particles from the gear surface that streak in the wind direction,
+    // making it obvious the platform is blowing air.
+    const count = 5;
+    for (let index = 0; index < count; index++) {
+      const particle = this.acquire();
+      if (!particle) return;
+
+      // Spawn scattered across gear top surface
+      const spawnAngle = Math.random() * Math.PI * 2;
+      const spawnRadius = Math.random() * gearRadius * 0.9;
+      particle.kind = "dust";
+      particle.life = 0;
+      particle.maxLife = 0.45 + Math.random() * 0.3;
+      particle.drag = 0.55;
+      particle.gravity = -0.2;
+      particle.mesh.visible = true;
+      particle.mesh.position.set(
+        gearPosition.x + Math.cos(spawnAngle) * spawnRadius,
+        gearPosition.y + 0.14 + Math.random() * 0.22,
+        gearPosition.z + Math.sin(spawnAngle) * spawnRadius
+      );
+
+      // Stream in wind direction with slight angular spread
+      const speed = 2.8 + Math.random() * 1.6;
+      const spread = (Math.random() - 0.5) * 0.45;
+      particle.velocity.set(
+        Math.cos(windAngle + spread) * speed,
+        0.15 + Math.random() * 0.25,
+        Math.sin(windAngle + spread) * speed
+      );
+
+      // Elongated in travel direction, blue-white tint
+      this.scale.set(0.028 + Math.random() * 0.018, 0.022, 0.065 + Math.random() * 0.04);
+      particle.mesh.scale.copy(this.scale);
+      this.setMaterial(particle, Math.random() > 0.4 ? 0xaaddff : 0xddf4ff, 0.8);
     }
   }
 

@@ -152,6 +152,10 @@ export class Player {
     this.scaleYImpulse = -THREE.MathUtils.clamp(impactSpeed * 0.04, 0.12, 0.32);
   }
 
+  bonk(impactSpeed: number) {
+    this.scaleYImpulse = -THREE.MathUtils.clamp(impactSpeed * 0.028, 0.08, 0.24);
+  }
+
   giveSpeedBoost(multiplier: number, duration: number) {
     this.speedBoostStrength = Math.max(this.speedBoostStrength, multiplier);
     this.speedBoostTimer = Math.max(this.speedBoostTimer, duration);

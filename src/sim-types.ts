@@ -114,7 +114,7 @@ export type SimEvent =
   | { type: "death_start" }
   | { type: "death" }
   | { type: "jump"; x: number; y: number; z: number }
-  | { type: "gear_block" }
+  | { type: "gear_block"; gearId: number; x: number; y: number; z: number; impactSpeed: number }
   | { type: "zone_change"; zoneIndex: number }
   | { type: "achievement"; id: string }
   | { type: "bounce_jump"; x: number; y: number; z: number }

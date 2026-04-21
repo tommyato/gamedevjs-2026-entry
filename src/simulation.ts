@@ -377,7 +377,7 @@ export class ClockworkClimbSimulation {
       reversePause: 0.35,
       pistonTime: this.randomRange(0, Math.PI * 2),
       windAngle: this.randomRange(0, Math.PI * 2),
-      windStrength: this.randomRange(2.5, 4.0),
+      windStrength: this.randomRange(1.5, 2.5),
       challenge: false,
     };
   }
@@ -910,7 +910,7 @@ export class ClockworkClimbSimulation {
       }
 
       if (gear.variant === "wind") {
-        gear.windAngle += dt * 0.4; // Slowly rotate wind direction
+        gear.windAngle += dt * 0.2; // Slowly rotate wind direction
       }
 
       gear.reverseTimer += dt;
@@ -1047,9 +1047,18 @@ export class ClockworkClimbSimulation {
         continue;
       }
 
+      const impactSpeed = player.vy;
+      const gearBottom = gear.y - gear.height / 2 - gear.crumbleFallDistance;
       player.y = block.capY;
       player.vy = 0;
-      this.events.push({ type: "gear_block" });
+      this.events.push({
+        type: "gear_block",
+        gearId: gear.id,
+        x: gear.x,
+        y: gearBottom - 0.04,
+        z: gear.z,
+        impactSpeed,
+      });
       break;
     }
   }

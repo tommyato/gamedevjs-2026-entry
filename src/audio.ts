@@ -331,6 +331,49 @@ export function playHit() {
   osc.stop(t + 0.26);
 }
 
+export function playGearBonk(strength: number = 1) {
+  if (!ctx || !masterGain) {
+    return;
+  }
+
+  const t = ctx.currentTime;
+  const normalizedStrength = Math.max(0.35, Math.min(1.6, strength));
+
+  const click = ctx.createOscillator();
+  click.type = "square";
+  click.frequency.setValueAtTime(860 * normalizedStrength, t);
+  click.frequency.exponentialRampToValueAtTime(260, t + 0.035);
+
+  const clickGain = ctx.createGain();
+  clickGain.gain.setValueAtTime(0.02 + normalizedStrength * 0.015, t);
+  clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+
+  const thud = ctx.createOscillator();
+  thud.type = "triangle";
+  thud.frequency.setValueAtTime(150, t);
+  thud.frequency.exponentialRampToValueAtTime(58, t + 0.12);
+
+  const thudGain = ctx.createGain();
+  thudGain.gain.setValueAtTime(0.045 + normalizedStrength * 0.03, t);
+  thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(980, t);
+  filter.Q.setValueAtTime(1.2, t);
+
+  click.connect(filter);
+  thud.connect(filter);
+  filter.connect(clickGain);
+  filter.connect(thudGain);
+  clickGain.connect(masterGain);
+  thudGain.connect(masterGain);
+  click.start(t);
+  thud.start(t);
+  click.stop(t + 0.06);
+  thud.stop(t + 0.16);
+}
+
 /** Escalating pitch combo sound — call with combo multiplier (1..5). */
 export function playComboLand(comboMultiplier: number) {
   if (!ctx || !masterGain) {

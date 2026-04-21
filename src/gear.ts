@@ -52,6 +52,7 @@ export class Gear {
   private pistonTime = Math.random() * Math.PI * 2;
   private milestoneRing: THREE.Mesh | null = null;
   private milestoneTime = 0;
+  private readonly windRings: THREE.Mesh[] = [];
 
   constructor(options: GearOptions = {}) {
     this.radius = options.radius ?? 1.5;
@@ -77,6 +78,7 @@ export class Gear {
       metalness: 0.9,
       roughness: this.variant === "crumbling" ? 0.48 : this.variant === "milestone" ? 0.18 : 0.34,
     });
+    this.rememberMaterialDefaults(this.bodyMaterial);
     const body = new THREE.Mesh(bodyGeo, this.bodyMaterial);
     this.mesh.add(body);
 
@@ -88,6 +90,7 @@ export class Gear {
       metalness: 0.78,
       roughness: 0.22,
     });
+    this.rememberMaterialDefaults(this.topSurfaceMaterial);
     const topSurface = new THREE.Mesh(topSurfaceGeo, this.topSurfaceMaterial);
     topSurface.position.y = this.height / 2 + 0.03;
     this.mesh.add(topSurface);
@@ -114,6 +117,7 @@ export class Gear {
       metalness: 0.92,
       roughness: 0.26,
     });
+    this.rememberMaterialDefaults(this.detailMaterial);
     const hub = new THREE.Mesh(hubGeo, this.detailMaterial);
     hub.position.y = 0.01;
     this.mesh.add(hub);
@@ -127,6 +131,7 @@ export class Gear {
       metalness: 0.72,
       roughness: 0.24,
     });
+    this.rememberMaterialDefaults(this.accentMaterial);
     const spokeCount = 3;
     for (let index = 0; index < spokeCount; index += 1) {
       const spoke = new THREE.Mesh(spokeGeo, this.accentMaterial);
@@ -155,6 +160,7 @@ export class Gear {
       metalness: 0.88,
       roughness: 0.24,
     });
+    this.rememberMaterialDefaults(this.toothMaterial);
     const toothCount = Math.floor(this.radius * 10);
     for (let index = 0; index < toothCount; index += 1) {
       const angle = (index / toothCount) * Math.PI * 2;
@@ -174,6 +180,10 @@ export class Gear {
 
     if (this.variant === "milestone") {
       this.addMilestoneEffects();
+    }
+
+    if (this.variant === "wind") {
+      this.addWindRings();
     }
 
     this.mesh.traverse((child) => {
@@ -212,8 +222,7 @@ export class Gear {
     shaft.add(cap);
   }
 
-  private addMilestoneEffects() {
-    // Pulsing beacon ring (animated in update())
+  private addMilestoneEffects() {    // Pulsing beacon ring (animated in update())
     const pulseRingGeo = new THREE.TorusGeometry(this.radius * 1.08, Math.max(this.radius * 0.045, 0.07), 10, 48);
     const pulseRingMat = new THREE.MeshStandardMaterial({
       color: 0xffd700,
@@ -241,6 +250,39 @@ export class Gear {
     });
     const glowSphere = new THREE.Mesh(glowGeo, glowMat);
     this.mesh.add(glowSphere);
+  }
+
+  private addWindRings() {
+    // Two expanding gust rings staggered by half a cycle, showing the "wind" nature
+    const ringGeo = new THREE.TorusGeometry(this.radius * 0.82, Math.max(this.radius * 0.033, 0.048), 8, 32);
+    for (let i = 0; i < 2; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xaaddff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      const ring = new THREE.Mesh(ringGeo, mat);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = this.height / 2 + 0.08;
+      ring.userData.windPhaseOffset = i * 0.5;
+      this.mesh.add(ring);
+      this.windRings.push(ring);
+    }
+  }
+
+  // Called from game.ts updateWorld() — drives the wind ring pulse animation.
+  updateWindRings(elapsedTime: number) {
+    if (this.windRings.length === 0) return;
+    const CYCLE = 1.4;
+    for (const ring of this.windRings) {
+      const phase = ((elapsedTime / CYCLE) + (ring.userData.windPhaseOffset as number)) % 1;
+      // Expand from 0.55× to 1.35× original size
+      ring.scale.setScalar(0.55 + phase * 0.8);
+      // Fade in quickly, then fade out slowly
+      const opacity = phase < 0.15 ? phase / 0.15 : (1 - phase) / 0.85;
+      (ring.material as THREE.MeshBasicMaterial).opacity = opacity * 0.62;
+    }
   }
 
   private addCrackDetails() {
@@ -284,6 +326,29 @@ export class Gear {
       this.crumbleArmed = true;
       this.crumbleTimer = 0;
     }
+  }
+
+  syncCrumbleVisuals(crumbleArmed: boolean, crumbleTimer: number, crumbleFallDistance: number) {
+    if (!crumbleArmed) {
+      this.mesh.scale.setScalar(1);
+      this.mesh.rotation.x = 0;
+      this.mesh.rotation.z = 0;
+      this.resetMaterialVisuals();
+      return;
+    }
+
+    const warning = THREE.MathUtils.clamp((crumbleTimer - 0.22) / 1.05, 0, 1);
+    const collapse = THREE.MathUtils.clamp((crumbleTimer - 1.5) / 0.4, 0, 1);
+    const shake = Math.sin(crumbleTimer * 52 + this.shakePhase);
+    const wobble = 0.012 + warning * 0.04;
+
+    this.mesh.scale.setScalar(1 - warning * 0.03 - collapse * 0.14);
+    this.mesh.rotation.x = Math.sin(crumbleTimer * 24 + this.shakePhase * 0.7) * wobble * 0.35 + collapse * 0.18;
+    this.mesh.rotation.z = shake * wobble;
+
+    const fade = collapse > 0 ? 1 - collapse * 0.92 : 1;
+    const urgency = Math.max(warning, collapse * 1.1);
+    this.applyCrumbleMaterialState(urgency, fade, crumbleFallDistance);
   }
 
   getAngularVelocity(): number {
@@ -403,6 +468,57 @@ export class Gear {
     }
 
     return { blocked: false, capY: 0 };
+  }
+
+  private rememberMaterialDefaults(material: THREE.MeshStandardMaterial) {
+    material.userData.baseColor = material.color.clone();
+    material.userData.baseEmissive = material.emissive.clone();
+    material.userData.baseEmissiveIntensity = material.emissiveIntensity;
+    material.userData.baseOpacity = material.opacity;
+    material.userData.baseTransparent = material.transparent;
+  }
+
+  private resetMaterialVisuals() {
+    this.applyMaterialDefaults(this.bodyMaterial);
+    this.applyMaterialDefaults(this.topSurfaceMaterial);
+    this.applyMaterialDefaults(this.detailMaterial);
+    this.applyMaterialDefaults(this.accentMaterial);
+    this.applyMaterialDefaults(this.toothMaterial);
+  }
+
+  private applyMaterialDefaults(material: THREE.MeshStandardMaterial) {
+    const baseColor = material.userData.baseColor as THREE.Color | undefined;
+    const baseEmissive = material.userData.baseEmissive as THREE.Color | undefined;
+    if (baseColor) {
+      material.color.copy(baseColor);
+    }
+    if (baseEmissive) {
+      material.emissive.copy(baseEmissive);
+    }
+    material.emissiveIntensity = (material.userData.baseEmissiveIntensity as number | undefined) ?? material.emissiveIntensity;
+    material.opacity = (material.userData.baseOpacity as number | undefined) ?? 1;
+    material.transparent = (material.userData.baseTransparent as boolean | undefined) ?? false;
+  }
+
+  private applyCrumbleMaterialState(urgency: number, fade: number, crumbleFallDistance: number) {
+    const collapseTint = THREE.MathUtils.clamp(urgency, 0, 1);
+    const fallTint = THREE.MathUtils.clamp(crumbleFallDistance * 0.15, 0, 0.35);
+    const materials = [this.bodyMaterial, this.topSurfaceMaterial, this.detailMaterial, this.accentMaterial, this.toothMaterial];
+
+    for (const material of materials) {
+      const baseColor = material.userData.baseColor as THREE.Color | undefined;
+      const baseEmissive = material.userData.baseEmissive as THREE.Color | undefined;
+      if (baseColor) {
+        material.color.copy(baseColor).lerp(this.hazardColor, collapseTint * 0.46);
+      }
+      if (baseEmissive) {
+        material.emissive.copy(baseEmissive).lerp(this.hazardColor, collapseTint * 0.75 + fallTint);
+      }
+      const baseIntensity = (material.userData.baseEmissiveIntensity as number | undefined) ?? 0.3;
+      material.emissiveIntensity = baseIntensity + collapseTint * 1.1 + fallTint * 0.65;
+      material.opacity = fade;
+      material.transparent = fade < 1;
+    }
   }
 }
 
