@@ -2389,17 +2389,23 @@ export class Game {
     }
 
     const dropHeight = Math.max(0, player.y - landingSurface.y);
+    // heightT: 0 = right above landing, 1 = far above (8m+ drop)
     const heightT = THREE.MathUtils.clamp(dropHeight / 8, 0, 1);
-    const descentT = THREE.MathUtils.clamp(-player.vy / 12, 0, 1);
-    const cueOpacity = THREE.MathUtils.clamp(0.54 - heightT * 0.34 + descentT * 0.08, 0.28, 0.58);
-    const cueScale = THREE.MathUtils.lerp(0.84, 1.24, heightT);
+
+    // Core shadow dot: always visible when airborne, the main landing indicator.
+    // Slight fade-in as you get closer so it doesn't pop.
+    const coreOpacity = THREE.MathUtils.lerp(0.18, 0.42, 1 - heightT);
+
+    // Ring: only visible when FAR from landing (faded out). Hidden when close.
+    // Fades in softly as you're still high up, disappears completely near touchdown.
+    const ringOpacity = THREE.MathUtils.clamp(heightT * 0.22, 0, 0.22);
 
     this.landingCueGroup.visible = true;
     this.landingCueGroup.position.set(player.x, landingSurface.y + 0.018, player.z);
-    this.landingCueGroup.scale.setScalar(cueScale);
-    this.landingCueRingMaterial.opacity = cueOpacity * 0.68;
-    this.landingCueCoreMaterial.opacity = cueOpacity * 0.4;
-    this.landingCueGlowMaterial.opacity = cueOpacity * 0.22;
+    this.landingCueGroup.scale.setScalar(1);
+    this.landingCueCoreMaterial.opacity = coreOpacity;
+    this.landingCueRingMaterial.opacity = ringOpacity;
+    this.landingCueGlowMaterial.opacity = 0;
   }
 
   private findLandingSurface(state: SimState): { y: number } | null {
