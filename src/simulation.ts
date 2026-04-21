@@ -44,6 +44,10 @@ const PLAYER_RADIUS = 0.3;
 const PLAYER_HEIGHT = 0.6;
 const PLAYER_MOVE_SPEED = 5;
 const JUMP_VELOCITY = 12;
+const DOUBLE_JUMP_DURATION = 12;
+const HIGH_ALTITUDE_REST_GEAR_HEIGHT = 100;
+const REST_GEAR_RADIUS = 1.2;
+const REST_GEAR_ROTATION_MAX = 1.2;
 const PISTON_LAUNCH_VELOCITY = 18;
 const GRAVITY = 20;
 const ORBIT_RADIUS = 12;
@@ -96,6 +100,8 @@ export class ClockworkClimbSimulation {
   private bestAirBoltChain = 0;
   private consecutiveCrumble = 0;
   private nextMilestoneGearHeight = 25;
+  private highAltitudeGearStreak = 0;
+  private nextHighAltitudeRestThreshold = 4;
 
   constructor(config: SimulationConfig = {}) {
     this.initialSeed = Number.isFinite(config.seed) ? Number(config.seed) : Math.floor(Math.random() * 0x1_0000_0000);
@@ -130,6 +136,8 @@ export class ClockworkClimbSimulation {
     this.bestAirBoltChain = 0;
     this.consecutiveCrumble = 0;
     this.nextMilestoneGearHeight = 25;
+    this.highAltitudeGearStreak = 0;
+    this.nextHighAltitudeRestThreshold = 4;
     this.state = this.createInitialState();
     this.state.gameState = "playing";
     this.seedInitialLayout();
@@ -257,6 +265,8 @@ export class ClockworkClimbSimulation {
       boltMagnetTimer: 0,
       slowMoTimer: 0,
       shieldActive: false,
+      doubleJumpAvailable: false,
+      doubleJumpTimer: 0,
       lastLandedGearX: 0,
       lastLandedGearY: 0,
       lastLandedGearZ: 0,
@@ -318,7 +328,8 @@ export class ClockworkClimbSimulation {
         this.nextMilestoneGearHeight += 25;
       }
 
-      const radius = this.randomRange(band.radiusMin, band.radiusMax);
+      const restGear = this.shouldSpawnRestGear(height);
+      const radius = restGear ? REST_GEAR_RADIUS : this.randomRange(band.radiusMin, band.radiusMax);
       const placement = this.findGearPlacement({
         band,
         context: "normal",
@@ -327,19 +338,20 @@ export class ClockworkClimbSimulation {
         targetY: height,
       });
       if (!placement) continue;
-      const variant = this.pickGearVariant(height);
+      const variant = restGear ? "normal" : this.pickGearVariant(height);
       const gear = this.createGear({
         x: placement.x,
         y: height,
         z: placement.z,
         radius,
         height: 0.3,
-        rotationSpeed: this.randomRange(band.rotationMin, band.rotationMax),
+        rotationSpeed: restGear ? this.randomRange(0.45, REST_GEAR_ROTATION_MAX) : this.randomRange(band.rotationMin, band.rotationMax),
         variant,
       });
       this.state.gears.push(gear);
       this.trySpawnBolt(gear);
       this.trySpawnPowerUp(gear);
+      this.recordHighAltitudeGearSpawn(height, restGear);
       angle = placement.angle;
     }
 
@@ -421,9 +433,81 @@ export class ClockworkClimbSimulation {
     if (gear.y < 15 || this.rng() >= 0.10) {
       return;
     }
-    const types: SimPowerUp["type"][] = ["bolt_magnet", "slow_mo", "shield"];
-    const type = types[Math.floor(this.rng() * types.length)];
+    const type = this.pickPowerUpType(gear.y);
     this.state.powerUps.push(this.createPowerUp(gear, type));
+  }
+
+  private pickPowerUpType(height: number): SimPowerUp["type"] {
+    if (height >= 100) {
+      return this.weightedChoice<SimPowerUp["type"]>([
+        ["bolt_magnet", 35],
+        ["slow_mo", 25],
+        ["shield", 25],
+        ["double_jump", 15],
+      ]);
+    }
+    if (height >= 75) {
+      return this.weightedChoice<SimPowerUp["type"]>([
+        ["bolt_magnet", 38],
+        ["slow_mo", 27],
+        ["shield", 25],
+        ["double_jump", 10],
+      ]);
+    }
+    if (height >= 50) {
+      return this.weightedChoice<SimPowerUp["type"]>([
+        ["bolt_magnet", 42],
+        ["slow_mo", 30],
+        ["shield", 23],
+        ["double_jump", 5],
+      ]);
+    }
+    return this.weightedChoice<SimPowerUp["type"]>([
+      ["bolt_magnet", 40],
+      ["slow_mo", 32],
+      ["shield", 28],
+    ]);
+  }
+
+  private weightedChoice<T>(options: Array<[T, number]>): T {
+    const total = options.reduce((sum, [, weight]) => sum + weight, 0);
+    let cursor = this.rng() * total;
+    for (const [value, weight] of options) {
+      cursor -= weight;
+      if (cursor <= 0) {
+        return value;
+      }
+    }
+    return options[options.length - 1][0];
+  }
+
+  private shouldSpawnRestGear(height: number): boolean {
+    return height >= HIGH_ALTITUDE_REST_GEAR_HEIGHT && this.highAltitudeGearStreak >= this.nextHighAltitudeRestThreshold - 1;
+  }
+
+  private recordHighAltitudeGearSpawn(height: number, restGear: boolean) {
+    if (height < HIGH_ALTITUDE_REST_GEAR_HEIGHT) {
+      this.highAltitudeGearStreak = 0;
+      this.nextHighAltitudeRestThreshold = 4;
+      return;
+    }
+
+    if (restGear) {
+      this.highAltitudeGearStreak = 0;
+      this.nextHighAltitudeRestThreshold = 4 + Math.floor(this.rng() * 2);
+      return;
+    }
+
+    this.highAltitudeGearStreak += 1;
+  }
+
+  private getMaxPlayableGap(anchorRotationSpeed: number, band: DifficultyBand, basePlayableGap: number): number {
+    if (anchorRotationSpeed <= 1.5 || band.rotationMax <= 1.5) {
+      return basePlayableGap;
+    }
+
+    const factor = clamp(1.0 - (anchorRotationSpeed - 1.0) * 0.2, 0.6, 1.0);
+    return basePlayableGap * factor;
   }
 
   private generateAhead() {
@@ -448,7 +532,8 @@ export class ClockworkClimbSimulation {
           this.nextMilestoneGearHeight += 25;
         }
 
-        const radius = this.randomRange(band.radiusMin, band.radiusMax);
+        const restGear = this.shouldSpawnRestGear(height);
+        const radius = restGear ? REST_GEAR_RADIUS : this.randomRange(band.radiusMin, band.radiusMax);
         const placement = this.findGearPlacement({
           band,
           context: "normal",
@@ -457,19 +542,20 @@ export class ClockworkClimbSimulation {
           targetY: height,
         });
         if (!placement) continue;
-        const variant = this.pickGearVariant(height);
+        const variant = restGear ? "normal" : this.pickGearVariant(height);
         const gear = this.createGear({
           x: placement.x,
           y: height,
           z: placement.z,
           radius,
           height: 0.3,
-          rotationSpeed: this.randomRange(band.rotationMin, band.rotationMax),
+          rotationSpeed: restGear ? this.randomRange(0.45, REST_GEAR_ROTATION_MAX) : this.randomRange(band.rotationMin, band.rotationMax),
           variant,
         });
         this.state.gears.push(gear);
         this.trySpawnBolt(gear);
         this.trySpawnPowerUp(gear);
+        this.recordHighAltitudeGearSpawn(height, restGear);
         angle = placement.angle;
       }
       batchesGenerated += 1;
@@ -654,7 +740,8 @@ export class ClockworkClimbSimulation {
             const horizontalDistance = Math.hypot(dx, dz);
             const verticalDistance = input.targetY - anchor.y;
             const playableGap = horizontalDistance - anchor.radius - input.radius;
-            const maxPlayableGap = input.context === "challenge" ? 2.9 : 2.65;
+            const basePlayableGap = input.context === "challenge" ? 2.9 : 2.65;
+            const maxPlayableGap = this.getMaxPlayableGap(anchor.rotationSpeed, input.band, basePlayableGap);
             const minHorizontalReach = Math.max(1.0, minAnchorSpacing * 0.9);
             if (
               verticalDistance > MAX_ROUTE_VERTICAL_STEP
@@ -708,7 +795,8 @@ export class ClockworkClimbSimulation {
         const dz = candidateZ - anchor.z;
         const horizontalDistance = Math.hypot(dx, dz);
         const playableGap = horizontalDistance - anchor.radius - input.radius;
-        return input.targetY - anchor.y <= MAX_ROUTE_VERTICAL_STEP && playableGap <= 2.8 && horizontalDistance >= 1.05 && horizontalDistance <= 5.0;
+        const maxPlayableGap = this.getMaxPlayableGap(anchor.rotationSpeed, getDifficultyBand(input.targetY), 2.8);
+        return input.targetY - anchor.y <= MAX_ROUTE_VERTICAL_STEP && playableGap <= maxPlayableGap && horizontalDistance >= 1.05 && horizontalDistance <= 5.0;
       });
       if (!hasReachableAnchor) {
         continue;
@@ -1069,6 +1157,10 @@ export class ClockworkClimbSimulation {
     player.speedBoostTimer = Math.max(0, player.speedBoostTimer - dt);
     player.boltMagnetTimer = Math.max(0, player.boltMagnetTimer - dt);
     player.slowMoTimer = Math.max(0, player.slowMoTimer - dt);
+    player.doubleJumpTimer = Math.max(0, player.doubleJumpTimer - dt);
+    if (player.doubleJumpTimer === 0) {
+      player.doubleJumpAvailable = false;
+    }
 
     const speedBoost = player.speedBoostTimer > 0
       ? lerp(player.speedBoostStrength, 1, 1 - player.speedBoostTimer / 0.9)
@@ -1130,6 +1222,11 @@ export class ClockworkClimbSimulation {
       } else {
         this.events.push({ type: "jump", x: player.x, y: player.y, z: player.z });
       }
+    } else if (!player.onGround && player.doubleJumpAvailable && action.jump) {
+      player.vy = JUMP_VELOCITY;
+      player.doubleJumpAvailable = false;
+      player.doubleJumpTimer = 0;
+      this.events.push({ type: "double_jump", x: player.x, y: player.y, z: player.z });
     }
 
     player.y += player.vy * dt;
@@ -1238,6 +1335,10 @@ export class ClockworkClimbSimulation {
           break;
         case "shield":
           player.shieldActive = true;
+          break;
+        case "double_jump":
+          player.doubleJumpAvailable = true;
+          player.doubleJumpTimer = DOUBLE_JUMP_DURATION;
           break;
       }
       this.events.push({
@@ -1558,6 +1659,8 @@ export class ClockworkClimbSimulation {
 
       this.state.gameState = "dying";
       this.deathFreezeTimer = 0.2;
+      this.state.player.doubleJumpAvailable = false;
+      this.state.player.doubleJumpTimer = 0;
       if (this.state.comboMultiplier > 1) {
         this.breakCombo();
       } else {

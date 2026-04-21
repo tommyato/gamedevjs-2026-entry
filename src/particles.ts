@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { Gear, type GearVariant } from "./gear";
 
-type ParticleKind = "dust" | "spark" | "ambient" | "steam" | "confetti";
+type ParticleKind = "dust" | "spark" | "ambient" | "steam" | "confetti" | "magnet";
 
 type Particle = {
   active: boolean;
@@ -10,6 +10,10 @@ type Particle = {
   kind: ParticleKind;
   life: number;
   maxLife: number;
+  magnetAnchor: THREE.Vector3;
+  magnetAngularVelocity: number;
+  magnetAngle: number;
+  magnetRadius: number;
   mesh: THREE.Mesh;
   velocity: THREE.Vector3;
 };
@@ -58,6 +62,10 @@ export class ParticleSystem {
         life: 0,
         maxLife: 0,
         mesh,
+        magnetAnchor: new THREE.Vector3(),
+        magnetAngularVelocity: 0,
+        magnetAngle: 0,
+        magnetRadius: 0,
         velocity: new THREE.Vector3(),
       });
     }
@@ -84,6 +92,23 @@ export class ParticleSystem {
         continue;
       }
 
+      if (particle.kind === "magnet") {
+        const t = THREE.MathUtils.clamp(particle.life / particle.maxLife, 0, 1);
+        const fade = 1 - t;
+        const spiralAngle = particle.magnetAngle + particle.magnetAngularVelocity * particle.life;
+        const spiralRadius = particle.magnetRadius * Math.max(0, Math.pow(fade, 1.1));
+        particle.mesh.position.set(
+          particle.magnetAnchor.x + Math.cos(spiralAngle) * spiralRadius,
+          particle.magnetAnchor.y + fade * 0.02,
+          particle.magnetAnchor.z + Math.sin(spiralAngle) * spiralRadius
+        );
+        const material = particle.mesh.material;
+        if (material instanceof THREE.MeshBasicMaterial) {
+          material.opacity = fade * 0.92;
+        }
+        continue;
+      }
+
       particle.velocity.multiplyScalar(Math.max(0, 1 - particle.drag * dt));
       particle.velocity.y -= particle.gravity * dt;
       particle.mesh.position.addScaledVector(particle.velocity, dt);
@@ -93,6 +118,41 @@ export class ParticleSystem {
         const fade = 1 - particle.life / particle.maxLife;
         material.opacity = particle.kind === "steam" ? fade * 0.55 : fade;
       }
+    }
+  }
+
+  spawnMagnetPull(gearPos: { x: number; y: number; z: number }, radius: number) {
+    const count = 4 + Math.floor(Math.random() * 3);
+    const height = gearPos.y + 0.11;
+    for (let index = 0; index < count; index += 1) {
+      const particle = this.acquire();
+      if (!particle) {
+        return;
+      }
+
+      const angle = Math.random() * Math.PI * 2;
+      const edgeRadius = radius * (0.96 + Math.random() * 0.08);
+      const life = 0.6 + Math.random() * 0.2;
+      const swirlDirection = Math.random() > 0.5 ? 1 : -1;
+
+      particle.kind = "magnet";
+      particle.life = 0;
+      particle.maxLife = life;
+      particle.drag = 0;
+      particle.gravity = 0;
+      particle.mesh.visible = true;
+      particle.magnetAnchor.set(gearPos.x, height, gearPos.z);
+      particle.magnetAngle = angle;
+      particle.magnetRadius = edgeRadius;
+      particle.magnetAngularVelocity = swirlDirection * (3.2 + Math.random() * 1.6);
+      particle.mesh.position.set(
+        gearPos.x + Math.cos(angle) * edgeRadius,
+        height,
+        gearPos.z + Math.sin(angle) * edgeRadius
+      );
+      this.scale.setScalar(0.08 + Math.random() * 0.04);
+      particle.mesh.scale.copy(this.scale);
+      this.setMaterial(particle, 0xc074ff, 0.9);
     }
   }
 

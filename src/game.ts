@@ -52,6 +52,7 @@ import {
 import { AIGhost, isAIGhostEnabled } from "./ai-ghost";
 import { MultiplayerManager, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
+import { applyTopDownShadowToObject, TopDownShadowSystem } from "./shadow";
 import { ClockworkClimbSimulation } from "./simulation";
 import type { GearVariant, SimAction, SimBolt, SimEvent, SimGear, SimPlayer, SimPowerUp, SimState } from "./sim-types";
 
@@ -94,6 +95,7 @@ type TitleBackdropDecoration = {
   baseY: number;
   bobAmplitude: number;
   bobPhase: number;
+  gear: Gear;
   mesh: THREE.Object3D;
   rotationSpeed: number;
 };
@@ -219,7 +221,7 @@ export class Game {
   private readonly visualPowerUpMap = new Map<number, THREE.Mesh>();
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
-  private shadowLight!: THREE.DirectionalLight;
+  private topDownShadow!: TopDownShadowSystem;
   private readonly landingCueGroup = new THREE.Group();
   private readonly landingCueCoreMaterial = new THREE.MeshBasicMaterial({
     color: 0x160e0a,
@@ -240,7 +242,6 @@ export class Game {
   private readonly landingCueCore = new THREE.Mesh(new THREE.CircleGeometry(0.34, 10), this.landingCueCoreMaterial);
   private readonly landingCueRing = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.68, 18), this.landingCueRingMaterial);
   private readonly cameraLookTarget = new THREE.Vector3();
-  private readonly shadowCameraOffset = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
   private readonly particles = new ParticleSystem(200);
@@ -281,7 +282,9 @@ export class Game {
   private toastTimer = 0;
   private zoneAnnouncementTimer = 0;
   private seenWindGear = false;
+  private seenMagnetGear = false;
   private windParticleTimer = 0;
+  private magnetParticleTimer = 0;
   private readonly scorePops: ScorePop[] = [];
   private readonly zoneAnnouncementDuration = 2;
   private tutorialShown = false;
@@ -334,8 +337,7 @@ export class Game {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.5;
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.enabled = false;
     container.insertBefore(this.renderer.domElement, container.firstChild);
 
     this.scene = new THREE.Scene();
@@ -365,27 +367,10 @@ export class Game {
     fillLight.position.set(-7, 9, -6);
     this.scene.add(fillLight);
 
-    // Shadow light — angled to the active camera so cast shadows read on the visible
-    // faces of nearby gears and the player instead of collapsing into a flat blob.
-    this.shadowLight = new THREE.DirectionalLight(0xffd6a3, 1.18);
-    this.shadowLight.position.set(8, 26, 8);
-    this.shadowLight.target.position.set(0, 0, 0);
-    this.shadowLight.castShadow = true;
-    this.shadowLight.shadow.mapSize.set(2048, 2048);
-    this.shadowLight.shadow.camera.near = 1;
-    this.shadowLight.shadow.camera.far = 55;
-    this.shadowLight.shadow.camera.left = -16;
-    this.shadowLight.shadow.camera.right = 16;
-    this.shadowLight.shadow.camera.top = 16;
-    this.shadowLight.shadow.camera.bottom = -16;
-    this.shadowLight.shadow.bias = -0.001;
-    this.shadowLight.shadow.normalBias = 0.035;
-    this.scene.add(this.shadowLight);
-    this.scene.add(this.shadowLight.target);
-
     this.playerLight = new THREE.PointLight(0xffc06a, 12, 16, 2);
     this.playerLight.position.set(0, 4.5, 4);
     this.scene.add(this.playerLight);
+    this.topDownShadow = new TopDownShadowSystem(this.renderer, this.scene);
 
     const renderPass = new RenderPass(this.scene, this.camera);
     this.bloomPass = new UnrealBloomPass(
@@ -431,12 +416,13 @@ export class Game {
     });
     this.towerBase = new THREE.Mesh(towerGeo, towerMat);
     this.towerBase.position.y = 190;
-    this.towerBase.receiveShadow = true;
+    applyTopDownShadowToObject(this.towerBase, this.topDownShadow.uniforms);
     this.scene.add(this.towerBase);
 
     this.scene.add(this.backgroundGroup);
     this.scene.add(this.particles.group);
     this.scene.add(this.ghostGroup);
+    this.player.enableTopDownShadow(this.topDownShadow.uniforms);
     this.scene.add(this.player.mesh);
     this.landingCueGroup.add(this.landingCueRing, this.landingCueCore);
     this.landingCueGroup.rotation.x = -Math.PI / 2;
@@ -1312,6 +1298,7 @@ export class Game {
         rotationSpeed: 0.12,
         variant: config.variant,
       });
+      gear.enableTopDownShadow(this.topDownShadow.uniforms);
       gear.mesh.scale.setScalar(config.scale);
       gear.mesh.position.set(config.x, config.y, config.z);
       gear.mesh.rotation.x = config.x === 0 ? -0.08 : 0;
@@ -1322,6 +1309,7 @@ export class Game {
         baseY: config.y,
         bobAmplitude: config.bobAmplitude,
         bobPhase: config.bobPhase,
+        gear,
         mesh: gear.mesh,
         rotationSpeed: config.rotationSpeed,
       });
@@ -1440,6 +1428,8 @@ export class Game {
         break;
     }
 
+    this.topDownShadow.update(this.player.mesh.position);
+    this.topDownShadow.render();
     this.composer.render();
     if (!this.hasRenderedFirstFrame) {
       this.hasRenderedFirstFrame = true;
@@ -1491,7 +1481,9 @@ export class Game {
     this.deathAnimTimer = 0;
     this.challengeZoneBloomBoost = 0;
     this.seenWindGear = false;
+    this.seenMagnetGear = false;
     this.windParticleTimer = 0;
+    this.magnetParticleTimer = 0;
     this.inChallengeZone = false;
     this.closeCallOverlay.style.opacity = "0";
     this.titleOverlay.style.overflowY = "";
@@ -1574,7 +1566,6 @@ export class Game {
     this.updateEnvironment(state.player.y);
     this.updateWorld(dt);
     this.updateCamera(dt, state);
-    this.updateShadowLight();
     this.updateLandingCue(state);
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
@@ -1605,6 +1596,7 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.landingCueGroup.visible = false;
+    this.player.setDoubleJumpAvailable(false);
     stopAmbientTick();
     stopMusic();
     this.deathAnimTimer = 0.4;
@@ -1877,6 +1869,7 @@ export class Game {
       rotationSpeed: simGear.rotationSpeed,
       variant: simGear.variant as GearVariant,
     });
+    gear.enableTopDownShadow(this.topDownShadow.uniforms);
     gear.rotationDir = simGear.rotationDir;
     return gear;
   }
@@ -1911,6 +1904,7 @@ export class Game {
     this.player.prevY = simPlayer.prevY;
     setPrivate(this.player, "speedBoostTimer", simPlayer.speedBoostTimer);
     setPrivate(this.player, "speedBoostStrength", simPlayer.speedBoostStrength);
+    this.player.setDoubleJumpAvailable(simPlayer.doubleJumpAvailable);
     this.player.update(dt, this.input, orbitAngle);
     this.player.mesh.position.set(simPlayer.x, simPlayer.y, simPlayer.z);
     this.player.velocity.set(simPlayer.vx, simPlayer.vy, simPlayer.vz);
@@ -1937,6 +1931,10 @@ export class Game {
             this.seenWindGear = true;
             // Delay the toast slightly so a combo_up in the same batch doesn't overwrite it
             window.setTimeout(() => this.showToast("WIND GEAR — you'll be pushed!"), 80);
+          }
+          if (event.variant === "magnetic" && !this.seenMagnetGear) {
+            this.seenMagnetGear = true;
+            window.setTimeout(() => this.showToast("MAGNET GEAR — pulls to center!"), 80);
           }
           break;
         case "bolt_collect": {
@@ -2024,7 +2022,19 @@ export class Game {
           playJump(1.45);
           this.cameraKick = Math.max(this.cameraKick, 0.18);
           break;
+        case "double_jump":
+          this.landingEffectPosition.set(event.x, event.y, event.z);
+          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          playJump(1.25);
+          this.cameraKick = Math.max(this.cameraKick, 0.16);
+          break;
         case "powerup_collect":
+          if (event.powerUpType === "double_jump") {
+            this.landingEffectPosition.set(event.x, event.y, event.z);
+            this.particles.spawnJumpSparks(this.landingEffectPosition);
+            this.particles.spawnJumpSparks(this.landingEffectPosition);
+          }
           this.showToast(getPowerUpDisplayName(event.powerUpType));
           playCollect(1.8);
           break;
@@ -2071,6 +2081,9 @@ export class Game {
         if (nearCamera && simGear.variant === "wind" && simGear.active) {
           gear.updateWindRings(this.elapsedTime);
         }
+        if (nearCamera && simGear.variant === "magnetic" && simGear.active) {
+          gear.updateMagnetIndicator(this.elapsedTime);
+        }
 
         if (this.state === GameState.Playing && simGear.active) {
           const distance = gear.mesh.position.distanceTo(this.player.mesh.position);
@@ -2108,6 +2121,25 @@ export class Game {
         } else {
           this.windParticleTimer = 0;
         }
+
+        if (activeGear?.variant === "magnetic" && this.simState.player.onGround) {
+          this.magnetParticleTimer -= dt;
+          if (this.magnetParticleTimer <= 0) {
+            this.magnetParticleTimer = 0.12;
+            const gearPos = new THREE.Vector3(activeGear.x, activeGear.y + activeGear.height / 2, activeGear.z);
+            this.particles.spawnMagnetPull(gearPos, activeGear.radius);
+          }
+        } else {
+          this.magnetParticleTimer = 0;
+        }
+      }
+    }
+
+    for (const decoration of this.titleBackdropDecorations) {
+      if (decoration.gear.variant === "wind") {
+        decoration.gear.updateWindRings(this.elapsedTime);
+      } else if (decoration.gear.variant === "magnetic") {
+        decoration.gear.updateMagnetIndicator(this.elapsedTime);
       }
     }
 
@@ -2140,7 +2172,6 @@ export class Game {
       decoration.mesh.position.y = decoration.baseY + Math.sin(titleTime + decoration.bobPhase) * decoration.bobAmplitude;
     }
 
-    this.updateGearShadowCasters();
     this.updateSteam(dt);
     this.particles.update(dt, this.player.mesh.position);
   }
@@ -2188,23 +2219,6 @@ export class Game {
 
     this.updatePlayerLight(dt);
   }
-
-  private updateShadowLight() {
-    const playerPos = this.player.mesh.position;
-    const cameraDirX = this.camera.position.x - playerPos.x;
-    const cameraDirZ = this.camera.position.z - playerPos.z;
-    const dirLength = Math.hypot(cameraDirX, cameraDirZ) || 1;
-    const nx = cameraDirX / dirLength;
-    const nz = cameraDirZ / dirLength;
-
-    // Keep the shadow frustum local to the current gameplay bubble and tilt it so
-    // silhouettes land across visible geometry instead of hiding under the camera.
-    this.shadowCameraOffset.set(-nx * 9.5, 0, -nz * 9.5);
-    this.shadowLight.position.set(playerPos.x + this.shadowCameraOffset.x, playerPos.y + 24, playerPos.z + this.shadowCameraOffset.z);
-    this.shadowLight.target.position.set(playerPos.x, playerPos.y + 1.2, playerPos.z);
-    this.shadowLight.target.updateMatrixWorld();
-  }
-
   private updateLandingCue(state: SimState) {
     const player = state.player;
     if (player.onGround) {
@@ -2258,27 +2272,6 @@ export class Game {
 
     return bestY > -Infinity ? { y: bestY } : null;
   }
-
-  private updateGearShadowCasters() {
-    // Restrict shadow participation to the nearby gameplay volume so the map stays
-    // cheap while still covering the gears that can interact with the player.
-    const playerPos = this.player.mesh.position;
-    const maxHorizontalDistSq = 23 * 23;
-    const maxVerticalDist = 18;
-    for (const gear of this.gears) {
-      const dx = gear.mesh.position.x - playerPos.x;
-      const dy = gear.mesh.position.y - playerPos.y;
-      const dz = gear.mesh.position.z - playerPos.z;
-      const withinRange = dx * dx + dz * dz <= maxHorizontalDistSq && Math.abs(dy) <= maxVerticalDist;
-      gear.mesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.castShadow = withinRange;
-          child.receiveShadow = withinRange;
-        }
-      });
-    }
-  }
-
   private ensureBackgroundCoverage(state: SimState) {
     const maxHeight = this.getMaxGearHeight(state) + 24;
     if (this.backgroundGenerationHeight === 0) {
@@ -2970,6 +2963,7 @@ function createPowerUpMesh(type: SimPowerUp["type"]): THREE.Mesh {
     bolt_magnet: 0xffcc00,
     slow_mo: 0x4488ff,
     shield: 0xff8844,
+    double_jump: 0x6ee7ff,
   };
   const color = colorMap[type];
   const geo = new THREE.OctahedronGeometry(0.35);
@@ -2988,7 +2982,9 @@ function getPowerUpDisplayName(type: SimPowerUp["type"]): string {
     case "bolt_magnet": return "BOLT MAGNET! (8s)";
     case "slow_mo": return "SLOW-MO! (3s)";
     case "shield": return "SHIELD ACTIVE!";
+    case "double_jump": return "DOUBLE JUMP! (12s)";
   }
+  return "POWER-UP!";
 }
 
 function parseSaveData(rawSave: string | null): SaveData {

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { Input } from "./input";
+import { applyTopDownShadowToObject, type TopDownShadowUniforms } from "./shadow";
 
 export type PlayerUpdateResult = {
   jumped: boolean;
@@ -15,9 +16,12 @@ export class Player {
   private readonly moveSpeed = 5;
   public highestY = 0;
   private readonly visualRoot = new THREE.Group();
+  private readonly doubleJumpAura: THREE.Mesh;
   private scaleYImpulse = 0;
   private speedBoostTimer = 0;
   private speedBoostStrength = 1;
+  private doubleJumpAvailable = false;
+  private doubleJumpPulse = 0;
   public readonly bodyMaterial: THREE.MeshStandardMaterial;
 
   constructor() {
@@ -33,8 +37,6 @@ export class Player {
     this.bodyMaterial = bodyMat;
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.position.y = this.height / 2;
-    body.castShadow = true;
-    body.receiveShadow = true;
     this.visualRoot.add(body);
 
     // Eyes
@@ -49,13 +51,30 @@ export class Player {
 
     const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
     leftEye.position.set(-0.1, 0.45, 0.25);
-    leftEye.castShadow = true;
     this.visualRoot.add(leftEye);
 
     const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
     rightEye.position.set(0.1, 0.45, 0.25);
-    rightEye.castShadow = true;
     this.visualRoot.add(rightEye);
+
+    const auraGeo = new THREE.TorusGeometry(0.48, 0.05, 8, 18);
+    const auraMat = new THREE.MeshBasicMaterial({
+      color: 0x6ee7ff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const aura = new THREE.Mesh(auraGeo, auraMat);
+    aura.position.y = 0.42;
+    aura.rotation.x = Math.PI / 2;
+    aura.visible = false;
+    aura.userData.skipTopDownShadowCaster = true;
+    this.doubleJumpAura = aura;
+    this.visualRoot.add(aura);
+  }
+
+  enableTopDownShadow(uniforms: TopDownShadowUniforms) {
+    applyTopDownShadowToObject(this.mesh, uniforms);
   }
 
   update(dt: number, input: Input, cameraAngle = 0): PlayerUpdateResult {
@@ -128,6 +147,21 @@ export class Player {
       1 - Math.exp(-dt * 10)
     );
 
+    if (this.doubleJumpAvailable) {
+      this.doubleJumpPulse += dt * 5.2;
+      this.doubleJumpAura.visible = true;
+      const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
+      auraMaterial.opacity = 0.22 + Math.sin(this.doubleJumpPulse) * 0.08;
+      this.doubleJumpAura.scale.setScalar(1 + Math.sin(this.doubleJumpPulse * 1.2) * 0.045);
+      this.doubleJumpAura.rotation.z += dt * 1.2;
+    } else {
+      this.doubleJumpPulse = 0;
+      this.doubleJumpAura.visible = false;
+      this.doubleJumpAura.scale.setScalar(1);
+      const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
+      auraMaterial.opacity = 0;
+    }
+
     return { jumped };
   }
 
@@ -161,6 +195,17 @@ export class Player {
     this.speedBoostTimer = Math.max(this.speedBoostTimer, duration);
   }
 
+  setDoubleJumpAvailable(available: boolean) {
+    this.doubleJumpAvailable = available;
+    if (!available) {
+      this.doubleJumpPulse = 0;
+      this.doubleJumpAura.visible = false;
+      this.doubleJumpAura.scale.setScalar(1);
+      const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
+      auraMaterial.opacity = 0;
+    }
+  }
+
   reset(y = 0, z = 0) {
     this.mesh.position.set(0, y, z);
     this.velocity.set(0, 0, 0);
@@ -170,8 +215,14 @@ export class Player {
     this.scaleYImpulse = 0;
     this.speedBoostTimer = 0;
     this.speedBoostStrength = 1;
+    this.doubleJumpAvailable = false;
+    this.doubleJumpPulse = 0;
     this.visualRoot.scale.setScalar(1);
     this.visualRoot.rotation.set(0, 0, 0);
     this.resetVisuals();
+    this.doubleJumpAura.visible = false;
+    this.doubleJumpAura.scale.setScalar(1);
+    const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
+    auraMaterial.opacity = 0;
   }
 }

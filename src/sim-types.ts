@@ -45,7 +45,7 @@ export type SimBolt = {
 export type SimPowerUp = {
   id: number;
   gearId: number;
-  type: "bolt_magnet" | "slow_mo" | "shield";
+  type: "bolt_magnet" | "slow_mo" | "shield" | "double_jump";
   x: number;
   y: number;
   z: number;
@@ -67,6 +67,8 @@ export type SimPlayer = {
   boltMagnetTimer: number;
   slowMoTimer: number;
   shieldActive: boolean;
+  doubleJumpAvailable: boolean;
+  doubleJumpTimer: number;
   lastLandedGearX: number;
   lastLandedGearY: number;
   lastLandedGearZ: number;
@@ -114,11 +116,12 @@ export type SimEvent =
   | { type: "death_start" }
   | { type: "death" }
   | { type: "jump"; x: number; y: number; z: number }
+  | { type: "double_jump"; x: number; y: number; z: number }
   | { type: "gear_block"; gearId: number; x: number; y: number; z: number; impactSpeed: number }
   | { type: "zone_change"; zoneIndex: number }
   | { type: "achievement"; id: string }
   | { type: "bounce_jump"; x: number; y: number; z: number }
-  | { type: "powerup_collect"; powerUpType: "bolt_magnet" | "slow_mo" | "shield"; x: number; y: number; z: number }
+  | { type: "powerup_collect"; powerUpType: "bolt_magnet" | "slow_mo" | "shield" | "double_jump"; x: number; y: number; z: number }
   | { type: "shield_save"; x: number; y: number; z: number }
   | { type: "challenge_zone_enter"; zoneCenter: number }
   | { type: "challenge_zone_exit"; bonusScore: number };

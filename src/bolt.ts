@@ -36,26 +36,22 @@ export class BoltCollectible {
     const shaftGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 6);
     const shaft = new THREE.Mesh(shaftGeo, bodyMaterial);
     shaft.rotation.z = Math.PI / 2;
-    shaft.castShadow = true;
     this.mesh.add(shaft);
 
     const headGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.12, 6);
     const headLeft = new THREE.Mesh(headGeo, bodyMaterial);
     headLeft.position.x = -0.22;
     headLeft.rotation.z = Math.PI / 2;
-    headLeft.castShadow = true;
     this.mesh.add(headLeft);
 
     const headRight = new THREE.Mesh(headGeo, bodyMaterial);
     headRight.position.x = 0.22;
     headRight.rotation.z = Math.PI / 2;
-    headRight.castShadow = true;
     this.mesh.add(headRight);
 
     const coreGeo = new THREE.TorusGeometry(0.16, 0.05, 8, 16);
     const core = new THREE.Mesh(coreGeo, coreMaterial);
     core.rotation.y = Math.PI / 2;
-    core.castShadow = true;
     this.mesh.add(core);
   }
 

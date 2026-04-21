@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { applyTopDownShadowToObject, type TopDownShadowUniforms } from "./shadow";
 
 export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston" | "wind" | "magnetic" | "bouncy" | "milestone";
 
@@ -53,6 +54,8 @@ export class Gear {
   private milestoneRing: THREE.Mesh | null = null;
   private milestoneTime = 0;
   private readonly windRings: THREE.Mesh[] = [];
+  private magnetIndicator: THREE.Mesh | null = null;
+  private magnetTime = 0;
 
   constructor(options: GearOptions = {}) {
     this.radius = options.radius ?? 1.5;
@@ -186,12 +189,14 @@ export class Gear {
       this.addWindRings();
     }
 
-    this.mesh.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
+    if (this.variant === "magnetic") {
+      this.addMagnetIndicator();
+    }
+
+  }
+
+  enableTopDownShadow(uniforms: TopDownShadowUniforms) {
+    applyTopDownShadowToObject(this.mesh, uniforms);
   }
 
   private addPistonDetail() {
@@ -236,6 +241,7 @@ export class Gear {
     const pulseRing = new THREE.Mesh(pulseRingGeo, pulseRingMat);
     pulseRing.rotation.x = Math.PI / 2;
     pulseRing.position.y = this.height / 2 + 0.08;
+    pulseRing.userData.skipTopDownShadowCaster = true;
     this.mesh.add(pulseRing);
     this.milestoneRing = pulseRing;
 
@@ -249,6 +255,7 @@ export class Gear {
       depthWrite: false,
     });
     const glowSphere = new THREE.Mesh(glowGeo, glowMat);
+    glowSphere.userData.skipTopDownShadowCaster = true;
     this.mesh.add(glowSphere);
   }
 
@@ -266,9 +273,28 @@ export class Gear {
       ring.rotation.x = Math.PI / 2;
       ring.position.y = this.height / 2 + 0.08;
       ring.userData.windPhaseOffset = i * 0.5;
+      ring.userData.skipTopDownShadowCaster = true;
       this.mesh.add(ring);
       this.windRings.push(ring);
     }
+  }
+
+  private addMagnetIndicator() {
+    const indicatorGeo = new THREE.CircleGeometry(1, 28);
+    const indicatorMat = new THREE.MeshBasicMaterial({
+      color: 0xc074ff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    const indicator = new THREE.Mesh(indicatorGeo, indicatorMat);
+    indicator.rotation.x = Math.PI / 2;
+    indicator.position.y = this.height / 2 + 0.09;
+    indicator.userData.skipTopDownShadowCaster = true;
+    this.mesh.add(indicator);
+    this.magnetIndicator = indicator;
   }
 
   // Called from game.ts updateWorld() — drives the wind ring pulse animation.
@@ -283,6 +309,24 @@ export class Gear {
       const opacity = phase < 0.15 ? phase / 0.15 : (1 - phase) / 0.85;
       (ring.material as THREE.MeshBasicMaterial).opacity = opacity * 0.62;
     }
+  }
+
+  // Called from game.ts updateWorld() — drives the magnetic center pulse.
+  updateMagnetIndicator(elapsedTime: number) {
+    if (!this.magnetIndicator) {
+      return;
+    }
+
+    this.magnetTime = elapsedTime;
+    const cycle = 1.2;
+    const phase = (this.magnetTime % cycle) / cycle;
+    const envelope = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
+    const pulseScale = THREE.MathUtils.lerp(0.3, 0.5, envelope) * this.radius;
+    const material = this.magnetIndicator.material as THREE.MeshBasicMaterial;
+
+    this.magnetIndicator.scale.setScalar(pulseScale);
+    this.magnetIndicator.position.y = this.height / 2 + 0.085 + envelope * 0.02;
+    material.opacity = THREE.MathUtils.lerp(0.1, 0.42, envelope);
   }
 
   private addCrackDetails() {
