@@ -467,16 +467,14 @@ export class Game {
   private readonly landingCueCore = new THREE.Mesh(new THREE.CircleGeometry(0.2, 10), this.landingCueCoreMaterial);
   private readonly landingCueRing = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.3, 18), this.landingCueRingMaterial);
   private readonly landingCueGlow = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.34, 18), this.landingCueGlowMaterial);
-  private readonly dropLineMaterial = new THREE.LineDashedMaterial({
-    color: 0xffeecc,
-    dashSize: 0.2,
-    gapSize: 0.14,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-  });
-  private dropLine: THREE.Line | null = null;
-  private dropLineAirTime = 0;
+  // Footstep trail — motion-history ribbon
+  private trailSamplingActive = false;
+  private trailSampleTimer = 0;
+  private readonly trailSamples: Array<{ position: THREE.Vector3; bornAt: number }> = [];
+  private readonly trailPool: THREE.Sprite[] = [];
+  private readonly _trailColorFresh = new THREE.Color(0xffcc66);
+  private readonly _trailColorOld = new THREE.Color(0x8a6a3a);
+  private readonly _trailColorTemp = new THREE.Color();
   private highlightedGearId: number | null = null;
   private hudOverlaySvg: SVGSVGElement | null = null;
   private hudPickupLine: SVGLineElement | null = null;
@@ -716,20 +714,34 @@ export class Game {
     this.landingCueCore.renderOrder = 13;
     this.scene.add(this.landingCueGroup);
 
-    // Dashed vertical drop line: player feet → projected landing point. Positions are
-    // written every frame in updateLandingCue; the geometry is seeded as a degenerate
-    // segment so line distances are computable from the start.
-    const dropLineGeo = new THREE.BufferGeometry();
-    dropLineGeo.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute([0, 0, 0, 0, -1, 0], 3)
-    );
-    const dropLine = new THREE.Line(dropLineGeo, this.dropLineMaterial);
-    dropLine.computeLineDistances();
-    dropLine.visible = false;
-    dropLine.renderOrder = 10;
-    this.dropLine = dropLine;
-    this.scene.add(dropLine);
+    // Footstep trail: radial-gradient disc texture shared across an 8-sprite pool.
+    const trailCanvas = document.createElement("canvas");
+    trailCanvas.width = 64;
+    trailCanvas.height = 64;
+    const trailCtx = trailCanvas.getContext("2d")!;
+    const trailGradient = trailCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    trailGradient.addColorStop(0, "rgba(255,255,255,1.0)");
+    trailGradient.addColorStop(0.55, "rgba(255,255,255,0.65)");
+    trailGradient.addColorStop(1, "rgba(255,255,255,0)");
+    trailCtx.fillStyle = trailGradient;
+    trailCtx.fillRect(0, 0, 64, 64);
+    const trailTexture = new THREE.CanvasTexture(trailCanvas);
+    for (let ti = 0; ti < 8; ti++) {
+      const mat = new THREE.SpriteMaterial({
+        map: trailTexture,
+        color: 0xffcc66,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.setScalar(0.01);
+      sprite.visible = false;
+      sprite.userData.skipTopDownShadowCaster = true;
+      this.trailPool.push(sprite);
+      this.scene.add(sprite);
+    }
     this.player.reset(0, 2);
     this.player.mesh.position.set(0, 0.32, 0);
 
@@ -1526,6 +1538,8 @@ export class Game {
     this.shieldSaveOverlay.style.opacity = "0";
     this.hideTutorialOverlay(true);
     this.hideLandingCueHard();
+    this.trailSamplingActive = false;
+    this.clearFootstepTrail();
     if (this.personalBestRing) {
       this.personalBestRing.visible = false;
     }
@@ -2323,6 +2337,9 @@ export class Game {
         break;
     }
 
+    // Trail disc update runs every frame so samples fade out after game-over/title.
+    this.updateFootstepTrailDiscs();
+
     this.topDownShadow.update(this.player.mesh.position);
     this.topDownShadow.render();
     this.composer.render();
@@ -2432,6 +2449,9 @@ export class Game {
     startAmbientTick();
     startMusic();
     this.hideLandingCueHard();
+    this.clearFootstepTrail();
+    this.trailSamplingActive = true;
+    this.trailSampleTimer = 0;
 
     if (this.personalBestRing) {
       this.personalBestRing.position.set(0, this.personalBestHeight, 0);
@@ -2494,6 +2514,9 @@ export class Game {
     this.updateWorld(dt);
     this.updateCamera(dt, state);
     this.updateLandingCue(state, dt);
+    if (this.trailSamplingActive) {
+      this.sampleFootstepTrail(dt, state.player);
+    }
     this.updatePersonalBestRing(state.player.y);
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
@@ -2547,6 +2570,8 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.hideLandingCueHard();
+    // Stop adding new samples; existing trail fades out naturally over 600ms.
+    this.trailSamplingActive = false;
     if (this.personalBestRing) {
       this.personalBestRing.visible = false;
     }
@@ -3345,11 +3370,6 @@ export class Game {
   // the normal fade-out in updateLandingCue.
   private hideLandingCueHard() {
     this.landingCueGroup.visible = false;
-    this.dropLineAirTime = 0;
-    if (this.dropLine) {
-      this.dropLineMaterial.opacity = 0;
-      this.dropLine.visible = false;
-    }
     this.setHighlightedGear(null);
   }
 
@@ -3357,19 +3377,9 @@ export class Game {
     const player = state.player;
     if (player.onGround) {
       this.landingCueGroup.visible = false;
-      this.dropLineAirTime = 0;
-      if (this.dropLine) {
-        this.dropLineMaterial.opacity = THREE.MathUtils.lerp(this.dropLineMaterial.opacity, 0, 1 - Math.exp(-dt * 10));
-        if (this.dropLineMaterial.opacity < 0.01) {
-          this.dropLine.visible = false;
-        }
-      }
       this.setHighlightedGear(null);
       return;
     }
-
-    // Accumulate hang time so the drop line fades IN over 0.25s (not pops in).
-    this.dropLineAirTime += dt;
 
     const landingSurface = this.findLandingSurface(state);
     if (!landingSurface) {
@@ -3384,7 +3394,6 @@ export class Game {
       this.landingCueCoreMaterial.opacity = 0.55;
       this.landingCueRingMaterial.opacity = 0;
       this.landingCueGlowMaterial.opacity = 0;
-      this.renderDropLine(player.x, player.y, player.z, player.y - 3.0, dt);
       this.setHighlightedGear(null);
       return;
     }
@@ -3412,34 +3421,71 @@ export class Game {
     this.landingCueRingMaterial.opacity = ringOpacity;
     this.landingCueGlowMaterial.opacity = 0;
 
-    this.renderDropLine(player.x, player.y, player.z, landingSurface.y + 0.02, dt);
     this.setHighlightedGear(landingSurface.gearId);
   }
 
-  private renderDropLine(x: number, fromY: number, z: number, toY: number, dt: number) {
-    const line = this.dropLine;
-    if (!line) {
-      return;
+  // --- Footstep trail ---
+
+  /** Hard-clear all trail samples and hide every pool disc immediately. */
+  private clearFootstepTrail() {
+    this.trailSamples.length = 0;
+    for (const sprite of this.trailPool) {
+      sprite.visible = false;
     }
-    // Avoid degenerate lines — if we're essentially at the target, hide.
-    if (fromY - toY < 0.05) {
-      this.dropLineMaterial.opacity = THREE.MathUtils.lerp(this.dropLineMaterial.opacity, 0, 1 - Math.exp(-dt * 10));
-      if (this.dropLineMaterial.opacity < 0.01) {
-        line.visible = false;
+  }
+
+  /** Record a position sample; called from updatePlaying while trailSamplingActive. */
+  private sampleFootstepTrail(dt: number, player: { x: number; y: number; z: number }) {
+    this.trailSampleTimer -= dt;
+    if (this.trailSampleTimer > 0) return;
+    this.trailSampleTimer = 0.060;
+    if (this.trailSamples.length >= 8) {
+      this.trailSamples.shift(); // drop oldest
+    }
+    this.trailSamples.push({
+      position: new THREE.Vector3(player.x, player.y, player.z),
+      bornAt: performance.now(),
+    });
+  }
+
+  /**
+   * Update disc pool each frame — runs regardless of GameState so trail fades
+   * smoothly after run ends. Sampling is gated by trailSamplingActive.
+   */
+  private updateFootstepTrailDiscs() {
+    const now = performance.now();
+    const LIFETIME_MS = 600;
+    // Sprite scale = radius * 2 (diameter) — base radius is 0.35 world units.
+    const BASE_DIAMETER = 0.70;
+
+    for (let i = 0; i < 8; i++) {
+      const sprite = this.trailPool[i];
+      const sample = this.trailSamples[i];
+
+      if (!sample) {
+        sprite.visible = false;
+        continue;
       }
-      return;
+
+      const ageMs = now - sample.bornAt;
+      if (ageMs >= LIFETIME_MS) {
+        sprite.visible = false;
+        continue;
+      }
+
+      const t = ageMs / LIFETIME_MS; // 0 (fresh) → 1 (dying)
+      const opacity = THREE.MathUtils.lerp(0.8, 0, t);
+      const scale = THREE.MathUtils.lerp(1.0, 0.55, t) * BASE_DIAMETER;
+
+      this._trailColorTemp.lerpColors(this._trailColorFresh, this._trailColorOld, t);
+
+      sprite.position.copy(sample.position);
+      sprite.visible = true;
+      sprite.scale.setScalar(scale);
+      const mat = sprite.material as THREE.SpriteMaterial;
+      mat.opacity = opacity;
+      mat.color.copy(this._trailColorTemp);
     }
-    const positions = line.geometry.getAttribute("position") as THREE.BufferAttribute;
-    positions.setXYZ(0, x, fromY, z);
-    positions.setXYZ(1, x, toY, z);
-    positions.needsUpdate = true;
-    line.geometry.computeBoundingSphere();
-    line.computeLineDistances();
-    line.visible = true;
-    // Ramp opacity up to 0.35 over 0.25s of hang time.
-    const airT = THREE.MathUtils.clamp(this.dropLineAirTime / 0.25, 0, 1);
-    const targetOpacity = 0.35 * airT;
-    this.dropLineMaterial.opacity = THREE.MathUtils.lerp(this.dropLineMaterial.opacity, targetOpacity, 1 - Math.exp(-dt * 10));
   }
 
   private setHighlightedGear(gearId: number | null) {
