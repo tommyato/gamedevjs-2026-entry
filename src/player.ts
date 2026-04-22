@@ -19,7 +19,14 @@ export class Player {
   private readonly visualRoot = new THREE.Group();
   private readonly automaton: WindUpAutomaton;
   private readonly doubleJumpAura: THREE.Mesh;
-  private readonly shieldAura: THREE.Mesh;
+  private readonly shieldRings: THREE.Mesh[] = [];
+  private readonly shieldRingAxes: THREE.Vector3[] = [];
+  private readonly shieldRingSpeeds: number[] = [];
+  private keyTintTime = 0;
+  private keyEmissiveIntensity = 0;
+  private readonly keyEmissiveColor = new THREE.Color(0x000000);
+  private readonly keyTargetEmissiveColor = new THREE.Color(0x000000);
+  private readonly keyTmpColor = new THREE.Color();
   private scaleYImpulse = 0;
   private scaleImpulseDecayRate = 12;
   private landingPoseTimer = 0;
@@ -54,20 +61,40 @@ export class Player {
     this.doubleJumpAura = aura;
     this.visualRoot.add(aura);
 
-    const shieldGeo = new THREE.SphereGeometry(0.45, 24, 16);
-    const shieldMat = new THREE.MeshBasicMaterial({
-      color: 0xffaa44,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const shieldAura = new THREE.Mesh(shieldGeo, shieldMat);
-    shieldAura.position.y = 0.44;
-    shieldAura.visible = false;
-    shieldAura.userData.skipTopDownShadowCaster = true;
-    this.shieldAura = shieldAura;
-    this.visualRoot.add(shieldAura);
+    // Shield readout: 1–3 thin orbital rings that count-gate off setShieldCount.
+    // Replaces the old opaque sphere "bubble" so the avatar silhouette stays readable.
+    // Each ring rotates around its own axis at a slightly different rate.
+    const ringGeo = new THREE.TorusGeometry(0.55, 0.025, 8, 48);
+    const ringAxes: THREE.Vector3[] = [
+      new THREE.Vector3(0, 0, 1).normalize(), // XY plane (torus default is XY)
+      new THREE.Vector3(0, 1, 0).normalize(), // XZ plane
+      new THREE.Vector3(1, 0, 0).normalize(), // YZ plane
+    ];
+    const ringRotations: Array<[number, number, number]> = [
+      [0, 0, 0],
+      [Math.PI / 2, 0, 0],
+      [0, Math.PI / 2, 0],
+    ];
+    const ringSpeeds = [0.55, 0.75, 0.45];
+    for (let index = 0; index < 3; index += 1) {
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xffaa44,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.y = 0.44;
+      const [rx, ry, rz] = ringRotations[index];
+      ring.rotation.set(rx, ry, rz);
+      ring.visible = false;
+      ring.userData.skipTopDownShadowCaster = true;
+      this.visualRoot.add(ring);
+      this.shieldRings.push(ring);
+      this.shieldRingAxes.push(ringAxes[index]);
+      this.shieldRingSpeeds.push(ringSpeeds[index]);
+    }
   }
 
   enableTopDownShadow(uniforms: TopDownShadowUniforms) {
@@ -212,25 +239,77 @@ export class Player {
       }
     }
 
-    const shieldMaterial = this.shieldAura.material as THREE.MeshBasicMaterial;
-    if (this.shieldCount > 0) {
-      this.shieldPulse += dt * 3.8;
-      this.shieldAura.visible = true;
-      const baseOpacity = 0.18 + Math.min(this.shieldCount, 9) * 0.04;
-      const targetOpacity = baseOpacity + Math.sin(this.shieldPulse) * 0.07;
-      shieldMaterial.opacity = THREE.MathUtils.lerp(shieldMaterial.opacity, targetOpacity, 1 - Math.exp(-dt * 6));
-      this.shieldAura.scale.setScalar(1 + Math.sin(this.shieldPulse * 0.9) * 0.05);
-      this.shieldAura.rotation.y += dt * 0.8;
-      this.shieldAura.rotation.z += dt * 0.4;
-    } else {
-      this.shieldPulse = 0;
-      shieldMaterial.opacity = THREE.MathUtils.lerp(shieldMaterial.opacity, 0, 1 - Math.exp(-dt * 5));
-      if (shieldMaterial.opacity < 0.01) {
-        this.shieldAura.visible = false;
-        shieldMaterial.opacity = 0;
-        this.shieldAura.scale.setScalar(1);
+    // Orbital shield rings: first `shieldCount` rings become active, others fade out.
+    // Each rotates around its own axis at a slightly different rate for visual life.
+    this.shieldPulse += dt * 3.8;
+    const activeRings = Math.min(this.shieldCount, this.shieldRings.length);
+    for (let index = 0; index < this.shieldRings.length; index += 1) {
+      const ring = this.shieldRings[index];
+      const material = ring.material as THREE.MeshBasicMaterial;
+      const axis = this.shieldRingAxes[index];
+      const speed = this.shieldRingSpeeds[index];
+      if (index < activeRings) {
+        ring.visible = true;
+        // Gently pulse opacity for a living amber ring. The 3rd ring pulses stronger
+        // so it reads as an "overlay" ring rather than three equally-solid rings.
+        const isOverlay = index === 2;
+        const baseOpacity = isOverlay ? 0.35 : 0.55;
+        const pulseDepth = isOverlay ? 0.22 : 0.08;
+        const phaseOffset = index * 0.9;
+        const targetOpacity = baseOpacity + Math.sin(this.shieldPulse + phaseOffset) * pulseDepth;
+        material.opacity = THREE.MathUtils.lerp(material.opacity, targetOpacity, 1 - Math.exp(-dt * 6));
+        ring.rotateOnAxis(axis, speed * dt);
+      } else {
+        material.opacity = THREE.MathUtils.lerp(material.opacity, 0, 1 - Math.exp(-dt * 5));
+        if (material.opacity < 0.01) {
+          ring.visible = false;
+          material.opacity = 0;
+        }
       }
     }
+    if (this.shieldCount === 0) {
+      this.shieldPulse = 0;
+    }
+
+    // Key-on-back tint = passive powerup readout. Brass default; amber for shield
+    // (intensity scaled by stack count), cyan for double-jump charges, alternate
+    // between the two at ~0.5s cadence when both are active. Smooth-lerped so the
+    // change doesn't snap.
+    this.keyTintTime += dt;
+    const shieldStack = Math.min(this.shieldCount, 3);
+    const hasShield = shieldStack > 0;
+    const hasDoubleJump = this.doubleJumpCharges > 0;
+    let targetIntensity = 0;
+    if (hasShield && hasDoubleJump) {
+      // Alternate each 0.5s: first half amber, second half cyan.
+      const phase = (this.keyTintTime % 1) < 0.5;
+      if (phase) {
+        this.keyTargetEmissiveColor.setHex(0xff8822);
+        targetIntensity = [0, 0.3, 0.55, 0.85][shieldStack];
+      } else {
+        this.keyTargetEmissiveColor.setHex(0x22ccff);
+        targetIntensity = 0.6;
+      }
+    } else if (hasShield) {
+      this.keyTargetEmissiveColor.setHex(0xff8822);
+      targetIntensity = [0, 0.3, 0.55, 0.85][shieldStack];
+    } else if (hasDoubleJump) {
+      this.keyTargetEmissiveColor.setHex(0x22ccff);
+      targetIntensity = 0.6;
+    } else {
+      this.keyTargetEmissiveColor.setHex(0x000000);
+      targetIntensity = 0;
+    }
+    // Lerp current emissive color & intensity toward target over ~0.15s (alpha ≈ 1 - e^(-dt/0.15/tau))
+    const keyLerp = 1 - Math.exp(-dt / 0.15);
+    this.keyEmissiveColor.lerp(this.keyTargetEmissiveColor, keyLerp);
+    this.keyEmissiveIntensity = THREE.MathUtils.lerp(this.keyEmissiveIntensity, targetIntensity, keyLerp);
+    this.keyTmpColor.copy(this.keyEmissiveColor);
+    this.automaton.setKeyState({
+      color: this.automaton.keyDefaultColor,
+      emissive: this.keyTmpColor,
+      emissiveIntensity: this.keyEmissiveIntensity,
+    });
 
     return { jumped };
   }
@@ -314,9 +393,18 @@ export class Player {
     auraMaterial.opacity = 0;
     this.shieldCount = 0;
     this.shieldPulse = 0;
-    this.shieldAura.visible = false;
-    this.shieldAura.scale.setScalar(1);
-    const shieldMaterial = this.shieldAura.material as THREE.MeshBasicMaterial;
-    shieldMaterial.opacity = 0;
+    for (const ring of this.shieldRings) {
+      ring.visible = false;
+      (ring.material as THREE.MeshBasicMaterial).opacity = 0;
+    }
+    this.keyTintTime = 0;
+    this.keyEmissiveIntensity = 0;
+    this.keyEmissiveColor.setHex(0x000000);
+    this.keyTargetEmissiveColor.setHex(0x000000);
+    this.automaton.setKeyState({
+      color: this.automaton.keyDefaultColor,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
+    });
   }
 }

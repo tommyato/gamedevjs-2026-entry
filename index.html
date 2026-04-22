@@ -185,6 +185,14 @@
       opacity: 0.3;
       filter: grayscale(0.85);
     }
+    .hud-powerup-slot.hud-powerup-pulse {
+      animation: hud-powerup-glow 180ms ease-out;
+    }
+    @keyframes hud-powerup-glow {
+      0%   { box-shadow: 0 0 0 rgba(255, 170, 68, 0); }
+      40%  { box-shadow: 0 0 28px 8px rgba(255, 170, 68, 0.55); }
+      100% { box-shadow: 0 0 0 rgba(255, 170, 68, 0); }
+    }
     .hud-powerup-icon {
       font-size: 26px;
       line-height: 1;

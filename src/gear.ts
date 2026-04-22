@@ -38,6 +38,10 @@ export class Gear {
   private readonly accentMaterial: THREE.MeshStandardMaterial;
   private readonly detailMaterial: THREE.MeshStandardMaterial;
   private readonly hazardColor = new THREE.Color(0xff5d42);
+  private landingRingMaterial: THREE.MeshStandardMaterial | null = null;
+  private landingRingBaseEmissiveIntensity = 0.5;
+  private landingHighlightActive = false;
+  private landingHighlightT = 0;
   private active = true;
   private crumbleArmed = false;
   private crumbleTimer = 0;
@@ -115,6 +119,8 @@ export class Gear {
     landingRing.rotation.x = Math.PI / 2;
     landingRing.position.y = this.height / 2 + 0.05;
     this.mesh.add(landingRing);
+    this.landingRingMaterial = landingRingMat;
+    this.landingRingBaseEmissiveIntensity = landingRingMat.emissiveIntensity;
 
     const hubGeo = new THREE.CylinderGeometry(this.radius * 0.22, this.radius * 0.22, this.height + 0.04, 16);
     this.detailMaterial = new THREE.MeshStandardMaterial({
@@ -205,6 +211,23 @@ export class Gear {
 
   triggerMilestoneActivation() {
     this.checkpointActivationPulse = 1;
+  }
+
+  // Landing-indicator rim glow. Boosts the existing landingRing's emissive so the
+  // destination gear is clearly distinguished mid-fall. Cleared on retarget/land.
+  setLandingHighlight(active: boolean) {
+    this.landingHighlightActive = active;
+  }
+
+  updateLandingHighlight(dt: number) {
+    const ring = this.landingRingMaterial;
+    if (!ring) {
+      return;
+    }
+    const target = this.landingHighlightActive ? 1 : 0;
+    this.landingHighlightT = THREE.MathUtils.lerp(this.landingHighlightT, target, 1 - Math.exp(-dt * 10));
+    const boost = this.landingHighlightT * 0.9; // amber emissive bump
+    ring.emissiveIntensity = this.landingRingBaseEmissiveIntensity + boost;
   }
 
   private addPistonDetail() {

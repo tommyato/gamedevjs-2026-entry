@@ -7,10 +7,19 @@ export type WindUpAutomatonPose = {
   landAmount: number;
 };
 
+export type WindUpAutomatonKeyState = {
+  color: THREE.ColorRepresentation;
+  emissive: THREE.ColorRepresentation;
+  emissiveIntensity: number;
+};
+
 export type WindUpAutomaton = {
   group: THREE.Group;
   update: (dt: number, pose?: WindUpAutomatonPose) => void;
   bodyMaterial: THREE.MeshStandardMaterial;
+  keyMaterial: THREE.MeshStandardMaterial;
+  keyDefaultColor: number;
+  setKeyState: (state: WindUpAutomatonKeyState) => void;
 };
 
 export function createWindUpAutomaton(): WindUpAutomaton {
@@ -90,8 +99,11 @@ export function createWindUpAutomaton(): WindUpAutomaton {
 
   // Key shaft
   const keyShaftGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.18, 8);
+  const KEY_DEFAULT_COLOR = 0xc8a14a;
   const keyMat = new THREE.MeshStandardMaterial({
-    color: 0x8a5a22, // darker brass for contrast
+    color: KEY_DEFAULT_COLOR, // brass — driven externally to signal powerup state
+    emissive: 0x000000,
+    emissiveIntensity: 0,
     metalness: 0.9,
     roughness: 0.3,
   });
@@ -156,5 +168,18 @@ export function createWindUpAutomaton(): WindUpAutomaton {
     rightFoot.scale.y = currentFootScaleY;
   };
 
-  return { group, update, bodyMaterial: bodyMat };
+  const setKeyState = (state: WindUpAutomatonKeyState) => {
+    keyMat.color.set(state.color);
+    keyMat.emissive.set(state.emissive);
+    keyMat.emissiveIntensity = state.emissiveIntensity;
+  };
+
+  return {
+    group,
+    update,
+    bodyMaterial: bodyMat,
+    keyMaterial: keyMat,
+    keyDefaultColor: KEY_DEFAULT_COLOR,
+    setKeyState,
+  };
 }

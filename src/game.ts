@@ -467,6 +467,19 @@ export class Game {
   private readonly landingCueCore = new THREE.Mesh(new THREE.CircleGeometry(0.2, 10), this.landingCueCoreMaterial);
   private readonly landingCueRing = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.3, 18), this.landingCueRingMaterial);
   private readonly landingCueGlow = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.34, 18), this.landingCueGlowMaterial);
+  private readonly dropLineMaterial = new THREE.LineDashedMaterial({
+    color: 0xffeecc,
+    dashSize: 0.2,
+    gapSize: 0.14,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  private dropLine: THREE.Line | null = null;
+  private dropLineAirTime = 0;
+  private highlightedGearId: number | null = null;
+  private hudOverlaySvg: SVGSVGElement | null = null;
+  private hudPickupLine: SVGLineElement | null = null;
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
@@ -702,6 +715,21 @@ export class Game {
     this.landingCueRing.renderOrder = 12;
     this.landingCueCore.renderOrder = 13;
     this.scene.add(this.landingCueGroup);
+
+    // Dashed vertical drop line: player feet → projected landing point. Positions are
+    // written every frame in updateLandingCue; the geometry is seeded as a degenerate
+    // segment so line distances are computable from the start.
+    const dropLineGeo = new THREE.BufferGeometry();
+    dropLineGeo.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute([0, 0, 0, 0, -1, 0], 3)
+    );
+    const dropLine = new THREE.Line(dropLineGeo, this.dropLineMaterial);
+    dropLine.computeLineDistances();
+    dropLine.visible = false;
+    dropLine.renderOrder = 10;
+    this.dropLine = dropLine;
+    this.scene.add(dropLine);
     this.player.reset(0, 2);
     this.player.mesh.position.set(0, 0.32, 0);
 
@@ -727,6 +755,33 @@ export class Game {
       throw new Error("Missing HUD elements");
     }
     this.hudAiBadge = document.getElementById("hud-ai-badge");
+
+    // Pickup flash overlay — SVG line player→pill, added lazily so the rest of the HUD
+    // doesn't need to know about it. Full-viewport fixed overlay, pointer-events none.
+    const overlaySvgNs = "http://www.w3.org/2000/svg";
+    const overlaySvg = document.createElementNS(overlaySvgNs, "svg") as SVGSVGElement;
+    overlaySvg.id = "hud-pickup-overlay";
+    overlaySvg.style.position = "fixed";
+    overlaySvg.style.top = "0";
+    overlaySvg.style.left = "0";
+    overlaySvg.style.width = "100%";
+    overlaySvg.style.height = "100%";
+    overlaySvg.style.pointerEvents = "none";
+    overlaySvg.style.zIndex = "12";
+    const pickupLine = document.createElementNS(overlaySvgNs, "line") as SVGLineElement;
+    pickupLine.setAttribute("x1", "0");
+    pickupLine.setAttribute("y1", "0");
+    pickupLine.setAttribute("x2", "0");
+    pickupLine.setAttribute("y2", "0");
+    pickupLine.setAttribute("stroke", "rgba(255, 170, 68, 0.85)");
+    pickupLine.setAttribute("stroke-width", "2");
+    pickupLine.setAttribute("stroke-linecap", "round");
+    pickupLine.style.opacity = "0";
+    pickupLine.style.transition = "opacity 260ms ease-out";
+    overlaySvg.appendChild(pickupLine);
+    document.body.appendChild(overlaySvg);
+    this.hudOverlaySvg = overlaySvg;
+    this.hudPickupLine = pickupLine;
 
     this.hud = hud;
     this.titleOverlay = titleOverlay;
@@ -1470,7 +1525,7 @@ export class Game {
     this.closeCallOverlay.style.opacity = "0";
     this.shieldSaveOverlay.style.opacity = "0";
     this.hideTutorialOverlay(true);
-    this.landingCueGroup.visible = false;
+    this.hideLandingCueHard();
     if (this.personalBestRing) {
       this.personalBestRing.visible = false;
     }
@@ -2376,7 +2431,7 @@ export class Game {
     this.showTutorialOverlay();
     startAmbientTick();
     startMusic();
-    this.landingCueGroup.visible = false;
+    this.hideLandingCueHard();
 
     if (this.personalBestRing) {
       this.personalBestRing.position.set(0, this.personalBestHeight, 0);
@@ -2438,7 +2493,7 @@ export class Game {
     this.updateEnvironment(state.player.y);
     this.updateWorld(dt);
     this.updateCamera(dt, state);
-    this.updateLandingCue(state);
+    this.updateLandingCue(state, dt);
     this.updatePersonalBestRing(state.player.y);
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
@@ -2491,7 +2546,7 @@ export class Game {
     this.state = GameState.GameOver;
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
-    this.landingCueGroup.visible = false;
+    this.hideLandingCueHard();
     if (this.personalBestRing) {
       this.personalBestRing.visible = false;
     }
@@ -3129,6 +3184,8 @@ export class Game {
         if (nearCamera && simGear.variant === "magnetic" && simGear.active) {
           gear.updateMagnetIndicator(this.elapsedTime);
         }
+        // Landing-indicator rim glow lerp — cheap per-frame tick.
+        gear.updateLandingHighlight(dt);
 
         if (this.state === GameState.Playing && simGear.active) {
           const distance = gear.mesh.position.distanceTo(this.player.mesh.position);
@@ -3283,50 +3340,125 @@ export class Game {
 
     this.updatePlayerLight(dt);
   }
-  private updateLandingCue(state: SimState) {
+  // Hard-reset helper: used at game-state transitions (title, gameover, respawn) where
+  // we want to clear every piece of the landing indicator bundle without waiting for
+  // the normal fade-out in updateLandingCue.
+  private hideLandingCueHard() {
+    this.landingCueGroup.visible = false;
+    this.dropLineAirTime = 0;
+    if (this.dropLine) {
+      this.dropLineMaterial.opacity = 0;
+      this.dropLine.visible = false;
+    }
+    this.setHighlightedGear(null);
+  }
+
+  private updateLandingCue(state: SimState, dt: number) {
     const player = state.player;
     if (player.onGround) {
       this.landingCueGroup.visible = false;
+      this.dropLineAirTime = 0;
+      if (this.dropLine) {
+        this.dropLineMaterial.opacity = THREE.MathUtils.lerp(this.dropLineMaterial.opacity, 0, 1 - Math.exp(-dt * 10));
+        if (this.dropLineMaterial.opacity < 0.01) {
+          this.dropLine.visible = false;
+        }
+      }
+      this.setHighlightedGear(null);
       return;
     }
 
-    // ~20% larger than the base 0.2-radius geometry so the shadow reads as grounded,
-    // not as a debug dot. Player radius is 0.3 so this remains modest.
-    const BASE_SCALE = 1.2;
+    // Accumulate hang time so the drop line fades IN over 0.25s (not pops in).
+    this.dropLineAirTime += dt;
 
     const landingSurface = this.findLandingSurface(state);
     if (!landingSurface) {
-      // No landing target below (player over a gap). Instead of hiding the cue — which
-      // strips the player of spatial awareness — project it a fixed distance below the
-      // player's feet so there is always a visual "down" reference. Render only the
-      // soft core at reduced opacity so it reads clearly as "no target" vs. "target".
+      // No landing target below (player over a gap). Project the cue a fixed distance
+      // below the player's feet so there's always a visual "down" reference. Render only
+      // the soft core at reduced opacity so it reads as "no target" vs. "target".
+      // Scale from 0.6→1.2 based on distance below player (here ≈3m, map to mid scale).
       this.landingCueGroup.visible = true;
       this.landingCueGroup.position.set(player.x, player.y - 3.0, player.z);
-      this.landingCueGroup.scale.setScalar(BASE_SCALE);
-      this.landingCueCoreMaterial.opacity = 0.14;
+      this.landingCueGroup.scale.setScalar(0.9);
+      // Keep the 0.55 floor so the dot doesn't disappear on bright backgrounds.
+      this.landingCueCoreMaterial.opacity = 0.55;
       this.landingCueRingMaterial.opacity = 0;
       this.landingCueGlowMaterial.opacity = 0;
+      this.renderDropLine(player.x, player.y, player.z, player.y - 3.0, dt);
+      this.setHighlightedGear(null);
       return;
     }
 
     const dropHeight = Math.max(0, player.y - landingSurface.y);
+    // Scaling landing shadow: 0.6× at 6m up → 1.2× at touchdown, smooth interp.
+    const proximityT = 1 - THREE.MathUtils.clamp(dropHeight / 6, 0, 1);
+    const shadowScale = THREE.MathUtils.lerp(0.6, 1.2, proximityT);
+
     // heightT: 0 = right above landing, 1 = far above (8m+ drop)
     const heightT = THREE.MathUtils.clamp(dropHeight / 8, 0, 1);
 
-    // Core shadow dot: always visible when airborne, the main landing indicator.
-    // Slight fade-in as you get closer so it doesn't pop.
-    const coreOpacity = THREE.MathUtils.lerp(0.18, 0.42, 1 - heightT);
+    // Core shadow dot: always visible when airborne. Opacity floor 0.55 so it doesn't
+    // get lost on bright amber/gold gears; cap around 0.85 near touchdown.
+    const coreOpacity = THREE.MathUtils.lerp(0.85, 0.55, heightT);
 
-    // Ring: only visible when FAR from landing (faded out). Hidden when close.
-    // Fades in softly as you're still high up, disappears completely near touchdown.
+    // Ring: only visible when FAR from landing — fades in softly as you're still high
+    // up, disappears completely near touchdown.
     const ringOpacity = THREE.MathUtils.clamp(heightT * 0.22, 0, 0.22);
 
     this.landingCueGroup.visible = true;
     this.landingCueGroup.position.set(player.x, landingSurface.y + 0.018, player.z);
-    this.landingCueGroup.scale.setScalar(BASE_SCALE);
+    this.landingCueGroup.scale.setScalar(shadowScale);
     this.landingCueCoreMaterial.opacity = coreOpacity;
     this.landingCueRingMaterial.opacity = ringOpacity;
     this.landingCueGlowMaterial.opacity = 0;
+
+    this.renderDropLine(player.x, player.y, player.z, landingSurface.y + 0.02, dt);
+    this.setHighlightedGear(landingSurface.gearId);
+  }
+
+  private renderDropLine(x: number, fromY: number, z: number, toY: number, dt: number) {
+    const line = this.dropLine;
+    if (!line) {
+      return;
+    }
+    // Avoid degenerate lines — if we're essentially at the target, hide.
+    if (fromY - toY < 0.05) {
+      this.dropLineMaterial.opacity = THREE.MathUtils.lerp(this.dropLineMaterial.opacity, 0, 1 - Math.exp(-dt * 10));
+      if (this.dropLineMaterial.opacity < 0.01) {
+        line.visible = false;
+      }
+      return;
+    }
+    const positions = line.geometry.getAttribute("position") as THREE.BufferAttribute;
+    positions.setXYZ(0, x, fromY, z);
+    positions.setXYZ(1, x, toY, z);
+    positions.needsUpdate = true;
+    line.geometry.computeBoundingSphere();
+    line.computeLineDistances();
+    line.visible = true;
+    // Ramp opacity up to 0.35 over 0.25s of hang time.
+    const airT = THREE.MathUtils.clamp(this.dropLineAirTime / 0.25, 0, 1);
+    const targetOpacity = 0.35 * airT;
+    this.dropLineMaterial.opacity = THREE.MathUtils.lerp(this.dropLineMaterial.opacity, targetOpacity, 1 - Math.exp(-dt * 10));
+  }
+
+  private setHighlightedGear(gearId: number | null) {
+    if (this.highlightedGearId === gearId) {
+      return;
+    }
+    if (this.highlightedGearId !== null) {
+      const prev = this.visualGearMap.get(this.highlightedGearId);
+      if (prev) {
+        prev.setLandingHighlight(false);
+      }
+    }
+    if (gearId !== null) {
+      const gear = this.visualGearMap.get(gearId);
+      if (gear) {
+        gear.setLandingHighlight(true);
+      }
+    }
+    this.highlightedGearId = gearId;
   }
 
   private triggerBouncyGearSquash(gearId: number) {
@@ -3395,10 +3527,11 @@ export class Game {
     }
   }
 
-  private findLandingSurface(state: SimState): { y: number } | null {
+  private findLandingSurface(state: SimState): { y: number; gearId: number } | null {
     const player = state.player;
     const playerRadius = 0.3;
     let bestY = -Infinity;
+    let bestGearId = -1;
 
     for (const gear of state.gears) {
       if (!gear.active) {
@@ -3418,9 +3551,10 @@ export class Game {
       }
 
       bestY = topY;
+      bestGearId = gear.id;
     }
 
-    return bestY > -Infinity ? { y: bestY } : null;
+    return bestGearId >= 0 ? { y: bestY, gearId: bestGearId } : null;
   }
   private ensureBackgroundCoverage(state: SimState) {
     const maxHeight = this.getMaxGearHeight(state) + 24;
@@ -3743,15 +3877,62 @@ export class Game {
   }
 
   private pulsePowerupSlot(slot: HTMLElement) {
-    // Playful motion: ease-out-back, ~200ms, 15% overshoot.
+    // Pickup burst bundle:
+    //   1. Scale burst 1.0 → 1.3 → 1.0 over 250ms (ease-out-back).
+    //   2. 180ms amber glow behind the pill via CSS class toggle.
+    //   3. Short line from the player's projected screen pos to the pill center (300ms).
     slot.animate(
       [
         { transform: "scale(1)" },
-        { transform: "scale(1.15)" },
+        { transform: "scale(1.3)" },
         { transform: "scale(1)" },
       ],
-      { duration: 200, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" }
+      { duration: 250, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" }
     );
+    slot.classList.add("hud-powerup-pulse");
+    window.setTimeout(() => slot.classList.remove("hud-powerup-pulse"), 180);
+    this.flashPlayerToSlotLine(slot);
+  }
+
+  private flashPlayerToSlotLine(slot: HTMLElement) {
+    const line = this.hudPickupLine;
+    const svg = this.hudOverlaySvg;
+    if (!line || !svg) {
+      return;
+    }
+    // Project player world position to screen coords.
+    const projected = this.player.mesh.position.clone();
+    projected.y += 0.5; // roughly chest height
+    projected.project(this.camera);
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const playerX = (projected.x * 0.5 + 0.5) * viewportW;
+    const playerY = (-projected.y * 0.5 + 0.5) * viewportH;
+
+    const rect = slot.getBoundingClientRect();
+    const slotX = rect.left + rect.width / 2;
+    const slotY = rect.top + rect.height / 2;
+
+    // Ergonomic skip: don't draw if the pill is >60% of viewport away from the player.
+    const dx = slotX - playerX;
+    const dy = slotY - playerY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const viewportDiag = Math.sqrt(viewportW * viewportW + viewportH * viewportH);
+    if (distance > viewportDiag * 0.6) {
+      return;
+    }
+
+    line.setAttribute("x1", String(playerX));
+    line.setAttribute("y1", String(playerY));
+    line.setAttribute("x2", String(slotX));
+    line.setAttribute("y2", String(slotY));
+    // Ensure a clean transition by resetting opacity quickly, then fading.
+    line.style.transition = "none";
+    line.style.opacity = "0.85";
+    // Force a reflow so the next transition applies.
+    void line.getBoundingClientRect();
+    line.style.transition = "opacity 300ms ease-out";
+    line.style.opacity = "0";
   }
 
   private updateComboHud(multiplier: number) {
