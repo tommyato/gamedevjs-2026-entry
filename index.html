@@ -420,9 +420,11 @@
       backdrop-filter: blur(6px);
       justify-content: center;
       align-items: center;
+      padding: 12px 20px 16px;
     }
     #title-overlay.game-over .title-copy-panel {
-      margin-bottom: 12px;
+      margin-bottom: 0;
+      padding: 10px 32px 8px;
     }
     #title-overlay.game-over h1 {
       font-size: clamp(24px, 2.6vw, 36px);
@@ -436,7 +438,7 @@
     .game-over-view {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 16px;
+      gap: 12px;
       max-width: 1120px;
       width: 100%;
       align-items: start;
@@ -450,6 +452,9 @@
       display: flex;
       flex-direction: column;
       gap: 0;
+      /* Cap height so footer stays pinned; inner content scrolls if needed */
+      max-height: 520px;
+      overflow-y: auto;
     }
     .game-over-footer {
       grid-column: 1 / -1;
@@ -457,7 +462,7 @@
       flex-wrap: wrap;
       gap: 10px;
       justify-content: center;
-      margin-top: 8px;
+      margin-top: 4px;
     }
     #title-overlay h1 {
       font-family: "Orbitron", ui-monospace, monospace; font-size: clamp(36px, 5vw, 56px); font-weight: 900;
@@ -1271,11 +1276,11 @@
             <div class="stat-row hidden" id="go-contracts-row"><span class="stat-label">CONTRACT BONUS</span><span class="stat-value" id="go-contracts"></span></div>
             <div class="stat-row stat-total"><span class="stat-label">TOTAL SCORE</span><span class="stat-value" id="go-total"></span></div>
           </div>
-          <div id="gameover-contracts" class="hidden"></div>
-          <div id="gameover-unlocks" class="hidden"></div>
         </div>
         <div id="game-over-right-col">
-          <!-- Leaderboard panel will be appended here by game.ts -->
+          <!-- Leaderboard panel prepended here by game.ts; contracts/unlocks follow -->
+          <div id="gameover-contracts" class="hidden"></div>
+          <div id="gameover-unlocks" class="hidden"></div>
         </div>
         <div class="game-over-footer">
           <div class="gameover-actions">

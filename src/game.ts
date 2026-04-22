@@ -1043,7 +1043,8 @@ export class Game {
     this.gameOverLeaderboardPanel.classList.add("hidden");
     const gameOverRightCol = document.getElementById("game-over-right-col");
     if (gameOverRightCol) {
-      gameOverRightCol.appendChild(this.gameOverLeaderboardPanel);
+      // Prepend so leaderboard appears above the contracts/unlocks rows in HTML.
+      gameOverRightCol.prepend(this.gameOverLeaderboardPanel);
     }
   }
 
@@ -2710,6 +2711,7 @@ export class Game {
     this.titleOverlay.classList.remove("hidden");
     this.titleOverlay.classList.add("game-over");
     this.titleOverlay.style.overflowY = "auto";
+    this.titleBest.classList.add("hidden");
     this.titleLeaderboardPanel.classList.add("hidden");
     this.buildTitleBackdrop();
     this.titleHeading.textContent = "GAME OVER";
@@ -2756,11 +2758,13 @@ export class Game {
 
     this.renderGameOverContracts();
 
-    // Surface a fresh preview for the next run.
+    // Pre-roll contracts for the next run but keep the preview panel hidden —
+    // it's a title-screen affordance; the player will see it after clicking
+    // PLAY AGAIN or TITLE SCREEN.
     this.contractsHudPanel.classList.add("empty");
     this.rerollPreviewContracts();
     this.renderContractsPreview();
-    this.contractsPreviewPanel.classList.remove("hidden");
+    this.contractsPreviewPanel.classList.add("hidden");
     this.renderLeaderboardList(
       this.gameOverLeaderboardContext,
       this.gameOverLeaderboardList,
