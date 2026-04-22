@@ -164,6 +164,34 @@ function utcDateKey(date = new Date()): string {
   return date.toISOString().slice(0, 10);
 }
 
+// "2026-04-22" → "April 22nd, 2026". Uses UTC so every player sees the same
+// label for a given daily seed, regardless of local timezone.
+const DAILY_MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+function dayOrdinalSuffix(day: number): string {
+  const rem100 = day % 100;
+  if (rem100 >= 11 && rem100 <= 13) return "th";
+  switch (day % 10) {
+    case 1: return "st";
+    case 2: return "nd";
+    case 3: return "rd";
+    default: return "th";
+  }
+}
+function formatHumanDate(dateKey: string): string {
+  // dateKey is "YYYY-MM-DD" from utcDateKey(). Parse as UTC, not local.
+  const parts = dateKey.split("-");
+  if (parts.length !== 3) return dateKey;
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return dateKey;
+  const monthName = DAILY_MONTH_NAMES[month - 1] ?? parts[1];
+  return `${monthName} ${day}${dayOrdinalSuffix(day)}, ${year}`;
+}
+
 function dailySeed(dateKey = utcDateKey()): number {
   return fnv1a(`clockwork-climb-${dateKey}`);
 }
@@ -888,7 +916,7 @@ export class Game {
       event.preventDefault();
       event.stopPropagation();
       const text = this.isDailyChallenge
-        ? `I scored ${this.score} climbing ${this.heightMaxReached}m in the Clockwork Climb Daily Challenge (${this.dailyChallengeDate})! ⚙️\nCan you beat today's tower?\n#gamedevjs #gamedev @tommyatoai`
+        ? `I scored ${this.score} climbing ${this.heightMaxReached}m in the Clockwork Climb Daily Challenge (${formatHumanDate(this.dailyChallengeDate)})! ⚙️\nCan you beat today's tower?\n#gamedevjs #gamedev @tommyatoai`
         : `I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️\nCan you beat my score?\n#gamedevjs #gamedev @tommyatoai`;
       const shareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://tommyato.com/games/clockwork-climb/")}`;
       window.open(shareUrl, "_blank", "noopener,noreferrer");
@@ -1086,7 +1114,7 @@ export class Game {
       this.gameOverLeaderboardList,
       this.gameOverLeaderboardEntries,
       slug === "daily-score"
-        ? `DAILY CHALLENGE · ${this.dailyChallengeDate} · THIS RUN ${this.score}`
+        ? `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · THIS RUN ${this.score}`
         : `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
     );
     this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
@@ -2735,7 +2763,7 @@ export class Game {
       this.titleTagline.classList.remove("new-best");
     }
     if (this.isDailyChallenge) {
-      this.titleTagline.textContent = `DAILY CHALLENGE · ${this.dailyChallengeDate} · SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
+      this.titleTagline.textContent = `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
       this.titleTagline.classList.remove("new-best");
     }
     this.titlePrompt.textContent = "RESTART";
@@ -2773,7 +2801,7 @@ export class Game {
       this.gameOverLeaderboardList,
       this.gameOverLeaderboardEntries,
       this.isDailyChallenge
-        ? `DAILY CHALLENGE · ${this.dailyChallengeDate} · THIS RUN ${this.score}`
+        ? `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · THIS RUN ${this.score}`
         : `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
     );
     this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
@@ -3408,14 +3436,16 @@ export class Game {
       );
       const halfViewWorld = Math.tan((this.camera.fov * Math.PI) / 360) * distToPlayer * this.camera.aspect;
       const shiftWorld = halfViewWorld * 0.22; // push target ~22% of half-width right
-      // "Right" in world space, relative to camera: perpendicular to the
-      // camera→player vector in the XZ plane.
+      // Camera "right" in world space. Three.js cameras use up=+Y and look
+      // down their -Z axis, so for a forward = (dx, 0, dz) from camera to
+      // player, camera-right = cross(forward, up) = (-dz, 0, dx) normalized.
+      // (Previous version used (dz, -dx), which is the LEFT perpendicular —
+      // that pushed the player off-screen to the RIGHT, under the HUD rail.)
       const dx = playerX - this.camera.position.x;
       const dz = playerZ - this.camera.position.z;
       const horizLen = Math.hypot(dx, dz) || 1;
-      // Right-hand perpendicular in XZ: (dz, -dx) normalized.
-      lookOffsetX = (dz / horizLen) * shiftWorld;
-      lookOffsetZ = (-dx / horizLen) * shiftWorld;
+      lookOffsetX = (-dz / horizLen) * shiftWorld;
+      lookOffsetZ = (dx / horizLen) * shiftWorld;
     }
 
     this.cameraLookTarget.set(
@@ -3938,7 +3968,7 @@ export class Game {
     const aiGs = this.aiGhostEnabled ? this.aiGhost?.getGhostState() : null;
     const aiHeightStr = aiGs ? ` · AI ${Math.round(aiGs.height)}m` : "";
     this.hudStatus.textContent = this.isDailyChallenge
-      ? `DAILY CHALLENGE · ${this.dailyChallengeDate} · HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`
+      ? `DAILY · ${formatHumanDate(this.dailyChallengeDate)} · SAME TOWER FOR EVERYONE · HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`
       : `HEIGHT ${this.heightMaxReached}m${aiHeightStr} · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
 
     if (this.hudAiBadge) {
