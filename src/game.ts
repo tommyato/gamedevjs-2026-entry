@@ -412,6 +412,12 @@ export class Game {
   private titleBackButton: HTMLButtonElement | null = null;
   private pauseTitleBtn: HTMLButtonElement | null = null;
   private achievementCatalog: AchievementCatalogEntry[] = [];
+  // Queue of achievement labels that arrived while the game-over overlay
+  // was visible. Queued entries are rendered in the #gameover-unlocks row
+  // instead of firing a toast (which would overlap the overlay), and are
+  // flushed as toasts when the overlay is dismissed so they can't vanish
+  // silently for players who don't glance at the unlocks row.
+  private achievementUnlockQueue: string[] = [];
   private gameOverHeightEl!: HTMLElement;
   private gameOverBoltsEl!: HTMLElement;
   private gameOverBoltCountEl!: HTMLElement;
@@ -979,6 +985,8 @@ export class Game {
     this.buildTitleBackdrop();
     await this.refreshLeaderboardPanels();
     this.setupAchievementsUi();
+    this.setupLeaderboardModal();
+    this.setupGameOverButtons();
     void this.loadAchievementCatalog();
     this.setupMultiplayerUi(container);
     this.initAIGhost();
@@ -987,6 +995,7 @@ export class Game {
     this.setupContractsUi(container);
     this.rerollPreviewContracts();
     this.renderContractsPreview();
+    this.applyHudRailState();
     this.updateHud(dtZero());
     this.updateOverlayText();
     this.input.setTouchControlsVisible(false);
@@ -1081,6 +1090,7 @@ export class Game {
         : `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
     );
     this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
+    this.renderTitleLeaderboardSummary();
   }
 
   private renderLeaderboardList(
@@ -1131,7 +1141,8 @@ export class Game {
   // -----------------------------------------------------------------------
 
   private setupAchievementsUi() {
-    const button = document.getElementById("achievements-btn") as HTMLButtonElement | null;
+    const button = document.getElementById("title-btn-achievements") as HTMLButtonElement | null;
+    const gameOverButton = document.getElementById("gameover-achievements") as HTMLButtonElement | null;
     const overlay = document.getElementById("achievements-overlay") as HTMLDivElement | null;
     const closeBtn = document.getElementById("achievements-close") as HTMLButtonElement | null;
 
@@ -1142,16 +1153,17 @@ export class Game {
     this.achievementsButton = button;
     this.achievementsPanel = overlay;
 
-    button.addEventListener("click", (event) => {
+    const openFromBtn = (event: Event) => {
       event.preventDefault();
       event.stopPropagation();
       this.openAchievementsPanel();
-    });
-    button.addEventListener("touchend", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.openAchievementsPanel();
-    }, { passive: false });
+    };
+    button.addEventListener("click", openFromBtn);
+    button.addEventListener("touchend", openFromBtn, { passive: false });
+    if (gameOverButton) {
+      gameOverButton.addEventListener("click", openFromBtn);
+      gameOverButton.addEventListener("touchend", openFromBtn, { passive: false });
+    }
 
     closeBtn.addEventListener("click", (event) => {
       event.preventDefault();
@@ -1177,6 +1189,124 @@ export class Game {
     });
   }
 
+  // -----------------------------------------------------------------------
+  // Leaderboard modal (LEADERBOARD pill opens an overlay instead of using
+  // the always-visible panel so the single-column title screen stays clean).
+  // -----------------------------------------------------------------------
+  private leaderboardModal: HTMLDivElement | null = null;
+  private leaderboardModalBody: HTMLDivElement | null = null;
+
+  private setupLeaderboardModal(): void {
+    const modal = document.getElementById("leaderboard-modal") as HTMLDivElement | null;
+    const body = document.getElementById("leaderboard-modal-body") as HTMLDivElement | null;
+    const closeBtn = document.getElementById("leaderboard-modal-close") as HTMLButtonElement | null;
+    const titleBtn = document.getElementById("title-btn-leaderboard") as HTMLButtonElement | null;
+    const gameOverBtn = document.getElementById("gameover-leaderboard") as HTMLButtonElement | null;
+    if (!modal || !body || !closeBtn) return;
+
+    this.leaderboardModal = modal;
+    this.leaderboardModalBody = body;
+
+    const open = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openLeaderboardModal();
+    };
+    titleBtn?.addEventListener("click", open);
+    titleBtn?.addEventListener("touchend", open, { passive: false });
+    gameOverBtn?.addEventListener("click", open);
+    gameOverBtn?.addEventListener("touchend", open, { passive: false });
+
+    const close = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.closeLeaderboardModal();
+    };
+    closeBtn.addEventListener("click", close);
+    closeBtn.addEventListener("touchend", close, { passive: false });
+
+    modal.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target === modal) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeLeaderboardModal();
+      } else {
+        event.stopPropagation();
+      }
+    });
+  }
+
+  private openLeaderboardModal(): void {
+    if (!this.leaderboardModal || !this.leaderboardModalBody) return;
+    this.renderLeaderboardModalBody();
+    this.leaderboardModal.classList.remove("hidden");
+    this.leaderboardModal.setAttribute("aria-hidden", "false");
+  }
+
+  private closeLeaderboardModal(): void {
+    if (!this.leaderboardModal) return;
+    this.leaderboardModal.classList.add("hidden");
+    this.leaderboardModal.setAttribute("aria-hidden", "true");
+  }
+
+  private renderLeaderboardModalBody(): void {
+    if (!this.leaderboardModalBody) return;
+    const entries = this.titleLeaderboardEntries;
+    if (entries.length === 0) {
+      this.leaderboardModalBody.innerHTML =
+        "<div style='font-size:13px; letter-spacing:2px; color:#8f8a85;'>NO SCORES RECORDED</div>";
+      return;
+    }
+    const rows = entries.slice(0, 10).map((entry) => (
+      `<div style="display:grid; grid-template-columns: 40px 1fr auto; gap:12px; padding:8px 4px; align-items:baseline; font-size:14px; letter-spacing:1px; border-bottom:1px solid rgba(127,214,255,0.08);">
+        <span style="color:#c7a271;">#${entry.rank}</span>
+        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(entry.username)}</span>
+        <span style="color:#ffaa44; font-weight:700;">${entry.score}</span>
+      </div>`
+    )).join("");
+    this.leaderboardModalBody.innerHTML = rows;
+  }
+
+  private renderTitleLeaderboardSummary(): void {
+    const el = document.getElementById("title-leaderboard-summary");
+    if (!el) return;
+    const entries = this.titleLeaderboardEntries;
+    if (entries.length === 0) {
+      el.textContent = "";
+      return;
+    }
+    const top = entries[0];
+    const heightPart = this.saveData.bestHeight > 0 ? ` · ${this.saveData.bestHeight}m` : "";
+    el.textContent = `#1 ${top.username} · ${top.score}${heightPart}`;
+  }
+
+  // -----------------------------------------------------------------------
+  // Game-over action buttons (play again, title screen, etc.)
+  // -----------------------------------------------------------------------
+  private setupGameOverButtons(): void {
+    const playAgain = document.getElementById("gameover-play-again") as HTMLButtonElement | null;
+    if (playAgain) {
+      const handler = (event: Event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.startGame();
+      };
+      playAgain.addEventListener("click", handler);
+      playAgain.addEventListener("touchend", handler, { passive: false });
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // HUD rail — on wide viewports (>= 1280px), render the HUD as a right
+  // rail so the gameplay claims the left ~78% of the canvas. CSS does the
+  // actual layout; this method just toggles the body class that gates it.
+  // -----------------------------------------------------------------------
+  private applyHudRailState(): void {
+    const wide = window.innerWidth >= 1280;
+    document.body.classList.toggle("hud-rail", wide);
+  }
+
   private async loadAchievementCatalog() {
     try {
       const progress = listAchievementProgress();
@@ -1192,10 +1322,8 @@ export class Game {
   }
 
   private setupDailyChallengeButton(): void {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "title-action-btn";
-    btn.textContent = "DAILY CHALLENGE";
+    const btn = document.getElementById("title-btn-daily") as HTMLButtonElement | null;
+    if (!btn) return;
     Object.assign(btn.style, {
       border: "1px solid rgba(255, 210, 110, 0.5)",
       background: "linear-gradient(180deg, rgba(58, 38, 10, 0.94), rgba(28, 18, 6, 0.84))",
@@ -1212,13 +1340,6 @@ export class Game {
       event.stopPropagation();
       this.startDailyChallenge();
     }, { passive: false });
-
-    const actions = document.getElementById("title-actions");
-    if (actions) {
-      actions.appendChild(btn);
-    } else {
-      this.titlePrompt.insertAdjacentElement("afterend", btn);
-    }
   }
 
   private startDailyChallenge(): void {
@@ -1233,104 +1354,27 @@ export class Game {
   // Run Contracts — UI, rolling, live tracking, completion bonuses.
   // -----------------------------------------------------------------------
 
-  private setupContractsUi(container: HTMLElement): void {
-    // Live HUD panel — top-right, below the main HUD card. Matches the
-    // frosted-glass look of the powerup HUD so the two read as siblings.
-    const hudPanel = document.createElement("div");
-    Object.assign(hudPanel.style, {
-      position: "absolute",
-      top: "220px",
-      right: "20px",
-      width: "248px",
-      padding: "12px 14px",
-      borderRadius: "14px",
-      border: "1px solid rgba(255, 196, 120, 0.18)",
-      background: "linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62))",
-      boxShadow: "0 12px 28px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08)",
-      backdropFilter: "blur(10px)",
-      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
-      color: "#f3d7b1",
-      pointerEvents: "none",
-      zIndex: "11",
-      display: "none",
-    } as CSSStyleDeclaration);
+  private setupContractsUi(_container: HTMLElement): void {
+    // Live HUD panel and title-screen preview panel are both declared in
+    // index.html so their ids are stable and greppable. We just grab the
+    // existing elements and wire the reroll button here.
+    const hudPanel = document.getElementById("hud-contracts") as HTMLDivElement | null;
+    const previewPanel = document.getElementById("title-contracts-preview") as HTMLDivElement | null;
+    const rerollBtn = document.getElementById("title-contracts-reroll") as HTMLButtonElement | null;
+    if (!hudPanel || !previewPanel || !rerollBtn) {
+      throw new Error("Missing contracts UI elements in index.html");
+    }
 
-    const hudHeading = document.createElement("div");
-    hudHeading.textContent = "CONTRACTS";
-    Object.assign(hudHeading.style, {
-      fontSize: "10px",
-      letterSpacing: "2.5px",
-      color: "#c7a271",
-      marginBottom: "8px",
-    } as CSSStyleDeclaration);
-    hudPanel.appendChild(hudHeading);
-
-    const hudList = document.createElement("div");
-    Object.assign(hudList.style, {
-      display: "grid",
-      gap: "6px",
-    } as CSSStyleDeclaration);
-    hudPanel.appendChild(hudList);
-    container.appendChild(hudPanel);
+    const previewList = previewPanel.querySelector(".contracts-preview-list") as HTMLDivElement | null;
+    if (!previewList) {
+      throw new Error("Missing .contracts-preview-list inside #title-contracts-preview");
+    }
 
     this.contractsHudPanel = hudPanel;
-    this.contractsHudList = hudList;
+    this.contractsHudList = hudPanel;
+    this.contractsPreviewPanel = previewPanel;
+    this.contractsPreviewList = previewList;
 
-    // Pre-run preview panel on the title overlay. Placed after the button
-    // stack so the PLAY / ACHIEVEMENTS / DAILY / MULTIPLAYER buttons remain
-    // the eye-grabbing primary CTAs, and the contracts are a useful but
-    // secondary "here's what you're signing up for" callout.
-    const previewPanel = document.createElement("div");
-    Object.assign(previewPanel.style, {
-      marginTop: "12px",
-      padding: "14px 16px",
-      borderRadius: "16px",
-      border: "1px solid rgba(255, 196, 120, 0.22)",
-      background: "linear-gradient(180deg, rgba(32, 22, 14, 0.86), rgba(14, 10, 8, 0.74))",
-      boxShadow: "0 14px 32px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.12)",
-      backdropFilter: "blur(10px)",
-      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
-      color: "#f3d7b1",
-      pointerEvents: "auto",
-      textAlign: "left",
-    } as CSSStyleDeclaration);
-    previewPanel.classList.add("contracts-preview-panel");
-
-    const previewHeading = document.createElement("div");
-    previewHeading.textContent = "RUN CONTRACTS · BONUSES ON COMPLETION";
-    Object.assign(previewHeading.style, {
-      fontSize: "11px",
-      letterSpacing: "2px",
-      color: "#c7a271",
-      marginBottom: "10px",
-    } as CSSStyleDeclaration);
-    previewPanel.appendChild(previewHeading);
-
-    const previewList = document.createElement("div");
-    Object.assign(previewList.style, {
-      display: "grid",
-      gap: "8px",
-    } as CSSStyleDeclaration);
-    previewPanel.appendChild(previewList);
-
-    // Reroll button — quality-of-life, lets the player swap contracts they
-    // don't feel like chasing that run.
-    const rerollBtn = document.createElement("button");
-    rerollBtn.type = "button";
-    rerollBtn.textContent = "REROLL";
-    Object.assign(rerollBtn.style, {
-      marginTop: "10px",
-      padding: "6px 14px",
-      borderRadius: "999px",
-      border: "1px solid rgba(255, 196, 120, 0.32)",
-      background: "linear-gradient(180deg, rgba(42, 28, 14, 0.94), rgba(18, 12, 6, 0.82))",
-      color: "#ffe19d",
-      cursor: "pointer",
-      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
-      fontSize: "11px",
-      fontWeight: "700",
-      letterSpacing: "2px",
-    } as CSSStyleDeclaration);
     rerollBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -1338,14 +1382,13 @@ export class Game {
       this.rerollPreviewContracts();
       this.renderContractsPreview();
     });
-    previewPanel.appendChild(rerollBtn);
-
-    this.contractsPreviewPanel = previewPanel;
-    this.contractsPreviewList = previewList;
-
-    // Insert before the leaderboard so it reads as part of the "what are you
-    // doing on this run?" block rather than a footer.
-    this.titleOverlay.insertBefore(previewPanel, this.titleLeaderboardPanel);
+    rerollBtn.addEventListener("touchend", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      playClick();
+      this.rerollPreviewContracts();
+      this.renderContractsPreview();
+    }, { passive: false });
   }
 
   private rerollPreviewContracts(): void {
@@ -1365,7 +1408,8 @@ export class Game {
   }
 
   private renderContractsHud(): void {
-    this.contractsHudList.innerHTML = this.activeContracts
+    const heading = `<div class="hud-label" style="margin-bottom:4px;">CONTRACTS</div>`;
+    const rows = this.activeContracts
       .map((c) => {
         const tick = c.complete ? "✓" : "◯";
         const tickColor = c.complete ? "#9aff9a" : "#c7a271";
@@ -1375,7 +1419,7 @@ export class Game {
         const progressColor = c.complete ? "#9aff9a" : "#ffaa44";
         const pulseScale = c.celebrateTimer > 0 ? 1 + c.celebrateTimer * 0.2 : 1;
         return `
-          <div style="display:grid; grid-template-columns: 14px 1fr auto; gap:8px; align-items:baseline; font-size:11px; letter-spacing:0.8px; transform:scale(${pulseScale}); transform-origin:left center; transition: transform 120ms ease-out;">
+          <div class="hud-contract-row" style="transform:scale(${pulseScale}); transform-origin:left center; transition: transform 120ms ease-out;">
             <span style="color:${tickColor};">${tick}</span>
             <span style="color:${labelColor}; text-decoration:${labelDecoration}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.def.label)}</span>
             <span style="color:${progressColor}; font-weight:700; font-size:10px;">${progress}</span>
@@ -1383,12 +1427,13 @@ export class Game {
         `;
       })
       .join("");
+    this.contractsHudList.innerHTML = heading + rows;
   }
 
   private commitContractsForRun(): void {
     if (this.isDailyChallenge) {
       this.activeContracts = [];
-      this.contractsHudPanel.style.display = "none";
+      this.contractsHudPanel.classList.add("empty");
       return;
     }
     if (this.previewContracts.length === 0) {
@@ -1401,7 +1446,7 @@ export class Game {
       complete: false,
       celebrateTimer: 0,
     }));
-    this.contractsHudPanel.style.display = "block";
+    this.contractsHudPanel.classList.remove("empty");
     this.renderContractsHud();
   }
 
@@ -1539,6 +1584,9 @@ export class Game {
     this.dailyPreviousBest = null;
     this.sim.setSeed(this.regularSeed);
     this.state = GameState.Title;
+    // Dismissing the game-over overlay — flush any queued achievement
+    // unlocks as toasts so they can't be silently lost.
+    this.flushAchievementUnlockQueue();
     this.pauseOverlay.classList.add("hidden");
     this.hud.classList.add("hidden");
     this.gameOverCard.classList.add("hidden");
@@ -1597,10 +1645,10 @@ export class Game {
 
     // Hide the live HUD panel and show a fresh preview on the title screen.
     this.activeContracts = [];
-    this.contractsHudPanel.style.display = "none";
+    this.contractsHudPanel.classList.add("empty");
     this.rerollPreviewContracts();
     this.renderContractsPreview();
-    this.contractsPreviewPanel.style.display = "";
+    this.contractsPreviewPanel.classList.remove("hidden");
   }
 
   // -----------------------------------------------------------------------
@@ -1608,14 +1656,17 @@ export class Game {
   // -----------------------------------------------------------------------
 
   private setupMultiplayerUi(container: HTMLElement) {
+    const button = document.getElementById("title-btn-versus") as HTMLButtonElement | null;
+    if (!button) {
+      return;
+    }
     if (!this.multiplayer.isAvailable()) {
+      button.disabled = true;
+      button.setAttribute("aria-disabled", "true");
+      button.title = "Multiplayer unavailable in this build.";
       return;
     }
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "title-action-btn";
-    button.textContent = "MULTIPLAYER";
     Object.assign(button.style, {
       border: "1px solid rgba(127, 214, 255, 0.45)",
       background: "linear-gradient(180deg, rgba(14, 32, 46, 0.92), rgba(8, 16, 24, 0.82))",
@@ -1633,12 +1684,6 @@ export class Game {
       void this.openMultiplayerLobby();
     }, { passive: false });
     this.multiplayerButton = button;
-    const actions = document.getElementById("title-actions");
-    if (actions) {
-      actions.appendChild(button);
-    } else {
-      this.titlePrompt.insertAdjacentElement("afterend", button);
-    }
 
     const panel = document.createElement("div");
     Object.assign(panel.style, {
@@ -1998,12 +2043,11 @@ export class Game {
   private setupAIGhostButton(): void {
     const AI_GHOST_READY = true;
 
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "title-action-btn";
+    const btn = document.getElementById("title-btn-raceai") as HTMLButtonElement | null;
+    if (!btn) return;
     btn.textContent = AI_GHOST_READY
-      ? (this.aiGhostEnabled ? "AI GHOST: ON" : "RACE THE AI")
-      : "RACE THE AI · SOON";
+      ? (this.aiGhostEnabled ? "AI: ON" : "RACE AI")
+      : "RACE AI · SOON";
     Object.assign(btn.style, {
       border: "1px solid rgba(255, 196, 120, 0.45)",
       background: "linear-gradient(180deg, rgba(46, 32, 14, 0.92), rgba(24, 16, 8, 0.82))",
@@ -2013,12 +2057,6 @@ export class Game {
 
     if (!AI_GHOST_READY) {
       btn.disabled = true;
-      Object.assign(btn.style, {
-        opacity: "0.42",
-        cursor: "not-allowed",
-        filter: "grayscale(0.65)",
-        pointerEvents: "none",
-      } as CSSStyleDeclaration);
       btn.setAttribute("aria-disabled", "true");
       btn.title = "Race the AI is being re-tuned — coming back soon.";
     } else {
@@ -2035,15 +2073,6 @@ export class Game {
     }
 
     this.aiGhostButton = btn;
-
-    // Append into the title-actions column so it stacks under MULTIPLAYER.
-    const actions = document.getElementById("title-actions");
-    if (actions) {
-      actions.appendChild(btn);
-    } else {
-      const anchor = this.multiplayerButton ?? this.titlePrompt;
-      anchor.insertAdjacentElement("afterend", btn);
-    }
   }
 
   private async handleAIGhostButtonClick(): Promise<void> {
@@ -2389,6 +2418,7 @@ export class Game {
   }
 
   private startGame() {
+    const wasGameOver = this.state === GameState.GameOver;
     if (!this.isDailyChallenge) {
       this.dailyChallengeDate = utcDateKey();
       this.dailyPreviousBest = null;
@@ -2397,6 +2427,10 @@ export class Game {
     initAudio();
     playClick();
     this.resumeAnimationLoop();
+    if (wasGameOver) {
+      // Dismissing the game-over overlay — flush any queued unlocks.
+      this.flushAchievementUnlockQueue();
+    }
     this.state = GameState.Playing;
     this.runStartElapsedTime = this.elapsedTime;
     this.toastTimer = 0;
@@ -2435,7 +2469,7 @@ export class Game {
     this.resetContractRunCounters();
     this.commitContractsForRun();
     // Preview panel is a title-screen-only affordance; hide it during play.
-    this.contractsPreviewPanel.style.display = "none";
+    this.contractsPreviewPanel.classList.add("hidden");
 
     const { state, events } = this.sim.reset();
     this.consumeState(state);
@@ -2582,6 +2616,10 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.hideLandingCueHard();
+    // Fresh queue for this run's unlocks — any pending from a prior run
+    // should have been flushed already on dismiss, but guard just in case.
+    this.achievementUnlockQueue.length = 0;
+    this.renderGameOverUnlocks();
     // Stop adding new samples; existing trail fades out naturally over 600ms.
     this.trailSamplingActive = false;
     if (this.personalBestRing) {
@@ -2723,11 +2761,13 @@ export class Game {
       }
     }
 
+    this.renderGameOverContracts();
+
     // Surface a fresh preview for the next run.
-    this.contractsHudPanel.style.display = "none";
+    this.contractsHudPanel.classList.add("empty");
     this.rerollPreviewContracts();
     this.renderContractsPreview();
-    this.contractsPreviewPanel.style.display = "";
+    this.contractsPreviewPanel.classList.remove("hidden");
     this.renderLeaderboardList(
       this.gameOverLeaderboardContext,
       this.gameOverLeaderboardList,
@@ -3351,10 +3391,37 @@ export class Game {
     this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, targetCamY, followLerp);
     this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetCamZ, followLerp);
 
+    // Right-rail HUD: on wide viewports the HUD claims the right ~22%, so we
+    // aim the camera's look target to the right of the player. The camera
+    // then frames the player in the left ~78% (the playable area) instead of
+    // having the rail cover gameplay. Compute the offset in world units at
+    // the player's depth by projecting the desired NDC offset back to world.
+    let lookOffsetX = 0;
+    let lookOffsetZ = 0;
+    if (window.innerWidth >= 1280) {
+      // Aim ~22% of the view width to the right of the player in screen
+      // space. Convert to world units via fov + distance-to-player.
+      const distToPlayer = Math.hypot(
+        this.camera.position.x - playerX,
+        this.camera.position.y - playerY,
+        this.camera.position.z - playerZ
+      );
+      const halfViewWorld = Math.tan((this.camera.fov * Math.PI) / 360) * distToPlayer * this.camera.aspect;
+      const shiftWorld = halfViewWorld * 0.22; // push target ~22% of half-width right
+      // "Right" in world space, relative to camera: perpendicular to the
+      // camera→player vector in the XZ plane.
+      const dx = playerX - this.camera.position.x;
+      const dz = playerZ - this.camera.position.z;
+      const horizLen = Math.hypot(dx, dz) || 1;
+      // Right-hand perpendicular in XZ: (dz, -dx) normalized.
+      lookOffsetX = (dz / horizLen) * shiftWorld;
+      lookOffsetZ = (-dx / horizLen) * shiftWorld;
+    }
+
     this.cameraLookTarget.set(
-      playerX,
+      playerX + lookOffsetX,
       playerY + 1.3 + verticalLead * 0.35,
-      playerZ
+      playerZ + lookOffsetZ
     );
     this.camera.lookAt(this.cameraLookTarget);
 
@@ -4117,6 +4184,18 @@ export class Game {
   }
 
   private showAchievementToast(label: string) {
+    // While the game-over overlay is visible, suppress toasts (they would
+    // overlap the card) and render into the #gameover-unlocks row instead.
+    // Queue the label so we can re-emit as a toast when the overlay is
+    // dismissed — that way the unlock is never silently lost.
+    if (this.state === GameState.GameOver) {
+      if (!this.achievementUnlockQueue.includes(label)) {
+        this.achievementUnlockQueue.push(label);
+      }
+      this.renderGameOverUnlocks();
+      playAchievementUnlock();
+      return;
+    }
     this.hudToast.style.color = "#ffd080";
     this.hudToast.style.borderColor = "rgba(255, 196, 120, 0.45)";
     this.hudToast.style.background = "rgba(28, 18, 10, 0.88)";
@@ -4125,6 +4204,97 @@ export class Game {
     this.hudToast.style.opacity = "1";
     this.hudToast.style.transform = "translate(-50%, 0)";
     playAchievementUnlock();
+  }
+
+  private renderGameOverUnlocks(): void {
+    const el = document.getElementById("gameover-unlocks");
+    if (!el) return;
+    if (this.achievementUnlockQueue.length === 0) {
+      el.classList.add("hidden");
+      el.innerHTML = "";
+      return;
+    }
+    el.classList.remove("hidden");
+    const rows = this.achievementUnlockQueue
+      .map((label) => `
+        <div class="gameover-unlock-row">
+          <span style="color:#ffd35e;">⚙</span>
+          <span>${escapeHtml(label)}</span>
+        </div>
+      `)
+      .join("");
+    el.innerHTML = `
+      <div class="gameover-unlocks-heading">UNLOCKED THIS RUN</div>
+      ${rows}
+    `;
+  }
+
+  private renderGameOverContracts(): void {
+    const el = document.getElementById("gameover-contracts");
+    if (!el) return;
+    if (this.isDailyChallenge || this.activeContracts.length === 0) {
+      el.classList.add("hidden");
+      el.innerHTML = "";
+      return;
+    }
+    const completed = this.activeContracts.filter((c) => c.complete);
+    const incomplete = this.activeContracts.filter((c) => !c.complete);
+    const rows = [
+      ...completed.map((c) => `
+        <div class="gameover-contract-row complete">
+          <span style="color:#9aff9a;">✓</span>
+          <span style="color:#cfeed0; text-decoration:line-through;">${escapeHtml(c.def.label)}</span>
+          <span style="color:#9aff9a; font-weight:700;">+${c.def.reward}</span>
+        </div>
+      `),
+      ...incomplete.map((c) => `
+        <div class="gameover-contract-row">
+          <span style="color:#c7a271;">◯</span>
+          <span style="color:#f3d7b1;">${escapeHtml(c.def.label)}</span>
+          <span style="color:#c7a271; font-weight:700; font-size:10px;">${formatContractProgress(c)}</span>
+        </div>
+      `),
+    ].join("");
+    const bonusLine = this.contractBonus > 0
+      ? `<div class="gameover-contracts-bonus">CONTRACT BONUS · +${this.contractBonus}</div>`
+      : "";
+    el.classList.remove("hidden");
+    el.innerHTML = `
+      <div class="gameover-contracts-heading">RUN CONTRACTS · ${completed.length}/${this.activeContracts.length}</div>
+      ${rows}
+      ${bonusLine}
+    `;
+  }
+
+  private flushAchievementUnlockQueue(): void {
+    if (this.achievementUnlockQueue.length === 0) return;
+    // Re-emit each queued unlock as a toast with a stagger so they're
+    // readable. We deliberately do NOT gate on state here — the player has
+    // dismissed the overlay (returnToTitle or startGame), so toasts are
+    // appropriate for both Title and Playing states.
+    const queued = this.achievementUnlockQueue.slice();
+    this.achievementUnlockQueue.length = 0;
+    queued.forEach((label, index) => {
+      setTimeout(() => {
+        if (this.state === GameState.GameOver) {
+          // Somehow ended up back on game-over before flush completed —
+          // push back into the queue rather than dropping.
+          if (!this.achievementUnlockQueue.includes(label)) {
+            this.achievementUnlockQueue.push(label);
+          }
+          this.renderGameOverUnlocks();
+          return;
+        }
+        this.hudToast.style.color = "#ffd080";
+        this.hudToast.style.borderColor = "rgba(255, 196, 120, 0.45)";
+        this.hudToast.style.background = "rgba(28, 18, 10, 0.88)";
+        this.hudToast.textContent = `⚙ ACHIEVEMENT · ${label}`;
+        this.toastTimer = 2.0;
+        this.hudToast.style.opacity = "1";
+        this.hudToast.style.transform = "translate(-50%, 0)";
+        playAchievementUnlock();
+      }, index * 2300);
+    });
   }
 
   private showZoneAnnouncement(text: string) {
@@ -4298,6 +4468,7 @@ export class Game {
     this.renderer.setSize(width, height);
     this.composer.setSize(width, height);
     this.bloomPass.setSize(width, height);
+    this.applyHudRailState();
   }
 
   private pauseAnimationLoop() {

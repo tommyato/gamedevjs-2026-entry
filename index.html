@@ -151,9 +151,27 @@
       font-size: 10px;
       letter-spacing: 2.5px;
     }
+    #hud-contracts {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 196, 120, 0.18);
+      display: grid;
+      gap: 6px;
+    }
+    #hud-contracts.empty {
+      display: none;
+    }
+    .hud-contract-row {
+      display: grid;
+      grid-template-columns: 14px 1fr auto;
+      gap: 8px;
+      align-items: baseline;
+      font-size: 11px;
+      letter-spacing: 0.8px;
+    }
     #hud-powerups {
       position: absolute;
-      bottom: 96px;
+      bottom: 28px;
       left: 50%;
       transform: translateX(-50%);
       display: flex;
@@ -236,6 +254,50 @@
     #hud-double-jump-charges.empty .hud-powerup-count {
       color: #6a7782;
       text-shadow: none;
+    }
+
+    /* Right-rail HUD on wide viewports (>= 1280px). Stacks score / best /
+       bolts / combo / contracts / powerups in a 300px rail along the right
+       edge, leaving ~78% of the canvas to the gameplay (which the camera
+       offsets toward to keep the player centered in the playable area). */
+    @media (min-width: 1280px) {
+      body.hud-rail #hud {
+        padding: 0;
+      }
+      body.hud-rail .hud-panel {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        bottom: auto;
+        width: 300px;
+        min-width: 300px;
+        max-width: 300px;
+        padding: 18px 20px;
+        border-radius: 20px;
+      }
+      body.hud-rail #hud-powerups {
+        position: absolute;
+        top: auto;
+        bottom: 28px;
+        left: auto;
+        right: 16px;
+        transform: none;
+        width: 300px;
+        min-width: 300px;
+        max-width: 300px;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px 14px;
+      }
+      body.hud-rail .hud-powerup-slot {
+        min-width: 0;
+        width: 100%;
+      }
+      body.hud-rail #hud-controls {
+        left: 20px;
+        bottom: 20px;
+        max-width: calc(100vw - 340px);
+      }
     }
     #shield-save-overlay {
       position: absolute;
@@ -344,9 +406,10 @@
 
     #title-overlay {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
       box-sizing: border-box;
-      padding: 20px;
+      padding: 24px 20px 32px;
+      gap: 12px;
       overflow-x: hidden;
       overflow-y: auto;
       z-index: 20; pointer-events: auto;
@@ -355,11 +418,12 @@
     #title-overlay.game-over {
       background: rgba(0, 0, 0, 0.24);
       backdrop-filter: blur(6px);
+      justify-content: center;
     }
     #title-overlay h1 {
-      font-family: "Orbitron", ui-monospace, monospace; font-size: 56px; font-weight: 900;
+      font-family: "Orbitron", ui-monospace, monospace; font-size: clamp(36px, 5vw, 56px); font-weight: 900;
       color: #ffaa44; text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 40px rgba(255,170,68,0.3);
-      letter-spacing: 6px; margin-bottom: 16px; text-align: center;
+      letter-spacing: 6px; margin-bottom: 8px; text-align: center;
     }
     .title-copy-panel {
       display: flex;
@@ -369,10 +433,10 @@
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
       border-radius: 16px;
-      padding: 28px 40px;
+      padding: 20px 32px 18px;
       border: 1px solid rgba(255, 196, 120, 0.15);
       box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
-      margin-bottom: 12px;
+      width: min(520px, calc(100vw - 40px));
     }
     .leaderboard-panel {
       box-sizing: border-box;
@@ -381,22 +445,61 @@
       text-align: left;
     }
     .contracts-preview-panel {
-      width: min(360px, calc(100vw - 40px));
+      width: min(520px, calc(100vw - 40px));
+      padding: 14px 18px;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 196, 120, 0.22);
+      background: linear-gradient(180deg, rgba(32, 22, 14, 0.86), rgba(14, 10, 8, 0.74));
+      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.12);
+      backdrop-filter: blur(10px);
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      color: #f3d7b1;
+      pointer-events: auto;
+      text-align: left;
+    }
+    .contracts-preview-heading {
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: #c7a271;
+      margin-bottom: 10px;
+    }
+    .contracts-preview-list {
+      display: grid;
+      gap: 8px;
+    }
+    #title-contracts-reroll {
+      margin-top: 10px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 196, 120, 0.32);
+      background: linear-gradient(180deg, rgba(42, 28, 14, 0.94), rgba(18, 12, 6, 0.82));
+      color: #ffe19d;
+      cursor: pointer;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      pointer-events: auto;
     }
     .title-leaderboard-panel {
-      position: absolute;
-      right: 20px;
-      bottom: 24px;
-      width: min(340px, calc(100vw - 40px));
+      display: none;
+    }
+    #title-leaderboard-summary {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 12px;
+      color: #7fd6ff;
+      letter-spacing: 2px;
+      text-align: center;
+      min-height: 14px;
     }
     .game-over-leaderboard-panel {
       margin-top: 0;
       margin-bottom: 20px;
-      width: min(400px, calc(100vw - 40px));
+      width: min(520px, calc(100vw - 40px));
     }
     #title-overlay .tagline {
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 14px; color: #aabbcc;
-      letter-spacing: 4px; margin-bottom: 40px; text-align: center;
+      letter-spacing: 4px; text-align: center;
     }
     #title-best {
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
@@ -404,7 +507,6 @@
       color: #c7a271;
       letter-spacing: 3px;
       margin-top: 8px;
-      margin-bottom: 28px;
       text-align: center;
     }
     #title-actions {
@@ -412,7 +514,26 @@
       flex-direction: column;
       align-items: center;
       gap: 10px;
-      margin-top: 8px;
+      width: min(520px, calc(100vw - 40px));
+    }
+    .title-mode-row,
+    .title-tertiary-row {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+      width: 100%;
+    }
+    .title-mode-row .title-action-btn {
+      flex: 1 1 0;
+      min-width: 100px;
+    }
+    .title-tertiary-row .title-action-btn {
+      flex: 0 1 auto;
+      min-width: 140px;
+      font-size: 12px;
+      padding: 9px 22px;
+      letter-spacing: 3px;
     }
     .title-action-btn {
       width: min(280px, calc(100vw - 64px));
@@ -438,7 +559,19 @@
     .title-action-btn:active {
       transform: translateY(1px);
     }
+    .title-action-btn[disabled],
+    .title-action-btn[aria-disabled="true"] {
+      opacity: 0.42;
+      cursor: not-allowed;
+      filter: grayscale(0.65);
+      pointer-events: none;
+    }
+    .title-play-primary,
     #title-overlay .prompt {
+      width: min(320px, calc(100vw - 48px));
+      padding: 18px 36px;
+      font-size: 18px;
+      letter-spacing: 6px;
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
       color: #ffe1a9;
       border: 1px solid rgba(255, 196, 120, 0.55);
@@ -446,6 +579,7 @@
       box-shadow: 0 14px 32px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255, 226, 176, 0.22), 0 0 24px rgba(255, 170, 68, 0.22);
       animation: play-pulse 1.8s ease-in-out infinite;
     }
+    .title-play-primary:hover,
     #title-overlay .prompt:hover {
       background: linear-gradient(180deg, rgba(82, 54, 26, 0.98), rgba(40, 26, 14, 0.92));
       border-color: rgba(255, 220, 140, 0.85);
@@ -464,11 +598,11 @@
       animation: glow 1.2s ease-in-out infinite;
     }
     .game-over-card {
-      width: min(400px, calc(100vw - 40px));
-      max-width: min(400px, calc(100vw - 40px));
+      width: min(480px, calc(100vw - 40px));
+      max-width: min(480px, calc(100vw - 40px));
       margin-top: 8px;
-      margin-bottom: 24px;
-      padding: 18px 24px;
+      margin-bottom: 20px;
+      padding: 20px 26px;
       border-radius: 18px;
       border: 1px solid rgba(255, 196, 120, 0.18);
       background: linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62));
@@ -477,8 +611,9 @@
       text-align: left;
     }
     .game-over-layout {
-      display: grid;
-      gap: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
     }
     .stat-row {
       display: flex;
@@ -487,7 +622,7 @@
       gap: 16px;
     }
     .stat-row + .stat-row {
-      margin-top: 12px;
+      margin-top: 10px;
     }
     .stat-label {
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
@@ -512,219 +647,84 @@
       color: #ffaa44;
       text-shadow: 0 0 24px rgba(255,170,68,0.28);
     }
-    @media (min-aspect-ratio: 4/3) {
-      .game-over-card {
-        max-width: min(520px, calc(100vw - 40px));
-      }
-      .game-over-layout {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        column-gap: 18px;
-        row-gap: 8px;
-      }
-      .game-over-card .stat-row {
-        gap: 10px;
-      }
-      .game-over-card .stat-row + .stat-row {
-        margin-top: 0;
-      }
-      .game-over-card .stat-value {
-        font-size: 18px;
-      }
-      .game-over-card .stat-total {
-        grid-column: 1 / -1;
-      }
-      .game-over-card .stat-total .stat-value {
-        font-size: 22px;
-      }
-      #title-overlay h1 {
-        font-size: 44px;
-        margin-bottom: 10px;
-      }
-      #title-overlay .tagline {
-        margin-bottom: 24px;
-      }
+    #gameover-contracts {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 196, 120, 0.18);
+      background: rgba(32, 22, 14, 0.4);
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      color: #f3d7b1;
+      display: grid;
+      gap: 6px;
     }
-
-    @media (min-aspect-ratio: 16/10) {
-      #title-overlay {
-        display: grid;
-        grid-template-columns: minmax(260px, 320px) minmax(320px, 1fr) minmax(260px, 340px);
-        grid-template-areas:
-          "preview title leaderboard"
-          "preview gameover leaderboard"
-          "preview share leaderboard";
-        align-items: start;
-        align-content: start;
-        justify-items: stretch;
-        column-gap: 24px;
-        row-gap: 12px;
-        padding: 24px;
-      }
-      #title-overlay > .title-copy-panel {
-        grid-area: title;
-        justify-self: center;
-        width: min(420px, 100%);
-        margin-bottom: 0;
-      }
-      #title-overlay > .contracts-preview-panel {
-        grid-area: preview;
-        width: 100%;
-        margin-top: 0;
-        justify-self: start;
-        align-self: stretch;
-      }
-      #title-overlay > .title-leaderboard-panel,
-      #title-overlay > .game-over-leaderboard-panel {
-        grid-area: leaderboard;
-        position: static;
-        width: 100%;
-        margin: 0;
-        justify-self: end;
-        align-self: start;
-      }
-      #title-overlay > .game-over-card {
-        grid-area: gameover;
-        width: min(420px, 100%);
-        justify-self: center;
-        margin-bottom: 0;
-      }
-      #title-overlay > #share-score-btn {
-        grid-area: share;
-        justify-self: center;
-        margin-bottom: 0;
-      }
-      .game-over-card {
-        padding: 14px 20px;
-        margin-bottom: 16px;
-      }
-      .game-over-card .stat-row + .stat-row {
-        margin-top: 8px;
-      }
-      #title-overlay h1 {
-        font-size: 40px;
-        margin-bottom: 8px;
-      }
-      #title-overlay .tagline {
-        font-size: 12px;
-        margin-bottom: 18px;
-      }
+    #gameover-contracts.hidden {
+      display: none !important;
     }
-    @media (max-height: 820px) {
-      #title-overlay {
-        justify-content: flex-start;
-        align-content: start;
-        padding-top: 16px;
-        padding-bottom: 16px;
-      }
-      #title-overlay h1 {
-        font-size: 36px;
-        letter-spacing: 4px;
-        margin-bottom: 6px;
-      }
-      .title-copy-panel {
-        padding: 14px 24px;
-        margin-bottom: 6px;
-      }
-      #title-overlay .tagline {
-        margin-bottom: 12px;
-      }
-      #title-best {
-        margin-top: 4px;
-        margin-bottom: 10px;
-      }
-      #title-actions {
-        gap: 6px;
-        margin-top: 4px;
-      }
-      .title-action-btn {
-        padding: 8px 20px;
-        font-size: 12px;
-        letter-spacing: 3px;
-      }
-      .contracts-preview-panel {
-        width: min(360px, calc(100vw - 32px));
-        margin-top: 6px;
-        padding: 10px 14px;
-      }
-      .contracts-preview-panel > div:first-child {
-        margin-bottom: 6px !important;
-      }
-      .contracts-preview-panel > button {
-        margin-top: 8px !important;
-      }
-      .title-leaderboard-panel,
-      .game-over-leaderboard-panel {
-        position: static;
-        width: min(400px, calc(100vw - 32px));
-        margin: 6px 0 0;
-      }
-      .title-leaderboard-panel {
-        padding: 10px 14px;
-      }
-      .game-over-leaderboard-panel {
-        padding: 10px 14px;
-      }
-      .game-over-card {
-        width: min(400px, calc(100vw - 32px));
-        margin-top: 6px;
-        margin-bottom: 14px;
-        padding: 14px 18px;
-      }
-      .game-over-card .stat-row + .stat-row {
-        margin-top: 6px;
-      }
-      .game-over-card .stat-value {
-        font-size: 18px;
-      }
-      .game-over-card .stat-total {
-        margin-top: 10px;
-        padding-top: 10px;
-      }
-      .game-over-card .stat-total .stat-value {
-        font-size: 20px;
-      }
-      #share-score-btn {
-        margin-bottom: 16px;
-        padding: 8px 20px;
-        font-size: 12px;
-        letter-spacing: 2px;
-      }
+    .gameover-contracts-heading {
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      color: #c7a271;
+      margin-bottom: 4px;
     }
-    @media (min-aspect-ratio: 16/10) and (max-height: 820px) {
-      #title-overlay {
-        grid-template-columns: minmax(260px, 320px) minmax(320px, 1fr) minmax(260px, 340px);
-        grid-template-areas:
-          "preview title leaderboard"
-          "preview gameover leaderboard"
-          "preview share leaderboard";
-        column-gap: 16px;
-        row-gap: 10px;
-        padding: 16px 20px;
-      }
-      #title-overlay > .contracts-preview-panel {
-        width: 100%;
-        margin-top: 0;
-        padding: 10px 14px;
-      }
-      #title-overlay > .title-copy-panel {
-        width: min(420px, 100%);
-        margin-bottom: 0;
-      }
-      #title-overlay > .title-leaderboard-panel,
-      #title-overlay > .game-over-leaderboard-panel {
-        width: 100%;
-        margin: 0;
-      }
-      #title-overlay > .game-over-card {
-        width: min(420px, 100%);
-        margin-bottom: 0;
-      }
-      #title-overlay > #share-score-btn {
-        margin-bottom: 0;
-      }
-      .game-over-card {
-        padding: 14px 18px;
-      }
+    .gameover-contract-row {
+      display: grid;
+      grid-template-columns: 14px 1fr auto;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .gameover-contracts-bonus {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255, 196, 120, 0.18);
+      color: #ffaa44;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-align: center;
+    }
+    #gameover-unlocks {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 196, 120, 0.24);
+      background: linear-gradient(180deg, rgba(36, 26, 16, 0.78), rgba(18, 14, 10, 0.7));
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      color: #ffe1a9;
+      display: grid;
+      gap: 6px;
+    }
+    #gameover-unlocks.hidden {
+      display: none !important;
+    }
+    .gameover-unlocks-heading {
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      color: #ffd35e;
+      margin-bottom: 4px;
+    }
+    .gameover-unlock-row {
+      display: grid;
+      grid-template-columns: 14px 1fr;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .gameover-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+    .gameover-actions .title-action-btn {
+      width: auto;
+      min-width: 140px;
+      font-size: 12px;
+      padding: 10px 20px;
+      letter-spacing: 3px;
     }
     #share-score-btn {
       margin-bottom: 24px;
@@ -859,7 +859,8 @@
       background: linear-gradient(180deg, rgba(60, 42, 26, 0.95), rgba(28, 18, 10, 0.88));
       border-color: rgba(255, 196, 120, 0.55);
     }
-    #achievements-overlay {
+    #achievements-overlay,
+    #leaderboard-modal {
       position: absolute;
       inset: 0;
       z-index: 30;
@@ -871,7 +872,8 @@
       backdrop-filter: blur(8px);
       pointer-events: auto;
     }
-    .achievements-card {
+    .achievements-card,
+    .leaderboard-modal-card {
       width: min(720px, calc(100vw - 32px));
       max-height: min(82vh, 760px);
       padding: 24px 26px 22px;
@@ -885,21 +887,27 @@
       gap: 16px;
       pointer-events: auto;
     }
-    .achievements-head {
+    .leaderboard-modal-card {
+      overflow: auto;
+    }
+    .achievements-head,
+    .leaderboard-modal-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
       flex-wrap: wrap;
     }
-    .achievements-head h2 {
+    .achievements-head h2,
+    .leaderboard-modal-head h2 {
       font-family: "Orbitron", ui-monospace, monospace;
       font-size: 28px;
       letter-spacing: 4px;
       color: #7fd6ff;
       text-shadow: 0 0 22px rgba(127, 214, 255, 0.25);
     }
-    #achievements-close {
+    #achievements-close,
+    #leaderboard-modal-close {
       padding: 10px 18px;
       border-radius: 999px;
       border: 1px solid rgba(127, 214, 255, 0.34);
@@ -911,7 +919,8 @@
       letter-spacing: 2px;
       cursor: pointer;
     }
-    #achievements-close:hover {
+    #achievements-close:hover,
+    #leaderboard-modal-close:hover {
       border-color: rgba(127, 214, 255, 0.58);
       background: linear-gradient(180deg, rgba(26, 42, 58, 0.95), rgba(10, 18, 28, 0.88));
     }
@@ -970,6 +979,9 @@
     .achievement-row.locked .achievement-name {
       color: #8a9cac;
     }
+    #leaderboard-modal-body {
+      overflow: auto;
+    }
     .hidden { display: none !important; }
     @media (max-width: 720px) {
       .hud-panel {
@@ -1014,17 +1026,13 @@
       }
       .title-copy-panel {
         width: min(100vw - 32px, 420px);
-        padding: 24px 20px;
+        padding: 18px 20px;
       }
-      #title-best {
-        font-size: 11px;
-        letter-spacing: 2px;
-        margin-top: 8px;
-        margin-bottom: 24px;
-        padding: 0 24px;
+      .contracts-preview-panel {
+        width: min(100vw - 32px, 420px);
       }
       .game-over-card {
-        width: min(100vw - 32px, 400px);
+        width: min(100vw - 32px, 420px);
         margin-bottom: 20px;
         padding: 16px 18px;
       }
@@ -1071,13 +1079,21 @@
       .menu-action-row .title-action-btn {
         min-width: min(260px, calc(100vw - 64px));
       }
-      .achievements-card {
+      .achievements-card,
+      .leaderboard-modal-card {
         width: min(100vw - 24px, 560px);
         padding: 20px 18px 18px;
       }
-      .achievements-head h2 {
+      .achievements-head h2,
+      .leaderboard-modal-head h2 {
         font-size: 22px;
         letter-spacing: 3px;
+      }
+      .title-mode-row {
+        flex-wrap: wrap;
+      }
+      .title-mode-row .title-action-btn {
+        flex: 1 1 calc(50% - 10px);
       }
     }
   </style>
@@ -1123,6 +1139,7 @@
         <div id="hud-status">NEXT 25m</div>
         <div id="hud-combo"></div>
         <div id="hud-ai-badge" class="hidden">RACING AI</div>
+        <div id="hud-contracts" class="empty"></div>
       </div>
       <div id="hud-powerups">
         <div id="hud-shield-count" class="hud-powerup-slot empty">
@@ -1155,11 +1172,25 @@
     <div id="title-overlay">
       <div class="title-copy-panel">
         <h1>CLOCKWORK CLIMB</h1>
-        <div class="tagline">GAMEDEV.JS JAM 2026 — Theme: MACHINES</div>
+        <div class="tagline">GAMEDEV.JS JAM 2026 · MACHINES</div>
         <div id="title-best" class="hidden"></div>
-        <div id="title-actions">
-          <button type="button" class="prompt title-action-btn">PLAY</button>
-          <button type="button" class="title-action-btn" id="achievements-btn">ACHIEVEMENTS</button>
+      </div>
+      <div class="contracts-preview-panel" id="title-contracts-preview">
+        <div class="contracts-preview-heading">RUN CONTRACTS · BONUSES ON COMPLETION</div>
+        <div class="contracts-preview-list"></div>
+        <button type="button" id="title-contracts-reroll">REROLL</button>
+      </div>
+      <div id="title-actions">
+        <button type="button" class="prompt title-action-btn title-play-primary" id="title-play-btn">PLAY</button>
+        <div class="title-mode-row">
+          <button type="button" class="title-action-btn" id="title-btn-daily">DAILY</button>
+          <button type="button" class="title-action-btn" id="title-btn-raceai">RACE AI</button>
+          <button type="button" class="title-action-btn" id="title-btn-versus">VERSUS</button>
+        </div>
+        <div id="title-leaderboard-summary"></div>
+        <div class="title-tertiary-row">
+          <button type="button" class="title-action-btn" id="title-btn-achievements">ACHIEVEMENTS</button>
+          <button type="button" class="title-action-btn" id="title-btn-leaderboard">LEADERBOARD</button>
         </div>
       </div>
       <div class="game-over-card game-over-layout hidden">
@@ -1170,7 +1201,12 @@
         <div class="stat-row"><span class="stat-label">TIME</span><span class="stat-value" id="go-time"></span></div>
         <div class="stat-row hidden" id="go-contracts-row"><span class="stat-label">CONTRACT BONUS</span><span class="stat-value" id="go-contracts"></span></div>
         <div class="stat-row stat-total"><span class="stat-label">TOTAL SCORE</span><span class="stat-value" id="go-total"></span></div>
-        <div class="menu-action-row">
+        <div id="gameover-contracts" class="hidden"></div>
+        <div id="gameover-unlocks" class="hidden"></div>
+        <div class="gameover-actions">
+          <button id="gameover-achievements" type="button" class="title-action-btn">ACHIEVEMENTS</button>
+          <button id="gameover-leaderboard" type="button" class="title-action-btn">LEADERBOARD</button>
+          <button id="gameover-play-again" type="button" class="title-action-btn">PLAY AGAIN</button>
           <button id="gameover-title" type="button" class="title-action-btn">TITLE SCREEN</button>
         </div>
       </div>
@@ -1184,6 +1220,15 @@
         </div>
         <div id="achievements-summary"></div>
         <div id="achievements-list"></div>
+      </div>
+    </div>
+    <div id="leaderboard-modal" class="hidden" aria-hidden="true">
+      <div class="leaderboard-modal-card">
+        <div class="leaderboard-modal-head">
+          <h2>LEADERBOARD</h2>
+          <button id="leaderboard-modal-close" type="button">CLOSE</button>
+        </div>
+        <div id="leaderboard-modal-body"></div>
       </div>
     </div>
   </div>
