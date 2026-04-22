@@ -1145,10 +1145,18 @@ export class Game {
   }
 
   private setupAIGhostButton(): void {
+    // FIXME: the AI ghost renders its own (seed=42) sim parallel to the
+    // player's run, and in practice the ghost mesh doesn't reliably appear.
+    // Disable the button until the feature is fixed so the title screen
+    // doesn't advertise something that looks like "just the normal game".
+    const AI_GHOST_READY = false;
+
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "title-action-btn";
-    btn.textContent = this.aiGhostEnabled ? "AI GHOST: ON" : "RACE THE AI";
+    btn.textContent = AI_GHOST_READY
+      ? (this.aiGhostEnabled ? "AI GHOST: ON" : "RACE THE AI")
+      : "RACE THE AI · SOON";
     Object.assign(btn.style, {
       border: "1px solid rgba(255, 196, 120, 0.45)",
       background: "linear-gradient(180deg, rgba(46, 32, 14, 0.92), rgba(24, 16, 8, 0.82))",
@@ -1156,16 +1164,28 @@ export class Game {
       color: "#ffe1a9",
     } as CSSStyleDeclaration);
 
-    btn.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void this.handleAIGhostButtonClick();
-    });
-    btn.addEventListener("touchend", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void this.handleAIGhostButtonClick();
-    }, { passive: false });
+    if (!AI_GHOST_READY) {
+      btn.disabled = true;
+      Object.assign(btn.style, {
+        opacity: "0.42",
+        cursor: "not-allowed",
+        filter: "grayscale(0.65)",
+        pointerEvents: "none",
+      } as CSSStyleDeclaration);
+      btn.setAttribute("aria-disabled", "true");
+      btn.title = "Race the AI is being re-tuned — coming back soon.";
+    } else {
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.handleAIGhostButtonClick();
+      });
+      btn.addEventListener("touchend", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.handleAIGhostButtonClick();
+      }, { passive: false });
+    }
 
     this.aiGhostButton = btn;
 
