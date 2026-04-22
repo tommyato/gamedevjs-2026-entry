@@ -3,10 +3,17 @@ import * as THREE from "three";
 export const TOP_DOWN_SHADOW_LAYER = 1;
 const SHADOW_MAP_SIZE = 1024;
 const SHADOW_FRUSTUM_HALF = 16;
-const SHADOW_CAMERA_HEIGHT = 22;
-const SHADOW_CAMERA_LOOK_OFFSET = 3;
-const SHADOW_NEAR = 1;
-const SHADOW_FAR = 36;
+// Gears are ~2.5u apart vertically on average (difficulty bands verticalMin/Max: 1.4–3.0).
+// We only want shadows from gears "directly above and vertically near" — roughly 2× that
+// spacing. Tight Y bounds also prevent gears far above/below from bleeding into the depth
+// map (which was producing phantom shadows on gears from off-screen casters above, and
+// could produce order-dependent artifacts from gears below).
+const SHADOW_CAMERA_HEIGHT = 6;
+const SHADOW_CAMERA_LOOK_OFFSET = 0;
+const SHADOW_NEAR = 0.1;
+// Covers roughly [player.y + 5.9, player.y − 2]: gears up to ~6u above cast, receivers
+// down to the gear the player is standing on (~0.5u below feet) get shaded.
+const SHADOW_FAR = 8;
 const SHADOW_DARKNESS = 0.48;
 
 export type TopDownShadowUniforms = {
