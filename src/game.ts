@@ -556,6 +556,7 @@ export class Game {
   private windParticleTimer = 0;
   private magnetParticleTimer = 0;
   private gearFreezeParticleTimer = 0;
+  private trailWispTimer = 0;
   private gearFreezeActive = false;
   private personalBestHeight = 0;
   private personalBestReachedThisRun = false;
@@ -2454,6 +2455,7 @@ export class Game {
     this.windParticleTimer = 0;
     this.magnetParticleTimer = 0;
     this.gearFreezeParticleTimer = 0;
+    this.trailWispTimer = 0;
     this.gearFreezeActive = false;
     this.personalBestReachedThisRun = false;
     this.inChallengeZone = false;
@@ -2557,7 +2559,7 @@ export class Game {
     this.updateWorld(dt);
     this.updateCamera(dt, state);
     this.updateLandingCue(state, dt);
-    // Trail sampling removed - particles now spawn on jump/landing events
+    this.updateAirborneTrail(dt, state);
     this.updatePersonalBestRing(state.player.y);
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
@@ -4358,6 +4360,19 @@ export class Game {
   private triggerShieldSaveFlash() {
     this.shieldSaveFlashTimer = 0.8;
     this.shieldSaveOverlay.style.opacity = "0.5";
+  }
+
+  private updateAirborneTrail(dt: number, state: SimState) {
+    if (!state.player.onGround) {
+      this.trailWispTimer -= dt;
+      if (this.trailWispTimer <= 0) {
+        this.trailWispTimer = 0.07;
+        this.landingEffectPosition.set(state.player.x, state.player.y, state.player.z);
+        this.particles.spawnTrailWisp(this.landingEffectPosition);
+      }
+    } else {
+      this.trailWispTimer = 0;
+    }
   }
 
   private updateSteam(dt: number) {

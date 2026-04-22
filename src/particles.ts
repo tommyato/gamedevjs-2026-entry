@@ -1,12 +1,13 @@
 import * as THREE from "three";
 import { Gear, type GearVariant } from "./gear";
 
-type ParticleKind = "dust" | "spark" | "ambient" | "steam" | "confetti" | "magnet";
+type ParticleKind = "dust" | "spark" | "ambient" | "steam" | "confetti" | "magnet" | "trail";
 
 type Particle = {
   active: boolean;
   drag: number;
   gravity: number;
+  initialScale: THREE.Vector3;
   kind: ParticleKind;
   life: number;
   maxLife: number;
@@ -58,6 +59,7 @@ export class ParticleSystem {
         active: false,
         drag: 0,
         gravity: 0,
+        initialScale: new THREE.Vector3(),
         kind: "dust",
         life: 0,
         maxLife: 0,
@@ -115,8 +117,18 @@ export class ParticleSystem {
 
       const material = particle.mesh.material;
       if (material instanceof THREE.MeshBasicMaterial) {
-        const fade = 1 - particle.life / particle.maxLife;
-        material.opacity = particle.kind === "steam" ? fade * 0.55 : fade;
+        const t = particle.life / particle.maxLife;
+        const fade = 1 - t;
+        if (particle.kind === "trail") {
+          // Scale expands 1.0 → 1.5× over lifetime
+          const scaleFactor = 1 + t * 0.5;
+          particle.mesh.scale.copy(particle.initialScale).multiplyScalar(scaleFactor);
+          material.opacity = fade * 0.7;
+        } else if (particle.kind === "steam") {
+          material.opacity = fade * 0.55;
+        } else {
+          material.opacity = fade;
+        }
       }
     }
   }
@@ -551,6 +563,49 @@ export class ParticleSystem {
     this.setMaterial(particle, 0xd8d4cf, 0.32);
   }
 
+  spawnTrailWisp(position: THREE.Vector3) {
+    // Cap active trail wisps at 40 to bound memory/draw cost
+    let activeTrailCount = 0;
+    for (const p of this.particles) {
+      if (p.active && p.kind === "trail") {
+        activeTrailCount += 1;
+      }
+    }
+    if (activeTrailCount >= 40) {
+      return;
+    }
+
+    const particle = this.acquire();
+    if (!particle) {
+      return;
+    }
+
+    // Slight lateral jitter so wisps don't form a stiff line
+    const jitterX = (Math.random() - 0.5) * 0.1;
+    const jitterZ = (Math.random() - 0.5) * 0.1;
+
+    particle.kind = "trail";
+    particle.life = 0;
+    particle.maxLife = 0.85 + Math.random() * 0.1;
+    particle.drag = 0.05;
+    particle.gravity = 0;
+    particle.mesh.visible = true;
+    particle.mesh.position.set(position.x + jitterX, position.y, position.z + jitterZ);
+
+    // Drift upward at ~0.4 u/s in world space — anchored, player moves past them
+    particle.velocity.set(0, 0.4, 0);
+
+    // ~60-70% of jumpSteam scale (0.2–0.3 → trail is 0.12–0.18)
+    const baseScale = 0.12 + Math.random() * 0.06;
+    this.scale.setScalar(baseScale);
+    particle.mesh.scale.copy(this.scale);
+    particle.initialScale.copy(this.scale);
+
+    // Warm cream core (#f5e6c8) with faint brass edge tint (#caa25a), additive blend
+    const colorHex = Math.random() > 0.4 ? 0xf5e6c8 : 0xcaa25a;
+    this.setMaterial(particle, colorHex, 0.7, THREE.AdditiveBlending);
+  }
+
   private acquire(): Particle | null {
     for (const particle of this.particles) {
       if (!particle.active) {
@@ -562,7 +617,12 @@ export class ParticleSystem {
     return null;
   }
 
-  private setMaterial(particle: Particle, colorHex: number, opacity: number) {
+  private setMaterial(
+    particle: Particle,
+    colorHex: number,
+    opacity: number,
+    blending: THREE.Blending = THREE.NormalBlending
+  ) {
     const material = particle.mesh.material;
     if (!(material instanceof THREE.MeshBasicMaterial)) {
       return;
@@ -571,5 +631,9 @@ export class ParticleSystem {
     this.color.setHex(colorHex);
     material.color.copy(this.color);
     material.opacity = opacity;
+    if (material.blending !== blending) {
+      material.blending = blending;
+      material.needsUpdate = true;
+    }
   }
 }
