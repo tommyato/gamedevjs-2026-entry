@@ -2068,6 +2068,7 @@ export class Game {
       this.titleTagline.classList.remove("new-best");
     }
     this.titlePrompt.textContent = "RESTART";
+    this.titleActions.classList.add("hidden");
 
     const gameSeconds = Math.floor(state.gameTime);
     this.gameOverHeightEl.textContent = String(this.heightScore);
@@ -2994,6 +2995,7 @@ export class Game {
       this.titleBest.classList.add("hidden");
     }
     this.titlePrompt.textContent = "PLAY";
+    this.titleActions.classList.remove("hidden");
     this.shareScoreBtn.classList.add("hidden");
     this.hudControls.textContent = this.input.isTouchDevice()
       ? "LEFT JOYSTICK TO MOVE · JUMP TO LEAP"
