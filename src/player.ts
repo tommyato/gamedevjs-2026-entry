@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { Input } from "./input";
+import { createWindUpAutomaton, type WindUpAutomaton } from "./characters/wind-up-automaton";
 import { applyTopDownShadowToObject, type TopDownShadowUniforms } from "./shadow";
 
 export type PlayerUpdateResult = {
@@ -16,10 +17,13 @@ export class Player {
   private readonly moveSpeed = 5;
   public highestY = 0;
   private readonly visualRoot = new THREE.Group();
+  private readonly automaton: WindUpAutomaton;
   private readonly doubleJumpAura: THREE.Mesh;
   private readonly shieldAura: THREE.Mesh;
   private scaleYImpulse = 0;
   private scaleImpulseDecayRate = 12;
+  private landingPoseTimer = 0;
+  private landingPoseStrength = 0;
   private speedBoostTimer = 0;
   private speedBoostStrength = 1;
   private doubleJumpCharges = 0;
@@ -31,35 +35,9 @@ export class Player {
   constructor() {
     this.mesh.add(this.visualRoot);
 
-    // Body
-    const bodyGeo = new THREE.CylinderGeometry(this.radius, this.radius, this.height, 12);
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0xcd7f32, // Bronze
-      metalness: 0.9,
-      roughness: 0.22
-    });
-    this.bodyMaterial = bodyMat;
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.position.y = this.height / 2;
-    this.visualRoot.add(body);
-
-    // Eyes
-    const eyeGeo = new THREE.SphereGeometry(0.05, 8, 8);
-    const eyeMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 1.5,
-      metalness: 0.1,
-      roughness: 0.15
-    });
-
-    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-    leftEye.position.set(-0.1, 0.45, 0.25);
-    this.visualRoot.add(leftEye);
-
-    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-    rightEye.position.set(0.1, 0.45, 0.25);
-    this.visualRoot.add(rightEye);
+    this.automaton = createWindUpAutomaton();
+    this.bodyMaterial = this.automaton.bodyMaterial;
+    this.visualRoot.add(this.automaton.group);
 
     const auraGeo = new THREE.TorusGeometry(0.48, 0.05, 8, 18);
     const auraMat = new THREE.MeshBasicMaterial({
@@ -69,7 +47,7 @@ export class Player {
       depthWrite: false,
     });
     const aura = new THREE.Mesh(auraGeo, auraMat);
-    aura.position.y = 0.42;
+    aura.position.y = 0.5;
     aura.rotation.x = Math.PI / 2;
     aura.visible = false;
     aura.userData.skipTopDownShadowCaster = true;
@@ -85,7 +63,7 @@ export class Player {
       blending: THREE.AdditiveBlending,
     });
     const shieldAura = new THREE.Mesh(shieldGeo, shieldMat);
-    shieldAura.position.y = 0.38;
+    shieldAura.position.y = 0.44;
     shieldAura.visible = false;
     shieldAura.userData.skipTopDownShadowCaster = true;
     this.shieldAura = shieldAura;
@@ -132,6 +110,8 @@ export class Player {
       this.velocity.y = 12;
       this.onGround = false;
       this.scaleYImpulse = 0.35;
+      this.landingPoseTimer = 0;
+      this.landingPoseStrength = 0;
       jumped = true;
     }
 
@@ -151,7 +131,37 @@ export class Player {
     const airborneScaleY = verticalVelocityFactor > 0
       ? verticalVelocityFactor * 0.25
       : verticalVelocityFactor * 0.18;
-    const targetScaleY = 1 + airborneScaleY + this.scaleYImpulse;
+    const jumpLift = THREE.MathUtils.smoothstep(THREE.MathUtils.clamp(this.velocity.y / 12, 0, 1), 0, 1);
+    const jumpPose = jumpLift * 0.05;
+
+    if (this.landingPoseTimer > 0) {
+      this.landingPoseTimer = Math.max(0, this.landingPoseTimer - dt);
+    }
+    const landingT = this.landingPoseStrength > 0 && this.landingPoseTimer > 0
+      ? 1 - this.landingPoseTimer / 0.24
+      : 0;
+    const landingPose = this.landingPoseStrength > 0 && this.landingPoseTimer > 0
+      ? this.landingPoseStrength * (1 - (1 - landingT) * (1 - landingT))
+      : 0;
+    if (this.landingPoseTimer === 0) {
+      this.landingPoseStrength = 0;
+    }
+
+    // Feed the body state to the automaton so the feet articulate:
+    // toes point down while rising, flatten & splay on landing.
+    // While airborne falling (velocity < 0), the feet gently relax back — the
+    // jumpAmount dips toward 0, not negative, so we don't double-up with landingPose.
+    const jumpAmount = this.onGround
+      ? 0
+      : this.velocity.y > 0
+        ? jumpLift
+        : Math.max(0, 1 + verticalVelocityFactor); // fades from 1 (apex) to 0 (fast fall)
+    this.automaton.update(dt, {
+      jumpAmount,
+      landAmount: landingPose,
+    });
+
+    const targetScaleY = 1 + airborneScaleY + this.scaleYImpulse + jumpPose - landingPose * 0.08;
     const targetScaleXZ = 1 - (targetScaleY - 1) * 0.55;
     const scaleLerp = 1 - Math.exp(-dt * 18);
     this.visualRoot.scale.x = THREE.MathUtils.lerp(this.visualRoot.scale.x, targetScaleXZ, scaleLerp);
@@ -169,6 +179,18 @@ export class Player {
       this.visualRoot.rotation.z,
       targetLean,
       1 - Math.exp(-dt * 10)
+    );
+    const targetPitch = jumpLift > 0 ? -jumpLift * 0.08 : landingPose * 0.16;
+    this.visualRoot.rotation.x = THREE.MathUtils.lerp(
+      this.visualRoot.rotation.x,
+      targetPitch,
+      1 - Math.exp(-dt * 12)
+    );
+    const targetYOffset = jumpPose * 0.22 - landingPose * 0.18;
+    this.visualRoot.position.y = THREE.MathUtils.lerp(
+      this.visualRoot.position.y,
+      targetYOffset,
+      1 - Math.exp(-dt * 14)
     );
 
     const auraMaterial = this.doubleJumpAura.material as THREE.MeshBasicMaterial;
@@ -233,6 +255,8 @@ export class Player {
   land(impactSpeed: number) {
     this.scaleYImpulse = -THREE.MathUtils.clamp(impactSpeed * 0.04, 0.12, 0.32);
     this.scaleImpulseDecayRate = 12;
+    this.landingPoseTimer = 0.24;
+    this.landingPoseStrength = THREE.MathUtils.clamp(impactSpeed * 0.018, 0.45, 1);
   }
 
   // Visual boost for launches off bouncy gears: stronger stretch (~1.45× effective peak
@@ -274,12 +298,15 @@ export class Player {
     this.prevY = y;
     this.scaleYImpulse = 0;
     this.scaleImpulseDecayRate = 12;
+    this.landingPoseTimer = 0;
+    this.landingPoseStrength = 0;
     this.speedBoostTimer = 0;
     this.speedBoostStrength = 1;
     this.doubleJumpCharges = 0;
     this.doubleJumpPulse = 0;
     this.visualRoot.scale.setScalar(1);
     this.visualRoot.rotation.set(0, 0, 0);
+    this.visualRoot.position.set(0, 0, 0);
     this.resetVisuals();
     this.doubleJumpAura.visible = false;
     this.doubleJumpAura.scale.setScalar(1);

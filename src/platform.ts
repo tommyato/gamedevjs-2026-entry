@@ -1,3 +1,5 @@
+import achievementCatalog from "../wavedash-achievements.json";
+
 type WavedashP2POptions = {
   maxPeers?: number;
   messageSize?: number;
@@ -59,6 +61,12 @@ type WavedashLeaderboardQueryResponse =
   | WavedashLeaderboardData;
 
 export type LeaderboardSlug = "high-score" | "highest-climb" | "best-combo";
+export type AchievementProgress = {
+  id: string;
+  displayName: string;
+  description: string;
+  unlocked: boolean;
+};
 
 interface WavedashSdk {
   init(options: WavedashInitOptions): void;
@@ -182,6 +190,26 @@ function getStorage(): Storage | null {
   return window.localStorage;
 }
 
+function isLocalAchievementUnlocked(id: string): boolean {
+  const storage = getStorage();
+  if (!storage) {
+    return false;
+  }
+
+  // In-game achievement calls historically used UPPERCASE ids (e.g.
+  // `unlockAchievement("FIRST_CLIMB")`), while the wavedash manifest uses
+  // lowercase identifiers (`first_climb`). Check both so the achievements
+  // panel doesn't report a locally-unlocked achievement as locked.
+  try {
+    if (storage.getItem(`ach_${id}`) === "1") return true;
+    if (storage.getItem(`ach_${id.toUpperCase()}`) === "1") return true;
+    if (storage.getItem(`ach_${id.toLowerCase()}`) === "1") return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export async function platformInit() {
   const wavedash = await resolveWavedashSdk();
   if (!wavedash) {
@@ -256,6 +284,31 @@ export async function signalLoadComplete() {
   }
 
   wavedash.loadComplete();
+}
+
+export function listAchievementProgress(): AchievementProgress[] {
+  const sdk = getWavedashSdkSync();
+
+  return achievementCatalog.achievements.map((entry) => {
+    const unlocked = (() => {
+      if (sdk && typeof sdk.getAchievement === "function") {
+        try {
+          return sdk.getAchievement(entry.identifier);
+        } catch {
+          return false;
+        }
+      }
+
+      return isLocalAchievementUnlocked(entry.identifier);
+    })();
+
+    return {
+      id: entry.identifier,
+      displayName: entry.display_name,
+      description: entry.description,
+      unlocked,
+    };
+  });
 }
 
 export function signalFirstFrame() {
@@ -344,6 +397,19 @@ export function unlockAchievement(id: string): boolean {
     localStorage.setItem(key, "1");
     return true;
   } catch { return false; }
+}
+
+export function hasAchievement(id: string): boolean {
+  const sdk = getWavedashSdkSync();
+  if (sdk && typeof sdk.getAchievement === "function") {
+    try {
+      return Boolean(sdk.getAchievement(id));
+    } catch {
+      return false;
+    }
+  }
+
+  return isLocalAchievementUnlocked(id);
 }
 
 export function updateStat(id: string, value: number) {

@@ -35,6 +35,7 @@ import {
   getStat,
   getUsername,
   isAudioEnabled,
+  listAchievementProgress,
   loadSaveData,
   onAudioChange,
   platformInit,
@@ -49,6 +50,7 @@ import {
   updateStat,
   writeSaveData,
 } from "./platform";
+import type { AchievementProgress } from "./platform";
 import { AIGhost, isAIGhostEnabled } from "./ai-ghost";
 import { MultiplayerManager, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
@@ -132,6 +134,12 @@ type LeaderboardDisplayEntry = {
   rank: number;
 };
 
+type AchievementCatalogEntry = {
+  id: string;
+  title: string;
+  description: string;
+};
+
 const DEFAULT_SAVE_DATA: SaveData = {
   bestScore: 0,
   bestHeight: 0,
@@ -177,6 +185,7 @@ export class Game {
 
   private hud!: HTMLElement;
   private titleOverlay!: HTMLElement;
+  private titleActions!: HTMLElement;
   private hudScore!: HTMLElement;
   private hudBest!: HTMLElement;
   private hudBolts!: HTMLElement;
@@ -205,6 +214,11 @@ export class Game {
   private titlePrompt!: HTMLElement;
   private gameOverCard!: HTMLElement;
   private shareScoreBtn!: HTMLButtonElement;
+  private achievementsButton: HTMLButtonElement | null = null;
+  private achievementsPanel: HTMLDivElement | null = null;
+  private titleBackButton: HTMLButtonElement | null = null;
+  private pauseTitleBtn: HTMLButtonElement | null = null;
+  private achievementCatalog: AchievementCatalogEntry[] = [];
   private gameOverHeightEl!: HTMLElement;
   private gameOverBoltsEl!: HTMLElement;
   private gameOverBoltCountEl!: HTMLElement;
@@ -216,9 +230,11 @@ export class Game {
   private pauseBtn!: HTMLElement;
   private titleLeaderboardPanel!: HTMLElement;
   private titleLeaderboardContext!: HTMLElement;
+  private titleLeaderboardThreshold!: HTMLElement;
   private titleLeaderboardList!: HTMLElement;
   private gameOverLeaderboardPanel!: HTMLElement;
   private gameOverLeaderboardContext!: HTMLElement;
+  private gameOverLeaderboardThreshold!: HTMLElement;
   private gameOverLeaderboardList!: HTMLElement;
 
   private readonly player = new Player();
@@ -517,6 +533,7 @@ export class Game {
     const heading = this.titleOverlay.querySelector("h1");
     const tagline = this.titleOverlay.querySelector(".tagline");
     const titleBest = document.getElementById("title-best");
+    const titleActions = document.getElementById("title-actions");
     const prompt = this.titleOverlay.querySelector(".prompt");
     const gameOverCard = this.titleOverlay.querySelector(".game-over-card");
     const shareScoreBtn = document.getElementById("share-score-btn");
@@ -530,6 +547,7 @@ export class Game {
       !heading ||
       !tagline ||
       !titleBest ||
+      !titleActions ||
       !prompt ||
       !gameOverCard ||
       !shareScoreBtn ||
@@ -546,6 +564,7 @@ export class Game {
     this.titleHeading = heading as HTMLElement;
     this.titleTagline = tagline as HTMLElement;
     this.titleBest = titleBest;
+    this.titleActions = titleActions;
     this.titlePrompt = prompt as HTMLElement;
     this.gameOverCard = gameOverCard as HTMLElement;
     this.shareScoreBtn = shareScoreBtn as HTMLButtonElement;
@@ -594,13 +613,16 @@ export class Game {
       }
     });
 
+    const isPauseActionTarget = (target: HTMLElement | null) =>
+      Boolean(target && (target.closest("#pause-restart") || target.closest("#pause-title") || target.closest("button")));
+
     this.pauseOverlay.addEventListener("click", (event) => {
-      if (!(event.target as HTMLElement).closest("#pause-restart")) {
+      if (!isPauseActionTarget(event.target as HTMLElement)) {
         this.resumeGame();
       }
     });
     this.pauseOverlay.addEventListener("touchend", (event) => {
-      if (!(event.target as HTMLElement).closest("#pause-restart")) {
+      if (!isPauseActionTarget(event.target as HTMLElement)) {
         event.preventDefault();
         this.resumeGame();
       }
@@ -611,6 +633,25 @@ export class Game {
       event.stopPropagation();
       this.startGame();
     });
+
+    const pauseTitleBtn = document.getElementById("pause-title") as HTMLButtonElement | null;
+    if (pauseTitleBtn) {
+      pauseTitleBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.returnToTitle();
+      });
+      this.pauseTitleBtn = pauseTitleBtn;
+    }
+
+    const gameOverTitleBtn = document.getElementById("gameover-title") as HTMLButtonElement | null;
+    if (gameOverTitleBtn) {
+      gameOverTitleBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.returnToTitle();
+      });
+    }
 
     this.pauseBtn.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -651,6 +692,8 @@ export class Game {
     this.buildBackgroundAtmosphere(this.getMaxGearHeight(state) + 24);
     this.buildTitleBackdrop();
     await this.refreshLeaderboardPanels();
+    this.setupAchievementsUi();
+    void this.loadAchievementCatalog();
     this.setupMultiplayerUi(container);
     this.initAIGhost();
     this.setupAIGhostButton();
@@ -672,6 +715,7 @@ export class Game {
   private createLeaderboardPanels() {
     this.titleLeaderboardPanel = this.buildLeaderboardPanel("TOP 10 SCORES");
     this.titleLeaderboardContext = this.titleLeaderboardPanel.querySelector("[data-role='context']") as HTMLElement;
+    this.titleLeaderboardThreshold = this.titleLeaderboardPanel.querySelector("[data-role='threshold']") as HTMLElement;
     this.titleLeaderboardList = this.titleLeaderboardPanel.querySelector("[data-role='list']") as HTMLElement;
     this.titleLeaderboardPanel.style.position = "absolute";
     this.titleLeaderboardPanel.style.right = "20px";
@@ -681,6 +725,7 @@ export class Game {
 
     this.gameOverLeaderboardPanel = this.buildLeaderboardPanel("RUN CONTEXT");
     this.gameOverLeaderboardContext = this.gameOverLeaderboardPanel.querySelector("[data-role='context']") as HTMLElement;
+    this.gameOverLeaderboardThreshold = this.gameOverLeaderboardPanel.querySelector("[data-role='threshold']") as HTMLElement;
     this.gameOverLeaderboardList = this.gameOverLeaderboardPanel.querySelector("[data-role='list']") as HTMLElement;
     this.gameOverLeaderboardPanel.style.marginTop = "0";
     this.gameOverLeaderboardPanel.style.marginBottom = "20px";
@@ -703,6 +748,7 @@ export class Game {
     panel.innerHTML = `
       <div style="font-size:11px; letter-spacing:2px; color:#c7a271; margin-bottom:8px;">${title}</div>
       <div data-role="context" style="font-size:11px; letter-spacing:2px; color:#7fd6ff; margin-bottom:10px;"></div>
+      <div data-role="threshold" style="font-size:10px; letter-spacing:1.4px; color:#ffcf84; margin-bottom:10px; line-height:1.35;"></div>
       <div data-role="list" style="display:grid; gap:6px;"></div>
     `;
     return panel;
@@ -723,12 +769,14 @@ export class Game {
       this.titleLeaderboardEntries,
       this.titleLeaderboardEntries.length > 0 ? "WAVEDASH OR LOCAL TOP RUNS" : "NO RUNS YET"
     );
+    this.titleLeaderboardThreshold.textContent = this.getLeaderboardThresholdCallout(this.titleLeaderboardEntries);
     this.renderLeaderboardList(
       this.gameOverLeaderboardContext,
       this.gameOverLeaderboardList,
       this.gameOverLeaderboardEntries,
       `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
     );
+    this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
   }
 
   private renderLeaderboardList(
@@ -750,6 +798,219 @@ export class Game {
         <span style="color:#ffaa44; font-weight:700;">${entry.score}</span>
       </div>`
     )).join("");
+  }
+
+  private getLeaderboardThresholdCallout(entries: LeaderboardDisplayEntry[]) {
+    if (entries.length === 0) {
+      return "TARGETS · SCORE 500+ · HEIGHT 25m+ · COMBO x3+";
+    }
+
+    const bestEntry = entries[0];
+    const scoreTarget = Math.max(500, Math.ceil(bestEntry.score / 500) * 500);
+    const heightTarget = Math.max(25, Math.ceil(this.saveData.bestHeight / 25) * 25 || 25);
+    const comboTarget = Math.max(3, Math.min(10, Math.ceil(Math.max(this.saveData.bestCombo, this.bestCombo) / 2) + 1));
+    return `TARGETS · SCORE ${scoreTarget}+ · HEIGHT ${heightTarget}m+ · COMBO x${comboTarget}+`;
+  }
+
+  private getGameOverCallout() {
+    return `CHECKPOINTS · NEXT ${this.nextMilestone}m · ZONES 25/50/75/100`;
+  }
+
+  // -----------------------------------------------------------------------
+  // Achievements UI
+  // -----------------------------------------------------------------------
+
+  private setupAchievementsUi() {
+    const button = document.getElementById("achievements-btn") as HTMLButtonElement | null;
+    const overlay = document.getElementById("achievements-overlay") as HTMLDivElement | null;
+    const closeBtn = document.getElementById("achievements-close") as HTMLButtonElement | null;
+
+    if (!button || !overlay || !closeBtn) {
+      return;
+    }
+
+    this.achievementsButton = button;
+    this.achievementsPanel = overlay;
+
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openAchievementsPanel();
+    });
+    button.addEventListener("touchend", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openAchievementsPanel();
+    }, { passive: false });
+
+    closeBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.closeAchievementsPanel();
+    });
+    closeBtn.addEventListener("touchend", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.closeAchievementsPanel();
+    }, { passive: false });
+
+    // Click outside the card closes it; clicks inside do not bubble to startGame.
+    overlay.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target === overlay) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeAchievementsPanel();
+      } else {
+        event.stopPropagation();
+      }
+    });
+  }
+
+  private async loadAchievementCatalog() {
+    try {
+      const progress = listAchievementProgress();
+      this.achievementCatalog = progress.map((entry) => ({
+        id: entry.id,
+        title: entry.displayName,
+        description: entry.description,
+      }));
+    } catch (error) {
+      console.error("Failed to load achievement catalog", error);
+      this.achievementCatalog = [];
+    }
+  }
+
+  private openAchievementsPanel() {
+    if (!this.achievementsPanel) {
+      return;
+    }
+    playClick();
+    this.renderAchievementsList();
+    this.achievementsPanel.classList.remove("hidden");
+    this.achievementsPanel.setAttribute("aria-hidden", "false");
+  }
+
+  private closeAchievementsPanel() {
+    if (!this.achievementsPanel) {
+      return;
+    }
+    playClick();
+    this.achievementsPanel.classList.add("hidden");
+    this.achievementsPanel.setAttribute("aria-hidden", "true");
+  }
+
+  private renderAchievementsList() {
+    const listEl = document.getElementById("achievements-list");
+    const summaryEl = document.getElementById("achievements-summary");
+    if (!listEl || !summaryEl) {
+      return;
+    }
+
+    // Always pull fresh state (SDK may have updated since we loaded)
+    const progress: AchievementProgress[] = (() => {
+      try {
+        return listAchievementProgress();
+      } catch {
+        // Fall back to the cached catalog marked as locked.
+        return this.achievementCatalog.map((entry) => ({
+          id: entry.id,
+          displayName: entry.title,
+          description: entry.description,
+          unlocked: false,
+        }));
+      }
+    })();
+
+    const unlocked = progress.filter((entry) => entry.unlocked).length;
+    const total = progress.length;
+    summaryEl.textContent = total === 0
+      ? "NO ACHIEVEMENTS CONFIGURED"
+      : `UNLOCKED ${unlocked} / ${total}`;
+
+    if (progress.length === 0) {
+      listEl.innerHTML = `<div style="padding:12px; color:#9cb5c5; font-family:ui-monospace,monospace; font-size:11px; letter-spacing:1.5px;">Play a run to earn your first achievement.</div>`;
+      return;
+    }
+
+    // Unlocked first, then locked, preserving catalog order within each group.
+    const ordered = [...progress].sort((a, b) => {
+      if (a.unlocked === b.unlocked) return 0;
+      return a.unlocked ? -1 : 1;
+    });
+
+    listEl.innerHTML = ordered.map((entry) => `
+      <div class="achievement-row ${entry.unlocked ? "unlocked" : "locked"}">
+        <div>
+          <div class="achievement-name">${escapeHtml(entry.displayName)}</div>
+          <div class="achievement-description">${escapeHtml(entry.description)}</div>
+        </div>
+        <div class="achievement-status">${entry.unlocked ? "UNLOCKED" : "LOCKED"}</div>
+      </div>
+    `).join("");
+  }
+
+  // -----------------------------------------------------------------------
+  // Title return (from pause / game-over back to title / mode select)
+  // -----------------------------------------------------------------------
+
+  private returnToTitle() {
+    playClick();
+
+    this.state = GameState.Title;
+    this.pauseOverlay.classList.add("hidden");
+    this.hud.classList.add("hidden");
+    this.gameOverCard.classList.add("hidden");
+    this.gameOverLeaderboardPanel.classList.add("hidden");
+    this.shareScoreBtn.classList.add("hidden");
+    this.titleLeaderboardPanel.classList.remove("hidden");
+    this.titleOverlay.classList.remove("hidden");
+    this.closeCallOverlay.style.opacity = "0";
+    this.shieldSaveOverlay.style.opacity = "0";
+    this.hideTutorialOverlay(true);
+    this.landingCueGroup.visible = false;
+    if (this.personalBestRing) {
+      this.personalBestRing.visible = false;
+    }
+
+    this.player.resetVisuals();
+    this.player.reset(0, 2);
+
+    this.resetVisualWorld();
+    const { state } = this.sim.reset();
+    this.consumeState(state);
+    this.syncVisuals(state);
+    this.buildBackgroundAtmosphere(this.getMaxGearHeight(state) + 24);
+    this.buildTitleBackdrop();
+    this.updateOverlayText();
+    void this.refreshLeaderboardPanels();
+
+    this.titleTagline.classList.remove("new-best");
+    this.deathAnimTimer = 0;
+    this.toastTimer = 0;
+    this.zoneAnnouncementTimer = 0;
+    this.cameraShakeTimer = 0;
+    this.cameraShakeOffset.set(0, 0, 0);
+    this.cameraDistancePulses.length = 0;
+    this.comboFovPulseTimer = 0;
+    this.zoneAnnouncement.style.opacity = "0";
+
+    this.input.setTouchControlsVisible(false);
+    stopMusic();
+    stopAmbientTick();
+    this.resumeAnimationLoop();
+
+    if (this.multiplayer.isActive()) {
+      this.hideMultiplayerPanel();
+    }
+    if (this.multiplayerButton) {
+      this.multiplayerButton.style.display = "inline-flex";
+    }
+    if (this.aiGhostButton) {
+      this.aiGhostButton.style.display = "inline-flex";
+    }
+    this.clearGhostMeshes();
+    this.resetAIGhost();
   }
 
   // -----------------------------------------------------------------------
@@ -1525,7 +1786,10 @@ export class Game {
       this.refreshMultiplayerPanel();
     }
 
-    if (this.input.justPressed("space") || this.input.justPressed("click")) {
+    // Keyboard restart from title. Click-to-start on empty title is handled by
+    // the titleOverlay click listener, which correctly ignores clicks that
+    // land on a button (ACHIEVEMENTS, MULTIPLAYER, AI GHOST, RACE THE AI).
+    if (this.input.justPressed("space")) {
       this.startGame();
     }
   }
@@ -1881,7 +2145,11 @@ export class Game {
       this.refreshMultiplayerPanel();
     }
 
-    if (this.input.justPressed("space") || this.input.justPressed("click")) {
+    // Keyboard-only restart. Mouse clicks on the game-over overlay are routed
+    // through the title-overlay click handler (which respects button targets),
+    // so we don't blanket-consume global clicks here — that would collapse
+    // every button click into "start game".
+    if (this.input.justPressed("space")) {
       this.startGame();
     }
   }
@@ -2093,6 +2361,7 @@ export class Game {
           this.showToast(`CHECKPOINT ${event.height}m`);
           playMilestone(1 + event.height / 220);
           this.particles.spawnMilestoneConfetti(this.player.mesh.position);
+          this.triggerMilestoneActivation(event.height);
           this.addCameraDistancePulse(2, 0.5, 1);
           this.pulseMilestoneToast();
           break;
@@ -3086,6 +3355,25 @@ export class Game {
     this.playerLight.position.x = THREE.MathUtils.lerp(this.playerLight.position.x, this.player.mesh.position.x, lightLerp);
     this.playerLight.position.y = THREE.MathUtils.lerp(this.playerLight.position.y, this.player.mesh.position.y + 3.2, lightLerp);
     this.playerLight.position.z = THREE.MathUtils.lerp(this.playerLight.position.z, this.player.mesh.position.z + 2.6, lightLerp);
+  }
+
+  private triggerMilestoneActivation(height: number) {
+    let bestGear: Gear | null = null;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (const gear of this.visualGearMap.values()) {
+      if (gear.variant !== "milestone") {
+        continue;
+      }
+      const delta = Math.abs(gear.mesh.position.y - height);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestGear = gear;
+      }
+    }
+
+    if (bestGear && bestDelta < 6) {
+      bestGear.triggerMilestoneActivation();
+    }
   }
 
   private triggerLandingShake(strength: number) {

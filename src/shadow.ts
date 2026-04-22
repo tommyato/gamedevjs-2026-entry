@@ -2,12 +2,12 @@ import * as THREE from "three";
 
 export const TOP_DOWN_SHADOW_LAYER = 1;
 const SHADOW_MAP_SIZE = 1024;
-const SHADOW_FRUSTUM_HALF = 18;
-const SHADOW_CAMERA_HEIGHT = 25;
-const SHADOW_CAMERA_LOOK_OFFSET = 4;
+const SHADOW_FRUSTUM_HALF = 16;
+const SHADOW_CAMERA_HEIGHT = 22;
+const SHADOW_CAMERA_LOOK_OFFSET = 3;
 const SHADOW_NEAR = 1;
-const SHADOW_FAR = 50;
-const SHADOW_DARKNESS = 0.56;
+const SHADOW_FAR = 36;
+const SHADOW_DARKNESS = 0.48;
 
 export type TopDownShadowUniforms = {
   shadowMap: { value: THREE.DepthTexture };
@@ -52,7 +52,8 @@ const SHADOW_FRAGMENT_BODY = [
   "        }",
   "      }",
   "      shadow /= 9.0;",
-  "      gl_FragColor.rgb *= 1.0 - shadow * edgeFade * uTopDownShadowDarkness;",
+  "      float distanceFade = 1.0 - smoothstep(0.72, 1.0, shadowProj.z);",
+  "      gl_FragColor.rgb *= 1.0 - shadow * edgeFade * uTopDownShadowDarkness * distanceFade;",
   "    }",
   "  }",
   "}",

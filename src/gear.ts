@@ -51,7 +51,11 @@ export class Gear {
   private pistonMesh: THREE.Mesh | null = null;
   private pistonBaseY = 0;
   private pistonTime = Math.random() * Math.PI * 2;
-  private milestoneRing: THREE.Mesh | null = null;
+  private checkpointRing: THREE.Mesh | null = null;
+  private checkpointPillar: THREE.Mesh | null = null;
+  private checkpointMarker: THREE.Mesh | null = null;
+  private checkpointGlow: THREE.Mesh | null = null;
+  private checkpointActivationPulse = 0;
   private milestoneTime = 0;
   private readonly windRings: THREE.Mesh[] = [];
   private magnetIndicator: THREE.Mesh | null = null;
@@ -76,8 +80,8 @@ export class Gear {
     const bodyGeo = new THREE.CylinderGeometry(this.radius, this.radius, this.height, 32);
     this.bodyMaterial = new THREE.MeshStandardMaterial({
       color: bodyColor.clone().multiplyScalar(this.variant === "crumbling" ? 0.72 : this.variant === "milestone" ? 1.0 : 0.82),
-      emissive: this.variant === "milestone" ? new THREE.Color(0xffaa00) : bodyColor.clone().multiplyScalar(0.08 + danger * 0.1),
-      emissiveIntensity: this.variant === "milestone" ? 0.6 : 0.3,
+      emissive: this.variant === "milestone" ? new THREE.Color(0xd7a530) : bodyColor.clone().multiplyScalar(0.08 + danger * 0.1),
+      emissiveIntensity: this.variant === "milestone" ? 0.38 : 0.3,
       metalness: 0.9,
       roughness: this.variant === "crumbling" ? 0.48 : this.variant === "milestone" ? 0.18 : 0.34,
     });
@@ -88,8 +92,8 @@ export class Gear {
     const topSurfaceGeo = new THREE.CylinderGeometry(this.radius * 0.92, this.radius * 0.92, 0.05, 32);
     this.topSurfaceMaterial = new THREE.MeshStandardMaterial({
       color: topColor,
-      emissive: topColor.clone().multiplyScalar(0.22 + danger * 0.16),
-      emissiveIntensity: 0.35,
+      emissive: topColor.clone().multiplyScalar(0.2 + danger * 0.14),
+      emissiveIntensity: this.variant === "milestone" ? 0.22 : 0.35,
       metalness: 0.78,
       roughness: 0.22,
     });
@@ -115,8 +119,8 @@ export class Gear {
     const hubGeo = new THREE.CylinderGeometry(this.radius * 0.22, this.radius * 0.22, this.height + 0.04, 16);
     this.detailMaterial = new THREE.MeshStandardMaterial({
       color: this.variant === "crumbling" ? 0x1d1817 : this.variant === "milestone" ? 0xaa8800 : 0x2b2623,
-      emissive: this.variant === "speed" ? 0x11355e : this.variant === "milestone" ? 0xffaa00 : 0x150f0a,
-      emissiveIntensity: this.variant === "speed" ? 0.5 : this.variant === "milestone" ? 0.5 : 0.35,
+      emissive: this.variant === "speed" ? 0x11355e : this.variant === "milestone" ? 0xcc9500 : 0x150f0a,
+      emissiveIntensity: this.variant === "speed" ? 0.5 : this.variant === "milestone" ? 0.34 : 0.35,
       metalness: 0.92,
       roughness: 0.26,
     });
@@ -130,7 +134,7 @@ export class Gear {
     this.accentMaterial = new THREE.MeshStandardMaterial({
       color: accentColor.color,
       emissive: accentColor.emissive,
-      emissiveIntensity: accentColor.emissiveIntensity,
+      emissiveIntensity: this.variant === "milestone" ? 0.38 : accentColor.emissiveIntensity,
       metalness: 0.72,
       roughness: 0.24,
     });
@@ -147,7 +151,7 @@ export class Gear {
     const markerMat = new THREE.MeshStandardMaterial({
       color: this.variant === "speed" ? 0x9ef5ff : this.variant === "reverse" ? 0xffb4aa : 0x9ef5ff,
       emissive: this.variant === "speed" ? 0x58e1ff : this.variant === "reverse" ? 0xff5a44 : 0x58e1ff,
-      emissiveIntensity: 0.65,
+      emissiveIntensity: this.variant === "milestone" ? 0.42 : 0.65,
       metalness: 0.4,
       roughness: 0.18,
     });
@@ -199,6 +203,10 @@ export class Gear {
     applyTopDownShadowToObject(this.mesh, uniforms);
   }
 
+  triggerMilestoneActivation() {
+    this.checkpointActivationPulse = 1;
+  }
+
   private addPistonDetail() {
     const shaftGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.6, 16);
     const shaftMat = new THREE.MeshStandardMaterial({
@@ -228,35 +236,71 @@ export class Gear {
   }
 
   private addMilestoneEffects() {    // Pulsing beacon ring (animated in update())
-    const pulseRingGeo = new THREE.TorusGeometry(this.radius * 1.08, Math.max(this.radius * 0.045, 0.07), 10, 48);
+    const beacon = new THREE.Group();
+    beacon.position.y = this.height / 2 + 0.06;
+
+    const pulseRingGeo = new THREE.TorusGeometry(this.radius * 1.08, Math.max(this.radius * 0.035, 0.055), 8, 40);
     const pulseRingMat = new THREE.MeshStandardMaterial({
-      color: 0xffd700,
-      emissive: new THREE.Color(0xffcc00),
-      emissiveIntensity: 0.9,
-      metalness: 0.6,
-      roughness: 0.12,
+      color: 0xffdf9a,
+      emissive: new THREE.Color(0xffb84a),
+      emissiveIntensity: 0.34,
+      metalness: 0.46,
+      roughness: 0.2,
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.86,
     });
     const pulseRing = new THREE.Mesh(pulseRingGeo, pulseRingMat);
     pulseRing.rotation.x = Math.PI / 2;
-    pulseRing.position.y = this.height / 2 + 0.08;
     pulseRing.userData.skipTopDownShadowCaster = true;
-    this.mesh.add(pulseRing);
-    this.milestoneRing = pulseRing;
+    beacon.add(pulseRing);
+    this.checkpointRing = pulseRing;
 
-    // Subtle additive glow sphere
-    const glowGeo = new THREE.SphereGeometry(this.radius * 1.18, 16, 12);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: 0xffdd44,
-      transparent: true,
-      opacity: 0.07,
-      side: THREE.BackSide,
-      depthWrite: false,
+    const pillarGeo = new THREE.CylinderGeometry(Math.max(this.radius * 0.048, 0.06), Math.max(this.radius * 0.065, 0.08), 0.84, 10);
+    const pillarMat = new THREE.MeshStandardMaterial({
+      color: 0xb9922a,
+      emissive: 0x553b07,
+      emissiveIntensity: 0.22,
+      metalness: 0.72,
+      roughness: 0.28,
     });
-    const glowSphere = new THREE.Mesh(glowGeo, glowMat);
-    glowSphere.userData.skipTopDownShadowCaster = true;
-    this.mesh.add(glowSphere);
+    const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+    pillar.position.y = 0.35;
+    beacon.add(pillar);
+    this.checkpointPillar = pillar;
+
+    const markerGeo = new THREE.OctahedronGeometry(Math.max(this.radius * 0.18, 0.14), 0);
+    const markerMat = new THREE.MeshBasicMaterial({
+      color: 0xffe18c,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    const marker = new THREE.Mesh(markerGeo, markerMat);
+    marker.position.y = 0.92;
+    marker.rotation.y = Math.PI * 0.25;
+    marker.userData.skipTopDownShadowCaster = true;
+    beacon.add(marker);
+    this.checkpointMarker = marker;
+
+    const haloGeo = new THREE.TorusGeometry(this.radius * 0.92, Math.max(this.radius * 0.022, 0.032), 8, 32);
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0xffcf66,
+      transparent: true,
+      opacity: 0.12,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    const halo = new THREE.Mesh(haloGeo, haloMat);
+    halo.rotation.x = Math.PI / 2;
+    halo.position.y = 0.1;
+    halo.userData.skipTopDownShadowCaster = true;
+    beacon.add(halo);
+    this.checkpointGlow = halo;
+
+    this.mesh.add(beacon);
   }
 
   private addWindRings() {
@@ -430,11 +474,38 @@ export class Gear {
       this.pistonMesh.position.y = this.pistonBaseY + oscillation;
     }
 
-    if (this.milestoneRing) {
+    if (this.checkpointRing) {
       this.milestoneTime += dt;
-      const pulse = 1 + Math.sin(this.milestoneTime * 2.8) * 0.07;
-      this.milestoneRing.scale.setScalar(pulse);
-      (this.milestoneRing.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.65 + Math.sin(this.milestoneTime * 2.8) * 0.32;
+      this.checkpointActivationPulse = Math.max(0, this.checkpointActivationPulse - dt * 1.8);
+      const idlePulse = 1 + Math.sin(this.milestoneTime * 2.6) * 0.045;
+      const activation = this.checkpointActivationPulse;
+      const ringScale = idlePulse + activation * 0.16;
+      this.checkpointRing.scale.setScalar(ringScale);
+
+      const ringMaterial = this.checkpointRing.material as THREE.MeshStandardMaterial;
+      ringMaterial.emissiveIntensity = 0.3 + Math.sin(this.milestoneTime * 2.6) * 0.05 + activation * 0.48;
+      ringMaterial.opacity = 0.82 + activation * 0.08;
+
+      if (this.checkpointPillar) {
+        this.checkpointPillar.scale.setScalar(1 + activation * 0.08);
+        this.checkpointPillar.rotation.y = this.milestoneTime * 0.55;
+        const pillarMaterial = this.checkpointPillar.material as THREE.MeshStandardMaterial;
+        pillarMaterial.emissiveIntensity = 0.18 + activation * 0.22;
+      }
+
+      if (this.checkpointMarker) {
+        const markerMaterial = this.checkpointMarker.material as THREE.MeshBasicMaterial;
+        this.checkpointMarker.scale.setScalar(1 + activation * 0.28);
+        this.checkpointMarker.position.y = 0.92 + Math.sin(this.milestoneTime * 3.2) * 0.03 + activation * 0.08;
+        this.checkpointMarker.rotation.y += dt * (1.1 + activation * 1.2);
+        markerMaterial.opacity = 0.86 + activation * 0.14;
+      }
+
+      if (this.checkpointGlow) {
+        const glowMaterial = this.checkpointGlow.material as THREE.MeshBasicMaterial;
+        this.checkpointGlow.scale.setScalar(0.92 + activation * 0.2 + Math.sin(this.milestoneTime * 1.8) * 0.03);
+        glowMaterial.opacity = 0.08 + activation * 0.12;
+      }
     }
 
     this.reverseTimer += dt;

@@ -382,7 +382,15 @@
       text-transform: uppercase;
       cursor: pointer;
       pointer-events: auto;
+      color: #d7f8ff;
+      border: 1px solid rgba(127, 214, 255, 0.34);
+      background: linear-gradient(180deg, rgba(18, 32, 46, 0.92), rgba(8, 16, 24, 0.82));
+      box-shadow: 0 12px 26px rgba(0,0,0,0.32), inset 0 1px 0 rgba(173, 232, 255, 0.08);
       transition: background 120ms ease-out, border-color 120ms ease-out, transform 120ms ease-out;
+    }
+    .title-action-btn:hover {
+      border-color: rgba(127, 214, 255, 0.58);
+      background: linear-gradient(180deg, rgba(26, 42, 58, 0.95), rgba(10, 18, 28, 0.88));
     }
     .title-action-btn:active {
       transform: translateY(1px);
@@ -617,6 +625,17 @@
       animation: pulse 1.5s ease-in-out infinite; text-align: center;
       margin-bottom: 32px;
     }
+    .menu-action-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+    }
+    .menu-action-row .title-action-btn {
+      width: auto;
+      min-width: 180px;
+    }
     #pause-restart {
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
       font-size: 14px; font-weight: 700; letter-spacing: 3px;
@@ -632,6 +651,117 @@
     #pause-restart:hover {
       background: linear-gradient(180deg, rgba(60, 42, 26, 0.95), rgba(28, 18, 10, 0.88));
       border-color: rgba(255, 196, 120, 0.55);
+    }
+    #achievements-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: radial-gradient(circle at center, rgba(6, 6, 10, 0.3), rgba(0, 0, 0, 0.78));
+      backdrop-filter: blur(8px);
+      pointer-events: auto;
+    }
+    .achievements-card {
+      width: min(720px, calc(100vw - 32px));
+      max-height: min(82vh, 760px);
+      padding: 24px 26px 22px;
+      border-radius: 22px;
+      border: 1px solid rgba(127, 214, 255, 0.18);
+      background: linear-gradient(180deg, rgba(14, 20, 28, 0.92), rgba(8, 12, 18, 0.88));
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(173, 232, 255, 0.08);
+      color: #d7f8ff;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      pointer-events: auto;
+    }
+    .achievements-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .achievements-head h2 {
+      font-family: "Orbitron", ui-monospace, monospace;
+      font-size: 28px;
+      letter-spacing: 4px;
+      color: #7fd6ff;
+      text-shadow: 0 0 22px rgba(127, 214, 255, 0.25);
+    }
+    #achievements-close {
+      padding: 10px 18px;
+      border-radius: 999px;
+      border: 1px solid rgba(127, 214, 255, 0.34);
+      background: linear-gradient(180deg, rgba(18, 32, 46, 0.92), rgba(8, 16, 24, 0.82));
+      color: #d7f8ff;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      cursor: pointer;
+    }
+    #achievements-close:hover {
+      border-color: rgba(127, 214, 255, 0.58);
+      background: linear-gradient(180deg, rgba(26, 42, 58, 0.95), rgba(10, 18, 28, 0.88));
+    }
+    #achievements-summary {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 12px;
+      letter-spacing: 2px;
+      color: #9ac9e8;
+    }
+    #achievements-list {
+      display: grid;
+      gap: 10px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .achievement-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: start;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(8, 12, 18, 0.46);
+    }
+    .achievement-row.unlocked {
+      border-color: rgba(255, 208, 140, 0.22);
+      background: linear-gradient(180deg, rgba(36, 26, 16, 0.78), rgba(18, 14, 10, 0.7));
+    }
+    .achievement-name {
+      font-family: "Orbitron", ui-monospace, monospace;
+      font-size: 14px;
+      letter-spacing: 2px;
+      color: #ffe1a9;
+      margin-bottom: 4px;
+    }
+    .achievement-description {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      color: #9cb5c5;
+      line-height: 1.45;
+    }
+    .achievement-status {
+      align-self: center;
+      justify-self: end;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #7b8794;
+    }
+    .achievement-row.unlocked .achievement-status {
+      color: #ffd35e;
+    }
+    .achievement-row.locked .achievement-name {
+      color: #8a9cac;
     }
     .hidden { display: none !important; }
     @media (max-width: 720px) {
@@ -728,6 +858,20 @@
         font-size: 14px;
         padding: 0 24px;
       }
+      .menu-action-row {
+        flex-direction: column;
+      }
+      .menu-action-row .title-action-btn {
+        min-width: min(260px, calc(100vw - 64px));
+      }
+      .achievements-card {
+        width: min(100vw - 24px, 560px);
+        padding: 20px 18px 18px;
+      }
+      .achievements-head h2 {
+        font-size: 22px;
+        letter-spacing: 3px;
+      }
     }
   </style>
 </head>
@@ -746,7 +890,10 @@
     <div id="pause-overlay" class="hidden">
       <h2>PAUSED</h2>
       <div class="prompt">PRESS ESC OR TAP TO RESUME</div>
-      <button id="pause-restart" type="button">RESTART</button>
+      <div class="menu-action-row">
+        <button id="pause-restart" type="button">RESTART</button>
+        <button id="pause-title" type="button" class="title-action-btn">TITLE SCREEN</button>
+      </div>
     </div>
     <div id="hud" class="hidden">
       <div class="hud-panel">
@@ -804,6 +951,7 @@
         <div id="title-best" class="hidden"></div>
         <div id="title-actions">
           <button type="button" class="prompt title-action-btn">PLAY</button>
+          <button type="button" class="title-action-btn" id="achievements-btn">ACHIEVEMENTS</button>
         </div>
       </div>
       <div class="game-over-card game-over-layout hidden">
@@ -813,8 +961,21 @@
         <div class="stat-row"><span class="stat-label">BEST COMBO</span><span class="stat-value" id="go-combo"></span></div>
         <div class="stat-row"><span class="stat-label">TIME</span><span class="stat-value" id="go-time"></span></div>
         <div class="stat-row stat-total"><span class="stat-label">TOTAL SCORE</span><span class="stat-value" id="go-total"></span></div>
+        <div class="menu-action-row">
+          <button id="gameover-title" type="button" class="title-action-btn">TITLE SCREEN</button>
+        </div>
       </div>
       <button id="share-score-btn" class="hidden" type="button">SHARE ON X</button>
+    </div>
+    <div id="achievements-overlay" class="hidden" aria-hidden="true">
+      <div class="achievements-card">
+        <div class="achievements-head">
+          <h2>ACHIEVEMENTS</h2>
+          <button id="achievements-close" type="button">CLOSE</button>
+        </div>
+        <div id="achievements-summary"></div>
+        <div id="achievements-list"></div>
+      </div>
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>

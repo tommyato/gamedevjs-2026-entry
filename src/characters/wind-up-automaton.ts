@@ -1,15 +1,25 @@
 import * as THREE from "three";
 
+export type WindUpAutomatonPose = {
+  // -1..1: negative = squash/land (feet splay out, flat), positive = jump/rise (feet tuck, point down)
+  jumpAmount: number;
+  // 0..1: landing pose strength — flattens feet against ground and spreads them slightly
+  landAmount: number;
+};
+
 export type WindUpAutomaton = {
   group: THREE.Group;
-  update: (dt: number) => void;
+  update: (dt: number, pose?: WindUpAutomatonPose) => void;
+  bodyMaterial: THREE.MeshStandardMaterial;
 };
 
 export function createWindUpAutomaton(): WindUpAutomaton {
   const group = new THREE.Group();
 
   // Feet — flat coin-shaped discs, darker bronze, symmetrical under body.
-  // Sit flush on the ground plane; body rests on top of them.
+  // Sit flush on the ground plane; body rests on top of them. We wrap each
+  // foot in a pivot group so we can tilt them (toes-down on jump, splay on
+  // landing) without disturbing their resting position.
   const footRadius = 0.15;
   const footHeight = 0.07;
   const footGeo = new THREE.CylinderGeometry(footRadius, footRadius, footHeight, 16);
@@ -20,13 +30,17 @@ export function createWindUpAutomaton(): WindUpAutomaton {
   });
   const footY = footHeight / 2;
 
+  const leftFootPivot = new THREE.Group();
+  leftFootPivot.position.set(-0.12, footY, 0);
   const leftFoot = new THREE.Mesh(footGeo, footMat);
-  leftFoot.position.set(-0.12, footY, 0);
-  group.add(leftFoot);
+  leftFootPivot.add(leftFoot);
+  group.add(leftFootPivot);
 
+  const rightFootPivot = new THREE.Group();
+  rightFootPivot.position.set(0.12, footY, 0);
   const rightFoot = new THREE.Mesh(footGeo, footMat);
-  rightFoot.position.set(0.12, footY, 0);
-  group.add(rightFoot);
+  rightFootPivot.add(rightFoot);
+  group.add(rightFootPivot);
 
   // Body — matches the in-game player exactly: cylinder r=0.3, h=0.6, bronze.
   // Raised by footHeight so the body sits on top of the feet instead of clipping them.
@@ -99,11 +113,48 @@ export function createWindUpAutomaton(): WindUpAutomaton {
   // Animation state
   let keyRotation = 0;
   const keyRotationSpeed = 0.3; // rad/sec
+  let currentFootPitch = 0; // rotation.x on the foot pivots
+  let currentFootSplay = 0; // outward tilt on rotation.z
+  let currentFootLift = 0;  // y lift from resting, positive during jump tuck
+  let currentFootScaleY = 1; // flatten during landing
 
-  const update = (dt: number) => {
+  const restingFootY = footY;
+
+  const update = (dt: number, pose?: WindUpAutomatonPose) => {
     keyRotation += keyRotationSpeed * dt;
     keyGroup.rotation.z = keyRotation;
+
+    const jump = pose ? THREE.MathUtils.clamp(pose.jumpAmount, -1, 1) : 0;
+    const land = pose ? THREE.MathUtils.clamp(pose.landAmount, 0, 1) : 0;
+
+    // Target feet posture:
+    //  - jump > 0  → toes point down (pitch forward around x), feet tucked up slightly
+    //  - land > 0  → feet flatten (scaleY < 1) and splay outward (rotation.z)
+    const targetPitch = jump > 0 ? jump * 0.9 : 0;
+    const targetLift = jump > 0 ? jump * 0.08 : 0;
+    const targetSplay = land * 0.35;
+    const targetScaleY = 1 - land * 0.45;
+
+    // Critically-damped-ish smoothing keeps the motion eased rather than snappy.
+    const pitchLerp = 1 - Math.exp(-dt * 16);
+    const liftLerp  = 1 - Math.exp(-dt * 14);
+    const splayLerp = 1 - Math.exp(-dt * 18);
+    const scaleLerp = 1 - Math.exp(-dt * 18);
+
+    currentFootPitch  = THREE.MathUtils.lerp(currentFootPitch,  targetPitch,  pitchLerp);
+    currentFootLift   = THREE.MathUtils.lerp(currentFootLift,   targetLift,   liftLerp);
+    currentFootSplay  = THREE.MathUtils.lerp(currentFootSplay,  targetSplay,  splayLerp);
+    currentFootScaleY = THREE.MathUtils.lerp(currentFootScaleY, targetScaleY, scaleLerp);
+
+    leftFootPivot.rotation.x  = currentFootPitch;
+    rightFootPivot.rotation.x = currentFootPitch;
+    leftFootPivot.rotation.z  =  currentFootSplay;
+    rightFootPivot.rotation.z = -currentFootSplay;
+    leftFootPivot.position.y  = restingFootY + currentFootLift;
+    rightFootPivot.position.y = restingFootY + currentFootLift;
+    leftFoot.scale.y  = currentFootScaleY;
+    rightFoot.scale.y = currentFootScaleY;
   };
 
-  return { group, update };
+  return { group, update, bodyMaterial: bodyMat };
 }
