@@ -425,6 +425,11 @@
       color: #ffaa44; text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 40px rgba(255,170,68,0.3);
       letter-spacing: 6px; margin-bottom: 8px; text-align: center;
       white-space: nowrap;
+      /* letter-spacing adds trailing space after the last letter, which both
+         pushes the visible text right of center under text-align:center AND
+         can bleed past the panel's right edge. Negative right margin
+         compensates for that trailing space. */
+      margin-right: -6px;
     }
     .title-copy-panel {
       display: flex;
@@ -434,10 +439,10 @@
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
       border-radius: 16px;
-      padding: 20px 32px 18px;
+      padding: 24px 56px 22px;
       border: 1px solid rgba(255, 196, 120, 0.15);
       box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
-      width: min(720px, calc(100vw - 40px));
+      width: min(860px, calc(100vw - 40px));
     }
     .leaderboard-panel {
       box-sizing: border-box;
