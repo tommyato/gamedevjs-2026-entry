@@ -999,6 +999,23 @@ export class Game {
     );
     setAudioEnabled(isAudioEnabled() && this.saveData.audioEnabled);
     onAudioChange((enabled) => setAudioEnabled(enabled));
+
+    // Debug hooks — only installed when ?debug is present in the URL.
+    // window.__clockworkClimb is intentionally undefined when ?debug is absent.
+    if (new URLSearchParams(location.search).has('debug')) {
+      (window as any).__clockworkClimb = {
+        forceGameOver: () => {
+          if (this.state === GameState.Playing && this.simState) {
+            this.finishGame(this.simState);
+          }
+        },
+        unlockTestAchievement: () => {
+          this.showAchievementToast(formatAchievementId('FIRST_CLIMB'));
+        },
+        getGameState: () => GameState[this.state],
+      };
+    }
+
     await signalLoadComplete();
   }
 
