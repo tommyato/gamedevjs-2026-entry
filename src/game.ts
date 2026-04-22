@@ -2712,6 +2712,7 @@ export class Game {
     this.titleOverlay.classList.add("game-over");
     this.titleOverlay.style.overflowY = "auto";
     this.titleBest.classList.add("hidden");
+    this.shareScoreBtn.classList.remove("hidden");
     this.titleLeaderboardPanel.classList.add("hidden");
     this.buildTitleBackdrop();
     this.titleHeading.textContent = "GAME OVER";
