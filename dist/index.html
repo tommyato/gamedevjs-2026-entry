@@ -345,6 +345,10 @@
     #title-overlay {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
+      box-sizing: border-box;
+      padding: 20px;
+      overflow-x: hidden;
+      overflow-y: auto;
       z-index: 20; pointer-events: auto;
       background: transparent;
     }
@@ -369,6 +373,26 @@
       border: 1px solid rgba(255, 196, 120, 0.15);
       box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
       margin-bottom: 12px;
+    }
+    .leaderboard-panel {
+      box-sizing: border-box;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      color: #f3d7b1;
+      text-align: left;
+    }
+    .contracts-preview-panel {
+      width: min(360px, calc(100vw - 40px));
+    }
+    .title-leaderboard-panel {
+      position: absolute;
+      right: 20px;
+      bottom: 24px;
+      width: min(340px, calc(100vw - 40px));
+    }
+    .game-over-leaderboard-panel {
+      margin-top: 0;
+      margin-bottom: 20px;
+      width: min(400px, calc(100vw - 40px));
     }
     #title-overlay .tagline {
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 14px; color: #aabbcc;
@@ -522,6 +546,58 @@
     }
 
     @media (min-aspect-ratio: 16/10) {
+      #title-overlay {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+        grid-template-areas:
+          "title leaderboard"
+          "preview leaderboard"
+          "gameover leaderboard"
+          "share leaderboard";
+        align-items: start;
+        align-content: start;
+        justify-items: start;
+        column-gap: 24px;
+        row-gap: 12px;
+      }
+      #title-overlay > .title-copy-panel {
+        grid-area: title;
+        justify-self: center;
+        width: min(420px, 100%);
+        margin-bottom: 0;
+      }
+      #title-overlay > .contracts-preview-panel {
+        grid-area: preview;
+        width: min(420px, 100%);
+        margin-top: 0;
+        justify-self: center;
+      }
+      #title-overlay > .title-leaderboard-panel {
+        grid-area: leaderboard;
+        position: static;
+        width: min(340px, 100%);
+        margin: 0;
+        justify-self: end;
+        align-self: start;
+      }
+      #title-overlay > .game-over-card {
+        grid-area: gameover;
+        width: min(400px, 100%);
+        justify-self: center;
+        margin-bottom: 0;
+      }
+      #title-overlay > #share-score-btn {
+        grid-area: share;
+        justify-self: center;
+        margin-bottom: 0;
+      }
+      #title-overlay > .game-over-leaderboard-panel {
+        grid-area: leaderboard;
+        width: min(400px, 100%);
+        margin: 0;
+        justify-self: end;
+        align-self: start;
+      }
       .game-over-card {
         padding: 14px 20px;
         margin-bottom: 16px;
@@ -536,6 +612,87 @@
       #title-overlay .tagline {
         font-size: 12px;
         margin-bottom: 18px;
+      }
+    }
+    @media (max-height: 820px) {
+      #title-overlay {
+        justify-content: flex-start;
+        align-content: start;
+        padding-top: 16px;
+        padding-bottom: 16px;
+      }
+      #title-overlay h1 {
+        font-size: 36px;
+        letter-spacing: 4px;
+        margin-bottom: 6px;
+      }
+      .title-copy-panel {
+        padding: 14px 24px;
+        margin-bottom: 6px;
+      }
+      #title-overlay .tagline {
+        margin-bottom: 12px;
+      }
+      #title-best {
+        margin-top: 4px;
+        margin-bottom: 10px;
+      }
+      #title-actions {
+        gap: 6px;
+        margin-top: 4px;
+      }
+      .title-action-btn {
+        padding: 8px 20px;
+        font-size: 12px;
+        letter-spacing: 3px;
+      }
+      .contracts-preview-panel {
+        width: min(360px, calc(100vw - 32px));
+        margin-top: 6px;
+        padding: 10px 14px;
+      }
+      .contracts-preview-panel > div:first-child {
+        margin-bottom: 6px !important;
+      }
+      .contracts-preview-panel > button {
+        margin-top: 8px !important;
+      }
+      .title-leaderboard-panel,
+      .game-over-leaderboard-panel {
+        position: static;
+        width: min(400px, calc(100vw - 32px));
+        margin: 6px 0 0;
+      }
+      .title-leaderboard-panel {
+        padding: 10px 14px;
+      }
+      .game-over-leaderboard-panel {
+        padding: 10px 14px;
+      }
+      .game-over-card {
+        width: min(400px, calc(100vw - 32px));
+        margin-top: 6px;
+        margin-bottom: 14px;
+        padding: 14px 18px;
+      }
+      .game-over-card .stat-row + .stat-row {
+        margin-top: 6px;
+      }
+      .game-over-card .stat-value {
+        font-size: 18px;
+      }
+      .game-over-card .stat-total {
+        margin-top: 10px;
+        padding-top: 10px;
+      }
+      .game-over-card .stat-total .stat-value {
+        font-size: 20px;
+      }
+      #share-score-btn {
+        margin-bottom: 16px;
+        padding: 8px 20px;
+        font-size: 12px;
+        letter-spacing: 2px;
       }
     }
     #share-score-btn {
@@ -5098,7 +5255,7 @@ ${a_}`)};const s=`top-down-shadow-${r_++}`,a=n.customProgramCacheKey;n.customPro
 Can you beat today's tower?
 #gamedevjs #gamedev @tommyatoai`:`I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️
 Can you beat my score?
-#gamedevjs #gamedev @tommyatoai`,Z=`https://x.com/intent/tweet?text=${encodeURIComponent(j)}&url=${encodeURIComponent("https://tommyato.com/games/clockwork-climb/")}`;window.open(Z,"_blank","noopener,noreferrer")}),window.addEventListener("keydown",P=>{P.key==="Escape"&&(P.preventDefault(),this.state===1?this.pauseGame():this.state===3&&this.resumeGame())});const D=P=>!!(P&&(P.closest("#pause-restart")||P.closest("#pause-title")||P.closest("button")));this.pauseOverlay.addEventListener("click",P=>{D(P.target)||this.resumeGame()}),this.pauseOverlay.addEventListener("touchend",P=>{D(P.target)||(P.preventDefault(),this.resumeGame())},{passive:!1}),document.getElementById("pause-restart")?.addEventListener("click",P=>{P.stopPropagation(),this.startGame()});const Ze=document.getElementById("pause-title");Ze&&(Ze.addEventListener("click",P=>{P.preventDefault(),P.stopPropagation(),this.returnToTitle()}),this.pauseTitleBtn=Ze);const it=document.getElementById("gameover-title");it&&it.addEventListener("click",P=>{P.preventDefault(),P.stopPropagation(),this.returnToTitle()}),this.pauseBtn.addEventListener("click",P=>{P.stopPropagation(),this.state===1&&this.pauseGame()});const ye=P=>{this.state!==0&&this.state!==2||P.target.closest("button")||(P.preventDefault(),this.startGame())};this.titleOverlay.addEventListener("click",ye),this.titleOverlay.addEventListener("touchend",ye,{passive:!1});const E=P=>{P.preventDefault(),P.stopPropagation(),!(this.state!==0&&this.state!==2)&&this.startGame()};this.titlePrompt.addEventListener("click",E),this.titlePrompt.addEventListener("touchend",E,{passive:!1}),this.resetVisualWorld();const{state:_}=this.sim.reset();this.consumeState(_),this.syncVisuals(_),this.player.mesh.position.set(0,.32,0),this.buildBackgroundAtmosphere(this.getMaxGearHeight(_)+24),this.buildTitleBackdrop(),await this.refreshLeaderboardPanels(),this.setupAchievementsUi(),this.loadAchievementCatalog(),this.setupMultiplayerUi(e),this.initAIGhost(),this.setupAIGhostButton(),this.setupDailyChallengeButton(),this.setupContractsUi(e),this.rerollPreviewContracts(),this.renderContractsPreview(),this.updateHud(Cr()),this.updateOverlayText(),this.input.setTouchControlsVisible(!1),window.addEventListener("resize",()=>this.onResize()),C_(()=>this.pauseAnimationLoop(),()=>this.resumeAnimationLoop()),ea(hc()&&this.saveData.audioEnabled),R_(P=>ea(P)),await E_()}createLeaderboardPanels(){this.titleLeaderboardPanel=this.buildLeaderboardPanel("TOP 10 SCORES"),this.titleLeaderboardContext=this.titleLeaderboardPanel.querySelector("[data-role='context']"),this.titleLeaderboardThreshold=this.titleLeaderboardPanel.querySelector("[data-role='threshold']"),this.titleLeaderboardList=this.titleLeaderboardPanel.querySelector("[data-role='list']"),this.titleLeaderboardPanel.style.position="absolute",this.titleLeaderboardPanel.style.right="20px",this.titleLeaderboardPanel.style.bottom="24px",this.titleLeaderboardPanel.style.width="min(340px, calc(100vw - 40px))",this.titleOverlay.appendChild(this.titleLeaderboardPanel),this.gameOverLeaderboardPanel=this.buildLeaderboardPanel("RUN CONTEXT"),this.gameOverLeaderboardContext=this.gameOverLeaderboardPanel.querySelector("[data-role='context']"),this.gameOverLeaderboardThreshold=this.gameOverLeaderboardPanel.querySelector("[data-role='threshold']"),this.gameOverLeaderboardList=this.gameOverLeaderboardPanel.querySelector("[data-role='list']"),this.gameOverLeaderboardPanel.style.marginTop="0",this.gameOverLeaderboardPanel.style.marginBottom="20px",this.gameOverLeaderboardPanel.style.width="min(400px, calc(100vw - 40px))",this.gameOverLeaderboardPanel.classList.add("hidden"),this.titleOverlay.insertBefore(this.gameOverLeaderboardPanel,this.shareScoreBtn)}buildLeaderboardPanel(e){const t=document.createElement("div");return t.style.padding="16px 18px",t.style.borderRadius="18px",t.style.border="1px solid rgba(255, 196, 120, 0.18)",t.style.background="linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62))",t.style.boxShadow="0 16px 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08)",t.style.backdropFilter="blur(10px)",t.style.fontFamily='ui-monospace, "Cascadia Code", "Fira Code", monospace',t.style.color="#f3d7b1",t.style.textAlign="left",t.innerHTML=`
+#gamedevjs #gamedev @tommyatoai`,Z=`https://x.com/intent/tweet?text=${encodeURIComponent(j)}&url=${encodeURIComponent("https://tommyato.com/games/clockwork-climb/")}`;window.open(Z,"_blank","noopener,noreferrer")}),window.addEventListener("keydown",P=>{P.key==="Escape"&&(P.preventDefault(),this.state===1?this.pauseGame():this.state===3&&this.resumeGame())});const D=P=>!!(P&&(P.closest("#pause-restart")||P.closest("#pause-title")||P.closest("button")));this.pauseOverlay.addEventListener("click",P=>{D(P.target)||this.resumeGame()}),this.pauseOverlay.addEventListener("touchend",P=>{D(P.target)||(P.preventDefault(),this.resumeGame())},{passive:!1}),document.getElementById("pause-restart")?.addEventListener("click",P=>{P.stopPropagation(),this.startGame()});const Ze=document.getElementById("pause-title");Ze&&(Ze.addEventListener("click",P=>{P.preventDefault(),P.stopPropagation(),this.returnToTitle()}),this.pauseTitleBtn=Ze);const it=document.getElementById("gameover-title");it&&it.addEventListener("click",P=>{P.preventDefault(),P.stopPropagation(),this.returnToTitle()}),this.pauseBtn.addEventListener("click",P=>{P.stopPropagation(),this.state===1&&this.pauseGame()});const ye=P=>{this.state!==0&&this.state!==2||P.target.closest("button")||(P.preventDefault(),this.startGame())};this.titleOverlay.addEventListener("click",ye),this.titleOverlay.addEventListener("touchend",ye,{passive:!1});const E=P=>{P.preventDefault(),P.stopPropagation(),!(this.state!==0&&this.state!==2)&&this.startGame()};this.titlePrompt.addEventListener("click",E),this.titlePrompt.addEventListener("touchend",E,{passive:!1}),this.resetVisualWorld();const{state:_}=this.sim.reset();this.consumeState(_),this.syncVisuals(_),this.player.mesh.position.set(0,.32,0),this.buildBackgroundAtmosphere(this.getMaxGearHeight(_)+24),this.buildTitleBackdrop(),await this.refreshLeaderboardPanels(),this.setupAchievementsUi(),this.loadAchievementCatalog(),this.setupMultiplayerUi(e),this.initAIGhost(),this.setupAIGhostButton(),this.setupDailyChallengeButton(),this.setupContractsUi(e),this.rerollPreviewContracts(),this.renderContractsPreview(),this.updateHud(Cr()),this.updateOverlayText(),this.input.setTouchControlsVisible(!1),window.addEventListener("resize",()=>this.onResize()),C_(()=>this.pauseAnimationLoop(),()=>this.resumeAnimationLoop()),ea(hc()&&this.saveData.audioEnabled),R_(P=>ea(P)),await E_()}createLeaderboardPanels(){this.titleLeaderboardPanel=this.buildLeaderboardPanel("TOP 10 SCORES"),this.titleLeaderboardPanel.classList.add("leaderboard-panel","title-leaderboard-panel"),this.titleLeaderboardContext=this.titleLeaderboardPanel.querySelector("[data-role='context']"),this.titleLeaderboardThreshold=this.titleLeaderboardPanel.querySelector("[data-role='threshold']"),this.titleLeaderboardList=this.titleLeaderboardPanel.querySelector("[data-role='list']"),this.titleOverlay.appendChild(this.titleLeaderboardPanel),this.gameOverLeaderboardPanel=this.buildLeaderboardPanel("RUN CONTEXT"),this.gameOverLeaderboardPanel.classList.add("leaderboard-panel","game-over-leaderboard-panel"),this.gameOverLeaderboardContext=this.gameOverLeaderboardPanel.querySelector("[data-role='context']"),this.gameOverLeaderboardThreshold=this.gameOverLeaderboardPanel.querySelector("[data-role='threshold']"),this.gameOverLeaderboardList=this.gameOverLeaderboardPanel.querySelector("[data-role='list']"),this.gameOverLeaderboardPanel.classList.add("hidden"),this.titleOverlay.insertBefore(this.gameOverLeaderboardPanel,this.shareScoreBtn)}buildLeaderboardPanel(e){const t=document.createElement("div");return t.style.padding="16px 18px",t.style.borderRadius="18px",t.style.border="1px solid rgba(255, 196, 120, 0.18)",t.style.background="linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62))",t.style.boxShadow="0 16px 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08)",t.style.backdropFilter="blur(10px)",t.style.fontFamily='ui-monospace, "Cascadia Code", "Fira Code", monospace',t.style.color="#f3d7b1",t.style.textAlign="left",t.innerHTML=`
       <div style="font-size:11px; letter-spacing:2px; color:#c7a271; margin-bottom:8px;">${e}</div>
       <div data-role="context" style="font-size:11px; letter-spacing:2px; color:#7fd6ff; margin-bottom:10px;"></div>
       <div data-role="threshold" style="font-size:10px; letter-spacing:1.4px; color:#ffcf84; margin-bottom:10px; line-height:1.35;"></div>
@@ -5107,7 +5264,7 @@ Can you beat my score?
         <span style="color:#c7a271;">#${a.rank}</span>
         <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${cs(a.username)}</span>
         <span style="color:#ffaa44; font-weight:700;">${a.score}</span>
-      </div>`).join("")}getLeaderboardThresholdCallout(e){if(e.length===0)return"TARGETS · SCORE 500+ · HEIGHT 25m+ · COMBO x3+";const t=e[0],i=Math.max(500,Math.ceil(t.score/500)*500),s=Math.max(25,Math.ceil(this.saveData.bestHeight/25)*25||25),a=Math.max(3,Math.min(10,Math.ceil(Math.max(this.saveData.bestCombo,this.bestCombo)/2)+1));return`TARGETS · SCORE ${i}+ · HEIGHT ${s}m+ · COMBO x${a}+`}getGameOverCallout(){if(this.isDailyChallenge){const e=Mv(yv());return this.dailyPreviousBest!==null?`DAILY BEST: ${this.dailyPreviousBest} · COME BACK TOMORROW · NEW RUN IN ${e} UTC`:`COME BACK TOMORROW · NEW RUN IN ${e} UTC`}return`CHECKPOINTS · NEXT ${this.nextMilestone}m · ZONES 25/50/75/100`}setupAchievementsUi(){const e=document.getElementById("achievements-btn"),t=document.getElementById("achievements-overlay"),i=document.getElementById("achievements-close");!e||!t||!i||(this.achievementsButton=e,this.achievementsPanel=t,e.addEventListener("click",s=>{s.preventDefault(),s.stopPropagation(),this.openAchievementsPanel()}),e.addEventListener("touchend",s=>{s.preventDefault(),s.stopPropagation(),this.openAchievementsPanel()},{passive:!1}),i.addEventListener("click",s=>{s.preventDefault(),s.stopPropagation(),this.closeAchievementsPanel()}),i.addEventListener("touchend",s=>{s.preventDefault(),s.stopPropagation(),this.closeAchievementsPanel()},{passive:!1}),t.addEventListener("click",s=>{s.target===t?(s.preventDefault(),s.stopPropagation(),this.closeAchievementsPanel()):s.stopPropagation()}))}async loadAchievementCatalog(){try{const e=cc();this.achievementCatalog=e.map(t=>({id:t.id,title:t.displayName,description:t.description}))}catch(e){console.error("Failed to load achievement catalog",e),this.achievementCatalog=[]}}setupDailyChallengeButton(){const e=document.createElement("button");e.type="button",e.className="title-action-btn",e.textContent="DAILY CHALLENGE",Object.assign(e.style,{border:"1px solid rgba(255, 210, 110, 0.5)",background:"linear-gradient(180deg, rgba(58, 38, 10, 0.94), rgba(28, 18, 6, 0.84))",boxShadow:"0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 239, 184, 0.24)",color:"#ffe19d"}),e.addEventListener("click",i=>{i.preventDefault(),i.stopPropagation(),this.startDailyChallenge()}),e.addEventListener("touchend",i=>{i.preventDefault(),i.stopPropagation(),this.startDailyChallenge()},{passive:!1});const t=document.getElementById("title-actions");t?t.appendChild(e):this.titlePrompt.insertAdjacentElement("afterend",e)}startDailyChallenge(){this.isDailyChallenge=!0,this.dailyChallengeDate=Bn(),this.dailyPreviousBest=this.readDailyBest(this.dailyChallengeDate),this.sim.setSeed(xv(this.dailyChallengeDate)),this.startGame()}setupContractsUi(e){const t=document.createElement("div");Object.assign(t.style,{position:"absolute",top:"220px",right:"20px",width:"248px",padding:"12px 14px",borderRadius:"14px",border:"1px solid rgba(255, 196, 120, 0.18)",background:"linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62))",boxShadow:"0 12px 28px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08)",backdropFilter:"blur(10px)",fontFamily:'ui-monospace, "Cascadia Code", "Fira Code", monospace',color:"#f3d7b1",pointerEvents:"none",zIndex:"11",display:"none"});const i=document.createElement("div");i.textContent="CONTRACTS",Object.assign(i.style,{fontSize:"10px",letterSpacing:"2.5px",color:"#c7a271",marginBottom:"8px"}),t.appendChild(i);const s=document.createElement("div");Object.assign(s.style,{display:"grid",gap:"6px"}),t.appendChild(s),e.appendChild(t),this.contractsHudPanel=t,this.contractsHudList=s;const a=document.createElement("div");Object.assign(a.style,{marginTop:"12px",padding:"14px 16px",borderRadius:"16px",border:"1px solid rgba(255, 196, 120, 0.22)",background:"linear-gradient(180deg, rgba(32, 22, 14, 0.86), rgba(14, 10, 8, 0.74))",boxShadow:"0 14px 32px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.12)",backdropFilter:"blur(10px)",fontFamily:'ui-monospace, "Cascadia Code", "Fira Code", monospace',color:"#f3d7b1",width:"min(360px, calc(100vw - 40px))",pointerEvents:"auto",textAlign:"left"});const r=document.createElement("div");r.textContent="RUN CONTRACTS · BONUSES ON COMPLETION",Object.assign(r.style,{fontSize:"11px",letterSpacing:"2px",color:"#c7a271",marginBottom:"10px"}),a.appendChild(r);const o=document.createElement("div");Object.assign(o.style,{display:"grid",gap:"8px"}),a.appendChild(o);const l=document.createElement("button");l.type="button",l.textContent="REROLL",Object.assign(l.style,{marginTop:"10px",padding:"6px 14px",borderRadius:"999px",border:"1px solid rgba(255, 196, 120, 0.32)",background:"linear-gradient(180deg, rgba(42, 28, 14, 0.94), rgba(18, 12, 6, 0.82))",color:"#ffe19d",cursor:"pointer",fontFamily:'ui-monospace, "Cascadia Code", "Fira Code", monospace',fontSize:"11px",fontWeight:"700",letterSpacing:"2px"}),l.addEventListener("click",c=>{c.preventDefault(),c.stopPropagation(),ls(),this.rerollPreviewContracts(),this.renderContractsPreview()}),a.appendChild(l),this.contractsPreviewPanel=a,this.contractsPreviewList=o,this.titleOverlay.insertBefore(a,this.titleLeaderboardPanel)}rerollPreviewContracts(){this.previewContracts=Sv(3)}renderContractsPreview(){this.contractsPreviewList.innerHTML=this.previewContracts.map(e=>`
+      </div>`).join("")}getLeaderboardThresholdCallout(e){if(e.length===0)return"TARGETS · SCORE 500+ · HEIGHT 25m+ · COMBO x3+";const t=e[0],i=Math.max(500,Math.ceil(t.score/500)*500),s=Math.max(25,Math.ceil(this.saveData.bestHeight/25)*25||25),a=Math.max(3,Math.min(10,Math.ceil(Math.max(this.saveData.bestCombo,this.bestCombo)/2)+1));return`TARGETS · SCORE ${i}+ · HEIGHT ${s}m+ · COMBO x${a}+`}getGameOverCallout(){if(this.isDailyChallenge){const e=Mv(yv());return this.dailyPreviousBest!==null?`DAILY BEST: ${this.dailyPreviousBest} · COME BACK TOMORROW · NEW RUN IN ${e} UTC`:`COME BACK TOMORROW · NEW RUN IN ${e} UTC`}return`CHECKPOINTS · NEXT ${this.nextMilestone}m · ZONES 25/50/75/100`}setupAchievementsUi(){const e=document.getElementById("achievements-btn"),t=document.getElementById("achievements-overlay"),i=document.getElementById("achievements-close");!e||!t||!i||(this.achievementsButton=e,this.achievementsPanel=t,e.addEventListener("click",s=>{s.preventDefault(),s.stopPropagation(),this.openAchievementsPanel()}),e.addEventListener("touchend",s=>{s.preventDefault(),s.stopPropagation(),this.openAchievementsPanel()},{passive:!1}),i.addEventListener("click",s=>{s.preventDefault(),s.stopPropagation(),this.closeAchievementsPanel()}),i.addEventListener("touchend",s=>{s.preventDefault(),s.stopPropagation(),this.closeAchievementsPanel()},{passive:!1}),t.addEventListener("click",s=>{s.target===t?(s.preventDefault(),s.stopPropagation(),this.closeAchievementsPanel()):s.stopPropagation()}))}async loadAchievementCatalog(){try{const e=cc();this.achievementCatalog=e.map(t=>({id:t.id,title:t.displayName,description:t.description}))}catch(e){console.error("Failed to load achievement catalog",e),this.achievementCatalog=[]}}setupDailyChallengeButton(){const e=document.createElement("button");e.type="button",e.className="title-action-btn",e.textContent="DAILY CHALLENGE",Object.assign(e.style,{border:"1px solid rgba(255, 210, 110, 0.5)",background:"linear-gradient(180deg, rgba(58, 38, 10, 0.94), rgba(28, 18, 6, 0.84))",boxShadow:"0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 239, 184, 0.24)",color:"#ffe19d"}),e.addEventListener("click",i=>{i.preventDefault(),i.stopPropagation(),this.startDailyChallenge()}),e.addEventListener("touchend",i=>{i.preventDefault(),i.stopPropagation(),this.startDailyChallenge()},{passive:!1});const t=document.getElementById("title-actions");t?t.appendChild(e):this.titlePrompt.insertAdjacentElement("afterend",e)}startDailyChallenge(){this.isDailyChallenge=!0,this.dailyChallengeDate=Bn(),this.dailyPreviousBest=this.readDailyBest(this.dailyChallengeDate),this.sim.setSeed(xv(this.dailyChallengeDate)),this.startGame()}setupContractsUi(e){const t=document.createElement("div");Object.assign(t.style,{position:"absolute",top:"220px",right:"20px",width:"248px",padding:"12px 14px",borderRadius:"14px",border:"1px solid rgba(255, 196, 120, 0.18)",background:"linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62))",boxShadow:"0 12px 28px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08)",backdropFilter:"blur(10px)",fontFamily:'ui-monospace, "Cascadia Code", "Fira Code", monospace',color:"#f3d7b1",pointerEvents:"none",zIndex:"11",display:"none"});const i=document.createElement("div");i.textContent="CONTRACTS",Object.assign(i.style,{fontSize:"10px",letterSpacing:"2.5px",color:"#c7a271",marginBottom:"8px"}),t.appendChild(i);const s=document.createElement("div");Object.assign(s.style,{display:"grid",gap:"6px"}),t.appendChild(s),e.appendChild(t),this.contractsHudPanel=t,this.contractsHudList=s;const a=document.createElement("div");Object.assign(a.style,{marginTop:"12px",padding:"14px 16px",borderRadius:"16px",border:"1px solid rgba(255, 196, 120, 0.22)",background:"linear-gradient(180deg, rgba(32, 22, 14, 0.86), rgba(14, 10, 8, 0.74))",boxShadow:"0 14px 32px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.12)",backdropFilter:"blur(10px)",fontFamily:'ui-monospace, "Cascadia Code", "Fira Code", monospace',color:"#f3d7b1",pointerEvents:"auto",textAlign:"left"}),a.classList.add("contracts-preview-panel");const r=document.createElement("div");r.textContent="RUN CONTRACTS · BONUSES ON COMPLETION",Object.assign(r.style,{fontSize:"11px",letterSpacing:"2px",color:"#c7a271",marginBottom:"10px"}),a.appendChild(r);const o=document.createElement("div");Object.assign(o.style,{display:"grid",gap:"8px"}),a.appendChild(o);const l=document.createElement("button");l.type="button",l.textContent="REROLL",Object.assign(l.style,{marginTop:"10px",padding:"6px 14px",borderRadius:"999px",border:"1px solid rgba(255, 196, 120, 0.32)",background:"linear-gradient(180deg, rgba(42, 28, 14, 0.94), rgba(18, 12, 6, 0.82))",color:"#ffe19d",cursor:"pointer",fontFamily:'ui-monospace, "Cascadia Code", "Fira Code", monospace',fontSize:"11px",fontWeight:"700",letterSpacing:"2px"}),l.addEventListener("click",c=>{c.preventDefault(),c.stopPropagation(),ls(),this.rerollPreviewContracts(),this.renderContractsPreview()}),a.appendChild(l),this.contractsPreviewPanel=a,this.contractsPreviewList=o,this.titleOverlay.insertBefore(a,this.titleLeaderboardPanel)}rerollPreviewContracts(){this.previewContracts=Sv(3)}renderContractsPreview(){this.contractsPreviewList.innerHTML=this.previewContracts.map(e=>`
         <div style="display:grid; grid-template-columns: 14px 1fr auto; gap:10px; align-items:baseline; font-size:12px; letter-spacing:1px;">
           <span style="color:#c7a271;">◯</span>
           <span style="color:#f3d7b1;">${cs(e.def.label)}</span>

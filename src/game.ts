@@ -1004,22 +1004,17 @@ export class Game {
 
   private createLeaderboardPanels() {
     this.titleLeaderboardPanel = this.buildLeaderboardPanel("TOP 10 SCORES");
+    this.titleLeaderboardPanel.classList.add("leaderboard-panel", "title-leaderboard-panel");
     this.titleLeaderboardContext = this.titleLeaderboardPanel.querySelector("[data-role='context']") as HTMLElement;
     this.titleLeaderboardThreshold = this.titleLeaderboardPanel.querySelector("[data-role='threshold']") as HTMLElement;
     this.titleLeaderboardList = this.titleLeaderboardPanel.querySelector("[data-role='list']") as HTMLElement;
-    this.titleLeaderboardPanel.style.position = "absolute";
-    this.titleLeaderboardPanel.style.right = "20px";
-    this.titleLeaderboardPanel.style.bottom = "24px";
-    this.titleLeaderboardPanel.style.width = "min(340px, calc(100vw - 40px))";
     this.titleOverlay.appendChild(this.titleLeaderboardPanel);
 
     this.gameOverLeaderboardPanel = this.buildLeaderboardPanel("RUN CONTEXT");
+    this.gameOverLeaderboardPanel.classList.add("leaderboard-panel", "game-over-leaderboard-panel");
     this.gameOverLeaderboardContext = this.gameOverLeaderboardPanel.querySelector("[data-role='context']") as HTMLElement;
     this.gameOverLeaderboardThreshold = this.gameOverLeaderboardPanel.querySelector("[data-role='threshold']") as HTMLElement;
     this.gameOverLeaderboardList = this.gameOverLeaderboardPanel.querySelector("[data-role='list']") as HTMLElement;
-    this.gameOverLeaderboardPanel.style.marginTop = "0";
-    this.gameOverLeaderboardPanel.style.marginBottom = "20px";
-    this.gameOverLeaderboardPanel.style.width = "min(400px, calc(100vw - 40px))";
     this.gameOverLeaderboardPanel.classList.add("hidden");
     this.titleOverlay.insertBefore(this.gameOverLeaderboardPanel, this.shareScoreBtn);
   }
@@ -1279,10 +1274,10 @@ export class Game {
       backdropFilter: "blur(10px)",
       fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
       color: "#f3d7b1",
-      width: "min(360px, calc(100vw - 40px))",
       pointerEvents: "auto",
       textAlign: "left",
     } as CSSStyleDeclaration);
+    previewPanel.classList.add("contracts-preview-panel");
 
     const previewHeading = document.createElement("div");
     previewHeading.textContent = "RUN CONTRACTS · BONUSES ON COMPLETION";
