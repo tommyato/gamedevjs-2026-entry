@@ -1162,7 +1162,7 @@ export class Game {
       position: "absolute",
       top: "220px",
       right: "20px",
-      width: "220px",
+      width: "248px",
       padding: "12px 14px",
       borderRadius: "14px",
       border: "1px solid rgba(255, 196, 120, 0.18)",
