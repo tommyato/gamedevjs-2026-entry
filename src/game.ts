@@ -45,6 +45,7 @@ import {
   signalGameReady,
   signalLoadComplete,
   storeStats,
+  submitDailyScore,
   submitScores,
   unlockAchievement,
   updateStat,
@@ -150,6 +151,48 @@ const DEFAULT_SAVE_DATA: SaveData = {
   audioEnabled: true,
 };
 
+function fnv1a(str: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i += 1) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash;
+}
+
+function utcDateKey(date = new Date()): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function dailySeed(dateKey = utcDateKey()): number {
+  return fnv1a(`clockwork-climb-${dateKey}`);
+}
+
+function dailyBestStorageKey(dateKey: string): string {
+  return `clockwork-daily-best-${dateKey}`;
+}
+
+function getUtcMsUntilTomorrow(date = new Date()): number {
+  const nextMidnightUtc = Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate() + 1,
+    0,
+    0,
+    0,
+    0
+  );
+  return Math.max(0, nextMidnightUtc - date.getTime());
+}
+
+function formatCountdown(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 export class Game {
   private renderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
@@ -162,9 +205,13 @@ export class Game {
   private hasRenderedFirstFrame = false;
 
   private readonly input = new Input();
-  private readonly sim = new ClockworkClimbSimulation();
+  private readonly regularSeed = Math.floor(Math.random() * 0x1_0000_0000);
+  private readonly sim = new ClockworkClimbSimulation({ seed: this.regularSeed });
   private simState: SimState | null = null;
   private state = GameState.Title;
+  private isDailyChallenge = false;
+  private dailyChallengeDate = utcDateKey();
+  private dailyPreviousBest: number | null = null;
   private score = 0;
   private heightScore = 0;
   private heightMaxReached = 0;
@@ -597,7 +644,9 @@ export class Game {
     this.shareScoreBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const text = `I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️\nCan you beat my score?\n#gamedevjs #gamedev @tommyatoai`;
+      const text = this.isDailyChallenge
+        ? `I scored ${this.score} climbing ${this.heightMaxReached}m in the Clockwork Climb Daily Challenge (${this.dailyChallengeDate})! ⚙️\nCan you beat today's tower?\n#gamedevjs #gamedev @tommyatoai`
+        : `I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️\nCan you beat my score?\n#gamedevjs #gamedev @tommyatoai`;
       const shareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://tommyato.com/games/clockwork-climb/")}`;
       window.open(shareUrl, "_blank", "noopener,noreferrer");
     });
@@ -697,6 +746,7 @@ export class Game {
     this.setupMultiplayerUi(container);
     this.initAIGhost();
     this.setupAIGhostButton();
+    this.setupDailyChallengeButton();
     this.updateHud(dtZero());
     this.updateOverlayText();
     this.input.setTouchControlsVisible(false);
@@ -754,8 +804,8 @@ export class Game {
     return panel;
   }
 
-  private async refreshLeaderboardPanels() {
-    const entries = await fetchLeaderboardScores();
+  private async refreshLeaderboardPanels(slug: "high-score" | "daily-score" = "high-score") {
+    const entries = await fetchLeaderboardScores(slug);
     const normalizedEntries = entries.map((entry, index) => ({
       username: entry.username,
       score: entry.score,
@@ -774,7 +824,9 @@ export class Game {
       this.gameOverLeaderboardContext,
       this.gameOverLeaderboardList,
       this.gameOverLeaderboardEntries,
-      `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
+      slug === "daily-score"
+        ? `DAILY CHALLENGE · ${this.dailyChallengeDate} · THIS RUN ${this.score}`
+        : `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
     );
     this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
   }
@@ -813,6 +865,12 @@ export class Game {
   }
 
   private getGameOverCallout() {
+    if (this.isDailyChallenge) {
+      const countdown = formatCountdown(getUtcMsUntilTomorrow());
+      return this.dailyPreviousBest !== null
+        ? `DAILY BEST: ${this.dailyPreviousBest} · COME BACK TOMORROW · NEW RUN IN ${countdown} UTC`
+        : `COME BACK TOMORROW · NEW RUN IN ${countdown} UTC`;
+    }
     return `CHECKPOINTS · NEXT ${this.nextMilestone}m · ZONES 25/50/75/100`;
   }
 
@@ -879,6 +937,44 @@ export class Game {
       console.error("Failed to load achievement catalog", error);
       this.achievementCatalog = [];
     }
+  }
+
+  private setupDailyChallengeButton(): void {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "title-action-btn";
+    btn.textContent = "DAILY CHALLENGE";
+    Object.assign(btn.style, {
+      border: "1px solid rgba(255, 210, 110, 0.5)",
+      background: "linear-gradient(180deg, rgba(58, 38, 10, 0.94), rgba(28, 18, 6, 0.84))",
+      boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 239, 184, 0.24)",
+      color: "#ffe19d",
+    } as CSSStyleDeclaration);
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.startDailyChallenge();
+    });
+    btn.addEventListener("touchend", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.startDailyChallenge();
+    }, { passive: false });
+
+    const actions = document.getElementById("title-actions");
+    if (actions) {
+      actions.appendChild(btn);
+    } else {
+      this.titlePrompt.insertAdjacentElement("afterend", btn);
+    }
+  }
+
+  private startDailyChallenge(): void {
+    this.isDailyChallenge = true;
+    this.dailyChallengeDate = utcDateKey();
+    this.dailyPreviousBest = this.readDailyBest(this.dailyChallengeDate);
+    this.sim.setSeed(dailySeed(this.dailyChallengeDate));
+    this.startGame();
   }
 
   private openAchievementsPanel() {
@@ -957,6 +1053,10 @@ export class Game {
   private returnToTitle() {
     playClick();
 
+    this.isDailyChallenge = false;
+    this.dailyChallengeDate = utcDateKey();
+    this.dailyPreviousBest = null;
+    this.sim.setSeed(this.regularSeed);
     this.state = GameState.Title;
     this.pauseOverlay.classList.add("hidden");
     this.hud.classList.add("hidden");
@@ -1398,7 +1498,7 @@ export class Game {
   // -----------------------------------------------------------------------
 
   private initAIGhost(): void {
-    if (!this.aiGhostEnabled) return;
+    if (!this.aiGhostEnabled || this.isDailyChallenge) return;
     this.aiGhost = new AIGhost("model-weights.json");
     void this.aiGhost.load().then((ok) => {
       if (ok) console.log("[game] AI ghost ready");
@@ -1501,12 +1601,12 @@ export class Game {
   }
 
   private resetAIGhost(): void {
-    if (!this.aiGhostEnabled || !this.aiGhost?.isReady()) return;
+    if (!this.aiGhostEnabled || this.isDailyChallenge || !this.aiGhost?.isReady()) return;
     this.aiGhost.reset();
   }
 
   private updateAIGhost(dt: number): void {
-    if (!this.aiGhostEnabled || !this.aiGhost?.isReady()) return;
+    if (!this.aiGhostEnabled || this.isDailyChallenge || !this.aiGhost?.isReady()) return;
     this.aiGhost.update(dt);
     const gs = this.aiGhost.getGhostState();
     if (!gs || !gs.alive) return;
@@ -1795,6 +1895,11 @@ export class Game {
   }
 
   private startGame() {
+    if (!this.isDailyChallenge) {
+      this.dailyChallengeDate = utcDateKey();
+      this.dailyPreviousBest = null;
+      this.sim.setSeed(this.regularSeed);
+    }
     initAudio();
     playClick();
     this.resumeAnimationLoop();
@@ -1869,7 +1974,9 @@ export class Game {
       this.aiGhostButton.style.display = "none";
     }
     this.clearGhostMeshes();
-    this.resetAIGhost();
+    if (!this.isDailyChallenge) {
+      this.resetAIGhost();
+    }
   }
 
   private pauseGame() {
@@ -1991,6 +2098,11 @@ export class Game {
     this.shieldSaveOverlay.style.opacity = "0";
     this.closeCallOverlay.style.opacity = "0";
 
+    if (this.isDailyChallenge) {
+      this.dailyChallengeDate = utcDateKey();
+      this.dailyPreviousBest = this.readDailyBest(this.dailyChallengeDate);
+    }
+
     const runPlaytime = Math.max(0, this.elapsedTime - this.runStartElapsedTime);
     const isNewBest = this.score > this.saveData.bestScore;
     const nextSaveData: SaveData = {
@@ -2023,7 +2135,13 @@ export class Game {
     }).catch((error: unknown) => {
       console.error("Failed to submit score", error);
     });
-    void this.refreshLeaderboardPanels().catch((error: unknown) => {
+    if (this.isDailyChallenge) {
+      this.writeDailyBest(this.dailyChallengeDate, this.score);
+      void submitDailyScore(this.score).catch((error: unknown) => {
+        console.error("Failed to submit daily score", error);
+      });
+    }
+    void this.refreshLeaderboardPanels(this.isDailyChallenge ? "daily-score" : "high-score").catch((error: unknown) => {
       console.error("Failed to refresh leaderboard panels", error);
     });
 
@@ -2067,6 +2185,10 @@ export class Game {
       this.titleTagline.textContent = `SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m · BEST ${this.highScore}`;
       this.titleTagline.classList.remove("new-best");
     }
+    if (this.isDailyChallenge) {
+      this.titleTagline.textContent = `DAILY CHALLENGE · ${this.dailyChallengeDate} · SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
+      this.titleTagline.classList.remove("new-best");
+    }
     this.titlePrompt.textContent = "RESTART";
     this.titleActions.classList.add("hidden");
 
@@ -2081,8 +2203,11 @@ export class Game {
       this.gameOverLeaderboardContext,
       this.gameOverLeaderboardList,
       this.gameOverLeaderboardEntries,
-      `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
+      this.isDailyChallenge
+        ? `DAILY CHALLENGE · ${this.dailyChallengeDate} · THIS RUN ${this.score}`
+        : `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
     );
+    this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
     this.gameOverCard.classList.remove("hidden");
     this.gameOverLeaderboardPanel.classList.remove("hidden");
     this.shareScoreBtn.classList.remove("hidden");
@@ -2131,9 +2256,42 @@ export class Game {
     }
   }
 
+  private readDailyBest(dateKey: string): number | null {
+    try {
+      const raw = localStorage.getItem(dailyBestStorageKey(dateKey));
+      if (!raw) {
+        return null;
+      }
+      const score = parseInt(raw, 10);
+      return Number.isFinite(score) ? score : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeDailyBest(dateKey: string, score: number): void {
+    if (!Number.isFinite(score) || score <= 0) {
+      return;
+    }
+
+    const currentBest = this.readDailyBest(dateKey);
+    if (currentBest !== null && currentBest >= score) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(dailyBestStorageKey(dateKey), String(Math.floor(score)));
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
   private updateGameOver(dt: number) {
     this.updateWorld(dt);
     this.updatePlayerLight(dt);
+    if (this.isDailyChallenge) {
+      this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
+    }
 
     if (this.deathAnimTimer > 0) {
       this.deathAnimTimer -= dt;
@@ -3072,7 +3230,9 @@ export class Game {
     this.hudScore.textContent = String(this.score);
     this.hudBest.textContent = `${Math.max(this.saveData.bestHeight, this.heightMaxReached)}m`;
     this.hudBolts.textContent = String(this.boltCount);
-    this.hudStatus.textContent = `HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
+    this.hudStatus.textContent = this.isDailyChallenge
+      ? `DAILY CHALLENGE · ${this.dailyChallengeDate} · HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`
+      : `HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
     this.updateComboHud(this.simState?.comboMultiplier ?? 1);
 
     const djCharges = this.simState?.player.doubleJumpCharges ?? 0;

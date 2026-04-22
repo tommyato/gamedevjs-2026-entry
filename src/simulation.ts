@@ -71,7 +71,7 @@ export class ClockworkClimbSimulation {
     { moveX: 0, moveY: 1, jump: true },     // 7: forward + jump
   ];
 
-  private readonly initialSeed: number;
+  private initialSeed: number;
   private readonly fixedDt: number | null;
 
   private rng: () => number;
@@ -108,6 +108,10 @@ export class ClockworkClimbSimulation {
     this.fixedDt = Number.isFinite(config.fixedDt) ? Number(config.fixedDt) : null;
     this.rng = mulberry32(this.initialSeed);
     this.state = this.createInitialState();
+  }
+
+  setSeed(seed: number): void {
+    this.initialSeed = seed >>> 0;
   }
 
   reset(): { state: SimState; events: SimEvent[] } {

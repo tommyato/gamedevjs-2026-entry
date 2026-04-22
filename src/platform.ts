@@ -60,7 +60,7 @@ type WavedashLeaderboardQueryResponse =
     }
   | WavedashLeaderboardData;
 
-export type LeaderboardSlug = "high-score" | "highest-climb" | "best-combo";
+export type LeaderboardSlug = "high-score" | "highest-climb" | "best-combo" | "daily-score";
 export type AchievementProgress = {
   id: string;
   displayName: string;
@@ -137,12 +137,13 @@ const DEFAULT_USERNAME = "Player";
 const DEFAULT_SAVE_KEY = "gameSave";
 const LOCAL_LEADERBOARD_KEY = "clockwork-climb-local-leaderboards";
 const LOCAL_LEADERBOARD_LIMIT = 10;
-const LEADERBOARD_SLUGS: readonly LeaderboardSlug[] = ["high-score", "highest-climb", "best-combo"];
+const LEADERBOARD_SLUGS: readonly LeaderboardSlug[] = ["high-score", "highest-climb", "best-combo", "daily-score"];
 let resolvedWavedashSdk: WavedashSdk | null = null;
 const resolvedLeaderboardIds: Record<LeaderboardSlug, string | null> = {
   "high-score": null,
   "highest-climb": null,
   "best-combo": null,
+  "daily-score": null,
 };
 
 function hasWavedash(): boolean {
@@ -257,6 +258,14 @@ export async function submitScores(input: { score: number; height: number; combo
   writeLocalLeaderboardEntry("high-score", { username, score: input.score });
   writeLocalLeaderboardEntry("highest-climb", { username, score: input.height });
   writeLocalLeaderboardEntry("best-combo", { username, score: input.combo });
+}
+
+export async function submitDailyScore(score: number) {
+  const wavedash = getWavedashSdkSync();
+  await uploadLeaderboardValue(wavedash, "daily-score", score);
+
+  const username = getUsername();
+  writeLocalLeaderboardEntry("daily-score", { username, score });
 }
 
 export async function fetchLeaderboardScores(slug: LeaderboardSlug = "high-score"): Promise<WavedashLeaderboardEntry[]> {
@@ -480,6 +489,7 @@ function writeLocalLeaderboardEntry(slug: LeaderboardSlug, entry: WavedashLeader
     "high-score": [],
     "highest-climb": [],
     "best-combo": [],
+    "daily-score": [],
   });
   const nextEntries = [...(store[slug] ?? []), entry]
     .sort((left, right) => right.score - left.score)
@@ -494,6 +504,7 @@ function readLocalLeaderboardEntries(slug: LeaderboardSlug): WavedashLeaderboard
     "high-score": [],
     "highest-climb": [],
     "best-combo": [],
+    "daily-score": [],
   });
   return (store[slug] ?? []).slice(0, LOCAL_LEADERBOARD_LIMIT).map((entry, index) => ({
     username: entry.username ?? DEFAULT_USERNAME,
