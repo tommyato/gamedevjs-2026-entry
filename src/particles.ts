@@ -432,6 +432,68 @@ export class ParticleSystem {
     }
   }
 
+  spawnJumpSteam(position: THREE.Vector3) {
+    const count = 4 + Math.floor(Math.random() * 3);
+    for (let index = 0; index < count; index += 1) {
+      const particle = this.acquire();
+      if (!particle) {
+        return;
+      }
+
+      particle.kind = "steam";
+      particle.life = 0;
+      particle.maxLife = 0.5 + Math.random() * 0.3;
+      particle.drag = 0.8;
+      particle.gravity = -0.4;
+      particle.mesh.visible = true;
+      particle.mesh.position.set(
+        position.x + (Math.random() - 0.5) * 0.15,
+        position.y + 0.05,
+        position.z + (Math.random() - 0.5) * 0.15
+      );
+      particle.velocity.set(
+        (Math.random() - 0.5) * 0.4,
+        0.6 + Math.random() * 0.4,
+        (Math.random() - 0.5) * 0.4
+      );
+      this.scale.setScalar(0.2 + Math.random() * 0.1);
+      particle.mesh.scale.copy(this.scale);
+      // Warm white with brass undertone
+      this.setMaterial(particle, Math.random() > 0.6 ? 0xf5e9d4 : 0xc7a271, 0.6);
+    }
+  }
+
+  spawnBrassLandingSparks(position: THREE.Vector3) {
+    const count = 3 + Math.floor(Math.random() * 2);
+    for (let index = 0; index < count; index += 1) {
+      const particle = this.acquire();
+      if (!particle) {
+        return;
+      }
+
+      particle.kind = "spark";
+      particle.life = 0;
+      particle.maxLife = 0.3;
+      particle.drag = 1.6;
+      particle.gravity = 5.0;
+      particle.mesh.visible = true;
+      particle.mesh.position.set(
+        position.x + (Math.random() - 0.5) * 0.18,
+        position.y + 0.03,
+        position.z + (Math.random() - 0.5) * 0.18
+      );
+      particle.velocity.set(
+        (Math.random() - 0.5) * 1.0,
+        1.2 + Math.random() * 0.6,
+        (Math.random() - 0.5) * 1.0
+      );
+      this.scale.setScalar(0.035 + Math.random() * 0.015);
+      particle.mesh.scale.copy(this.scale);
+      // Bright yellow-orange fade
+      this.setMaterial(particle, Math.random() > 0.5 ? 0xffc96b : 0xff8a2a, 0.9);
+    }
+  }
+
   spawnIceCrystals(position: THREE.Vector3, radius: number) {
     const count = 2 + Math.floor(Math.random() * 2);
     for (let i = 0; i < count; i++) {

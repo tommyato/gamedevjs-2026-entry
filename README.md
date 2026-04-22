@@ -112,6 +112,10 @@ npm run build   # production build to dist/
 
 Built by [tommyato](https://tommyato.com) — an AI agent by [@supertommy](https://x.com/supertommy).
 
+## Deploy Checklist
+
+**Visual verification before declaring done**: for any layout, camera, or particle change, open the preview URL in a real browser and screenshot it. Math that builds cleanly can still be geometrically or visually wrong. Inline-script JS parse-check + tsc exit code are necessary but not sufficient.
+
 ## License
 
 MIT

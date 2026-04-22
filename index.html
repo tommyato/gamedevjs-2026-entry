@@ -419,6 +419,45 @@
       background: rgba(0, 0, 0, 0.24);
       backdrop-filter: blur(6px);
       justify-content: center;
+      align-items: center;
+    }
+    #title-overlay.game-over .title-copy-panel {
+      margin-bottom: 12px;
+    }
+    #title-overlay.game-over h1 {
+      font-size: clamp(24px, 2.6vw, 36px);
+      margin-bottom: 4px;
+    }
+    #title-overlay.game-over .tagline {
+      font-size: 12px;
+      letter-spacing: 3px;
+    }
+    /* Game-over grid wrapper */
+    .game-over-view {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      max-width: 1120px;
+      width: 100%;
+      align-items: start;
+    }
+    #game-over-left-col {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    #game-over-right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .game-over-footer {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 8px;
     }
     #title-overlay h1 {
       font-family: "Orbitron", ui-monospace, monospace; font-size: clamp(36px, 5vw, 56px); font-weight: 900;
@@ -500,8 +539,16 @@
     }
     .game-over-leaderboard-panel {
       margin-top: 0;
-      margin-bottom: 20px;
-      width: min(520px, calc(100vw - 40px));
+      margin-bottom: 0;
+      width: 100%;
+      max-width: 100%;
+    }
+    #share-score-btn.in-gameover-footer {
+      width: auto;
+      min-width: 140px;
+      font-size: 11px;
+      padding: 9px 18px;
+      letter-spacing: 2.5px;
     }
     #title-overlay .tagline {
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 14px; color: #aabbcc;
@@ -604,10 +651,10 @@
       animation: glow 1.2s ease-in-out infinite;
     }
     .game-over-card {
-      width: min(480px, calc(100vw - 40px));
-      max-width: min(480px, calc(100vw - 40px));
-      margin-top: 8px;
-      margin-bottom: 20px;
+      width: 100%;
+      max-width: 100%;
+      margin-top: 0;
+      margin-bottom: 0;
       padding: 20px 26px;
       border-radius: 18px;
       border: 1px solid rgba(255, 196, 120, 0.18);
@@ -719,18 +766,14 @@
       align-items: baseline;
     }
     .gameover-actions {
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-top: 16px;
+      display: contents;
     }
     .gameover-actions .title-action-btn {
       width: auto;
       min-width: 140px;
-      font-size: 12px;
-      padding: 10px 20px;
-      letter-spacing: 3px;
+      font-size: 11px;
+      padding: 9px 18px;
+      letter-spacing: 2.5px;
     }
     #share-score-btn {
       margin-bottom: 24px;
@@ -989,6 +1032,23 @@
       overflow: auto;
     }
     .hidden { display: none !important; }
+    @media (max-width: 1024px) {
+      /* Stack game-over on mobile/tablet */
+      .game-over-view {
+        grid-template-columns: 1fr;
+        max-width: min(520px, calc(100vw - 40px));
+      }
+      #game-over-left-col,
+      #game-over-right-col {
+        width: 100%;
+      }
+      .game-over-card {
+        margin-bottom: 16px;
+      }
+      .game-over-leaderboard-panel {
+        margin-bottom: 16px;
+      }
+    }
     @media (max-width: 720px) {
       .hud-panel {
         top: 14px;
@@ -1200,24 +1260,33 @@
           <button type="button" class="title-action-btn" id="title-btn-leaderboard">LEADERBOARD</button>
         </div>
       </div>
-      <div class="game-over-card game-over-layout hidden">
-        <div class="stat-row"><span class="stat-label">HEIGHT SCORE</span><span class="stat-value" id="go-height"></span></div>
-        <div class="stat-row"><span class="stat-label">BOLT SCORE</span><span class="stat-value" id="go-bolts"></span></div>
-        <div class="stat-row"><span class="stat-label">BOLTS COLLECTED</span><span class="stat-value" id="go-bolt-count"></span></div>
-        <div class="stat-row"><span class="stat-label">BEST COMBO</span><span class="stat-value" id="go-combo"></span></div>
-        <div class="stat-row"><span class="stat-label">TIME</span><span class="stat-value" id="go-time"></span></div>
-        <div class="stat-row hidden" id="go-contracts-row"><span class="stat-label">CONTRACT BONUS</span><span class="stat-value" id="go-contracts"></span></div>
-        <div class="stat-row stat-total"><span class="stat-label">TOTAL SCORE</span><span class="stat-value" id="go-total"></span></div>
-        <div id="gameover-contracts" class="hidden"></div>
-        <div id="gameover-unlocks" class="hidden"></div>
-        <div class="gameover-actions">
-          <button id="gameover-achievements" type="button" class="title-action-btn">ACHIEVEMENTS</button>
-          <button id="gameover-leaderboard" type="button" class="title-action-btn">LEADERBOARD</button>
-          <button id="gameover-play-again" type="button" class="title-action-btn">PLAY AGAIN</button>
-          <button id="gameover-title" type="button" class="title-action-btn">TITLE SCREEN</button>
+      <div class="game-over-view hidden" id="game-over-view">
+        <div id="game-over-left-col">
+          <div class="game-over-card game-over-layout">
+            <div class="stat-row"><span class="stat-label">HEIGHT SCORE</span><span class="stat-value" id="go-height"></span></div>
+            <div class="stat-row"><span class="stat-label">BOLT SCORE</span><span class="stat-value" id="go-bolts"></span></div>
+            <div class="stat-row"><span class="stat-label">BOLTS COLLECTED</span><span class="stat-value" id="go-bolt-count"></span></div>
+            <div class="stat-row"><span class="stat-label">BEST COMBO</span><span class="stat-value" id="go-combo"></span></div>
+            <div class="stat-row"><span class="stat-label">TIME</span><span class="stat-value" id="go-time"></span></div>
+            <div class="stat-row hidden" id="go-contracts-row"><span class="stat-label">CONTRACT BONUS</span><span class="stat-value" id="go-contracts"></span></div>
+            <div class="stat-row stat-total"><span class="stat-label">TOTAL SCORE</span><span class="stat-value" id="go-total"></span></div>
+          </div>
+          <div id="gameover-contracts" class="hidden"></div>
+          <div id="gameover-unlocks" class="hidden"></div>
+        </div>
+        <div id="game-over-right-col">
+          <!-- Leaderboard panel will be appended here by game.ts -->
+        </div>
+        <div class="game-over-footer">
+          <div class="gameover-actions">
+            <button id="gameover-achievements" type="button" class="title-action-btn">ACHIEVEMENTS</button>
+            <button id="gameover-leaderboard" type="button" class="title-action-btn">LEADERBOARD</button>
+            <button id="share-score-btn" type="button" class="title-action-btn">SHARE ON X</button>
+            <button id="gameover-play-again" type="button" class="title-action-btn">PLAY AGAIN</button>
+            <button id="gameover-title" type="button" class="title-action-btn">TITLE SCREEN</button>
+          </div>
         </div>
       </div>
-      <button id="share-score-btn" class="hidden" type="button">SHARE ON X</button>
     </div>
     <div id="achievements-overlay" class="hidden" aria-hidden="true">
       <div class="achievements-card">

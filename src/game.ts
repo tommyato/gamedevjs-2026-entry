@@ -424,6 +424,7 @@ export class Game {
   private comboGlowOverlay!: HTMLDivElement;
   private scorePopLayer!: HTMLDivElement;
   private soundToggleBtn!: HTMLElement;
+  private pauseOverlay!: HTMLElement;
   private closeCallOverlay!: HTMLElement;
   private shieldSaveOverlay!: HTMLElement;
   private tutorialOverlay!: HTMLElement;
@@ -433,6 +434,7 @@ export class Game {
   private titleTagline!: HTMLElement;
   private titleBest!: HTMLElement;
   private titlePrompt!: HTMLElement;
+  private gameOverView!: HTMLElement;
   private gameOverCard!: HTMLElement;
   private shareScoreBtn!: HTMLButtonElement;
   private achievementsButton: HTMLButtonElement | null = null;
@@ -453,7 +455,6 @@ export class Game {
   private gameOverTimeEl!: HTMLElement;
   private gameOverTotalEl!: HTMLElement;
   private zoneAnnouncement!: HTMLElement;
-  private pauseOverlay!: HTMLElement;
   private pauseBtn!: HTMLElement;
   private titleLeaderboardPanel!: HTMLElement;
   private titleLeaderboardContext!: HTMLElement;
@@ -501,13 +502,7 @@ export class Game {
   private readonly landingCueCore = new THREE.Mesh(new THREE.CircleGeometry(0.2, 10), this.landingCueCoreMaterial);
   private readonly landingCueRing = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.3, 18), this.landingCueRingMaterial);
   private readonly landingCueGlow = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.34, 18), this.landingCueGlowMaterial);
-  // Footstep trail — motion-history ribbon
-  private trailSamplingActive = false;
-  private trailSampleTimer = 0;
-  private readonly trailSamples: Array<{ position: THREE.Vector3; bornAt: number }> = [];
-  private readonly trailPool: THREE.Sprite[] = [];
-  private readonly _trailColorFresh = new THREE.Color(0xffcc66);
-  private readonly _trailColorOld = new THREE.Color(0x8a6a3a);
+  // Footstep trail removed - replaced with jump/landing particle bursts
   private readonly _trailColorTemp = new THREE.Color();
   private highlightedGearId: number | null = null;
   private hudOverlaySvg: SVGSVGElement | null = null;
@@ -748,34 +743,7 @@ export class Game {
     this.landingCueCore.renderOrder = 13;
     this.scene.add(this.landingCueGroup);
 
-    // Footstep trail: radial-gradient disc texture shared across an 8-sprite pool.
-    const trailCanvas = document.createElement("canvas");
-    trailCanvas.width = 64;
-    trailCanvas.height = 64;
-    const trailCtx = trailCanvas.getContext("2d")!;
-    const trailGradient = trailCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
-    trailGradient.addColorStop(0, "rgba(255,255,255,1.0)");
-    trailGradient.addColorStop(0.55, "rgba(255,255,255,0.65)");
-    trailGradient.addColorStop(1, "rgba(255,255,255,0)");
-    trailCtx.fillStyle = trailGradient;
-    trailCtx.fillRect(0, 0, 64, 64);
-    const trailTexture = new THREE.CanvasTexture(trailCanvas);
-    for (let ti = 0; ti < 8; ti++) {
-      const mat = new THREE.SpriteMaterial({
-        map: trailTexture,
-        color: 0xffcc66,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const sprite = new THREE.Sprite(mat);
-      sprite.scale.setScalar(0.01);
-      sprite.visible = false;
-      sprite.userData.skipTopDownShadowCaster = true;
-      this.trailPool.push(sprite);
-      this.scene.add(sprite);
-    }
+    // Footstep trail removed - replaced with jump/landing particle bursts
     this.player.reset(0, 2);
     this.player.mesh.position.set(0, 0.32, 0);
 
@@ -853,6 +821,7 @@ export class Game {
     const titleBest = document.getElementById("title-best");
     const titleActions = document.getElementById("title-actions");
     const prompt = this.titleOverlay.querySelector(".prompt");
+    const gameOverView = document.getElementById("game-over-view");
     const gameOverCard = this.titleOverlay.querySelector(".game-over-card");
     const shareScoreBtn = document.getElementById("share-score-btn");
     const gameOverHeight = document.getElementById("go-height");
@@ -867,6 +836,7 @@ export class Game {
       !titleBest ||
       !titleActions ||
       !prompt ||
+      !gameOverView ||
       !gameOverCard ||
       !shareScoreBtn ||
       !gameOverHeight ||
@@ -884,6 +854,7 @@ export class Game {
     this.titleBest = titleBest;
     this.titleActions = titleActions;
     this.titlePrompt = prompt as HTMLElement;
+    this.gameOverView = gameOverView;
     this.gameOverCard = gameOverCard as HTMLElement;
     this.shareScoreBtn = shareScoreBtn as HTMLButtonElement;
     this.gameOverHeightEl = gameOverHeight;
@@ -1070,7 +1041,10 @@ export class Game {
     this.gameOverLeaderboardThreshold = this.gameOverLeaderboardPanel.querySelector("[data-role='threshold']") as HTMLElement;
     this.gameOverLeaderboardList = this.gameOverLeaderboardPanel.querySelector("[data-role='list']") as HTMLElement;
     this.gameOverLeaderboardPanel.classList.add("hidden");
-    this.titleOverlay.insertBefore(this.gameOverLeaderboardPanel, this.shareScoreBtn);
+    const gameOverRightCol = document.getElementById("game-over-right-col");
+    if (gameOverRightCol) {
+      gameOverRightCol.appendChild(this.gameOverLeaderboardPanel);
+    }
   }
 
   private buildLeaderboardPanel(title: string): HTMLElement {
@@ -1617,17 +1591,15 @@ export class Game {
     this.flushAchievementUnlockQueue();
     this.pauseOverlay.classList.add("hidden");
     this.hud.classList.add("hidden");
-    this.gameOverCard.classList.add("hidden");
+    this.gameOverView.classList.add("hidden");
     this.gameOverLeaderboardPanel.classList.add("hidden");
-    this.shareScoreBtn.classList.add("hidden");
     this.titleLeaderboardPanel.classList.remove("hidden");
     this.titleOverlay.classList.remove("hidden");
     this.closeCallOverlay.style.opacity = "0";
     this.shieldSaveOverlay.style.opacity = "0";
     this.hideTutorialOverlay(true);
     this.hideLandingCueHard();
-    this.trailSamplingActive = false;
-    this.clearFootstepTrail();
+    // Trail sampling removed
     if (this.personalBestRing) {
       this.personalBestRing.visible = false;
     }
@@ -2406,8 +2378,7 @@ export class Game {
         break;
     }
 
-    // Trail disc update runs every frame so samples fade out after game-over/title.
-    this.updateFootstepTrailDiscs();
+    // Trail disc update removed - particles updated via particle system
 
     this.topDownShadow.update(this.player.mesh.position);
     this.topDownShadow.render();
@@ -2510,10 +2481,9 @@ export class Game {
     this.titleOverlay.classList.add("hidden");
     this.titleOverlay.classList.remove("game-over");
     this.pauseOverlay.classList.add("hidden");
-    this.gameOverCard.classList.add("hidden");
+    this.gameOverView.classList.add("hidden");
     this.titleLeaderboardPanel.classList.remove("hidden");
     this.gameOverLeaderboardPanel.classList.add("hidden");
-    this.shareScoreBtn.classList.add("hidden");
     this.titleTagline.classList.remove("new-best");
     this.titleBest.classList.add("hidden");
     this.zoneAnnouncement.style.opacity = "0";
@@ -2523,9 +2493,7 @@ export class Game {
     startAmbientTick();
     startMusic();
     this.hideLandingCueHard();
-    this.clearFootstepTrail();
-    this.trailSamplingActive = true;
-    this.trailSampleTimer = 0;
+    // Trail sampling removed - particles spawn on jump/landing events
 
     if (this.personalBestRing) {
       this.personalBestRing.position.set(0, this.personalBestHeight, 0);
@@ -2588,9 +2556,7 @@ export class Game {
     this.updateWorld(dt);
     this.updateCamera(dt, state);
     this.updateLandingCue(state, dt);
-    if (this.trailSamplingActive) {
-      this.sampleFootstepTrail(dt, state.player);
-    }
+    // Trail sampling removed - particles now spawn on jump/landing events
     this.updatePersonalBestRing(state.player.y);
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
@@ -2648,8 +2614,7 @@ export class Game {
     // should have been flushed already on dismiss, but guard just in case.
     this.achievementUnlockQueue.length = 0;
     this.renderGameOverUnlocks();
-    // Stop adding new samples; existing trail fades out naturally over 600ms.
-    this.trailSamplingActive = false;
+    // Trail sampling removed
     if (this.personalBestRing) {
       this.personalBestRing.visible = false;
     }
@@ -2805,9 +2770,8 @@ export class Game {
         : `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
     );
     this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
-    this.gameOverCard.classList.remove("hidden");
+    this.gameOverView.classList.remove("hidden");
     this.gameOverLeaderboardPanel.classList.remove("hidden");
-    this.shareScoreBtn.classList.remove("hidden");
 
     if (this.multiplayer.isActive()) {
       this.renderMultiplayerGameOverBoard();
@@ -3156,12 +3120,13 @@ export class Game {
         case "jump":
           this.landingEffectPosition.set(event.x, event.y, event.z);
           playJump();
-          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          this.particles.spawnJumpSteam(this.landingEffectPosition);
           this.cameraKick = Math.max(this.cameraKick, 0.12);
           break;
         case "gear_block":
           this.landingEffectPosition.set(event.x, event.y, event.z);
           this.particles.spawnGearBonkSparks(this.landingEffectPosition, event.impactSpeed);
+          this.particles.spawnBrassLandingSparks(this.landingEffectPosition);
           this.player.bonk(event.impactSpeed);
           this.triggerLandingShake(Math.min(0.04 + event.impactSpeed * 0.006, 0.1));
           this.cameraKick = Math.max(this.cameraKick, Math.min(event.impactSpeed * 0.008, 0.12));
@@ -3178,17 +3143,16 @@ export class Game {
           break;
         case "bounce_jump":
           this.landingEffectPosition.set(event.x, event.y, event.z);
-          this.particles.spawnJumpSparks(this.landingEffectPosition);
-          this.particles.spawnJumpSparks(this.landingEffectPosition);
-          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          this.particles.spawnJumpSteam(this.landingEffectPosition);
+          this.particles.spawnJumpSteam(this.landingEffectPosition);
           playJump(1.45);
           this.cameraKick = Math.max(this.cameraKick, 0.18);
           this.player.bouncyLaunch();
           break;
         case "double_jump":
           this.landingEffectPosition.set(event.x, event.y, event.z);
-          this.particles.spawnJumpSparks(this.landingEffectPosition);
-          this.particles.spawnJumpSparks(this.landingEffectPosition);
+          this.particles.spawnJumpSteam(this.landingEffectPosition);
+          this.particles.spawnJumpSteam(this.landingEffectPosition);
           playJump(1.25);
           this.cameraKick = Math.max(this.cameraKick, 0.16);
           this.doubleJumpFlashTimer = 0.5;
@@ -3197,7 +3161,7 @@ export class Game {
           this.contractPowerupsCollected += 1;
           if (event.powerUpType === "double_jump") {
             this.landingEffectPosition.set(event.x, event.y, event.z);
-            this.particles.spawnJumpSparks(this.landingEffectPosition);
+            this.particles.spawnJumpSteam(this.landingEffectPosition);
             this.particles.spawnJumpSparks(this.landingEffectPosition);
             this.showToast(`DOUBLE JUMP +3! (×${state.player.doubleJumpCharges} total)`);
           } else if (event.powerUpType === "shield") {
@@ -3533,69 +3497,8 @@ export class Game {
     this.setHighlightedGear(landingSurface.gearId);
   }
 
-  // --- Footstep trail ---
-
-  /** Hard-clear all trail samples and hide every pool disc immediately. */
-  private clearFootstepTrail() {
-    this.trailSamples.length = 0;
-    for (const sprite of this.trailPool) {
-      sprite.visible = false;
-    }
-  }
-
-  /** Record a position sample; called from updatePlaying while trailSamplingActive. */
-  private sampleFootstepTrail(dt: number, player: { x: number; y: number; z: number }) {
-    this.trailSampleTimer -= dt;
-    if (this.trailSampleTimer > 0) return;
-    this.trailSampleTimer = 0.060;
-    if (this.trailSamples.length >= 8) {
-      this.trailSamples.shift(); // drop oldest
-    }
-    this.trailSamples.push({
-      position: new THREE.Vector3(player.x, player.y, player.z),
-      bornAt: performance.now(),
-    });
-  }
-
-  /**
-   * Update disc pool each frame — runs regardless of GameState so trail fades
-   * smoothly after run ends. Sampling is gated by trailSamplingActive.
-   */
-  private updateFootstepTrailDiscs() {
-    const now = performance.now();
-    const LIFETIME_MS = 600;
-    // Sprite scale = radius * 2 (diameter) — base radius is 0.35 world units.
-    const BASE_DIAMETER = 0.70;
-
-    for (let i = 0; i < 8; i++) {
-      const sprite = this.trailPool[i];
-      const sample = this.trailSamples[i];
-
-      if (!sample) {
-        sprite.visible = false;
-        continue;
-      }
-
-      const ageMs = now - sample.bornAt;
-      if (ageMs >= LIFETIME_MS) {
-        sprite.visible = false;
-        continue;
-      }
-
-      const t = ageMs / LIFETIME_MS; // 0 (fresh) → 1 (dying)
-      const opacity = THREE.MathUtils.lerp(0.8, 0, t);
-      const scale = THREE.MathUtils.lerp(1.0, 0.55, t) * BASE_DIAMETER;
-
-      this._trailColorTemp.lerpColors(this._trailColorFresh, this._trailColorOld, t);
-
-      sprite.position.copy(sample.position);
-      sprite.visible = true;
-      sprite.scale.setScalar(scale);
-      const mat = sprite.material as THREE.SpriteMaterial;
-      mat.opacity = opacity;
-      mat.color.copy(this._trailColorTemp);
-    }
-  }
+  // --- Footstep trail removed — particles now spawn on jump/landing events ---
+  // Old clearFootstepTrail, sampleFootstepTrail, and updateFootstepTrailDiscs methods removed
 
   private setHighlightedGear(gearId: number | null) {
     if (this.highlightedGearId === gearId) {
