@@ -2652,7 +2652,7 @@ export class Game {
         }
         case "challenge_zone_enter":
           this.showZoneAnnouncement("⚙ CHALLENGE ZONE!");
-          this.challengeZoneBloomBoost = 0.18;
+          this.challengeZoneBloomBoost = 0.08;
           break;
         case "challenge_zone_exit":
           if (event.bonusScore > 0) {
@@ -3453,7 +3453,7 @@ export class Game {
       { height: 25, bg: 0x0f1318, fogDensity: 0.012, ambient: 0x8899bb, ambientIntensity: 1.1, bloom: 0.22 },
       { height: 50, bg: 0x181b22, fogDensity: 0.010, ambient: 0xb8c4dd, ambientIntensity: 1.25, bloom: 0.26 },
       { height: 75, bg: 0x1a1408, fogDensity: 0.008, ambient: 0xffd6a3, ambientIntensity: 1.5, bloom: 0.32 },
-      { height: 100, bg: 0x0a0a14, fogDensity: 0.006, ambient: 0xff88aa, ambientIntensity: 1.8, bloom: 0.40 },
+      { height: 100, bg: 0x0a0a14, fogDensity: 0.006, ambient: 0xff88aa, ambientIntensity: 1.5, bloom: 0.30 },
     ];
 
     let from = zones[0];
