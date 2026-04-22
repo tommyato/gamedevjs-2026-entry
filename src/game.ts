@@ -193,6 +193,152 @@ function formatCountdown(ms: number): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+// -------------------------------------------------------------------------
+// Run Contracts — per-run mini-challenges that award a score bonus on
+// completion. Three are rolled at the start of each non-daily run and shown
+// live in the HUD. Defs are pure — progress is computed from the sim state
+// plus a handful of run-local counters tracked on the Game class.
+// -------------------------------------------------------------------------
+
+type ContractCtx = {
+  state: SimState;
+  nearMisses: number;
+  powerupsCollected: number;
+  // Seconds since the last shield_save event (or since run start if never).
+  timeSinceLastShieldBreak: number;
+  runTime: number;
+};
+
+type ContractDef = {
+  readonly id: string;
+  readonly label: string;
+  readonly target: number;
+  readonly reward: number;
+  // Returns current (unclamped) progress value in the same unit as `target`.
+  readonly progress: (ctx: ContractCtx) => number;
+  // Optional custom progress text (e.g. "12/50m"); defaults to "n/target".
+  readonly format?: (progress: number, target: number) => string;
+};
+
+type ContractInstance = {
+  def: ContractDef;
+  progress: number;
+  complete: boolean;
+  celebrateTimer: number;
+};
+
+const CONTRACT_POOL: readonly ContractDef[] = [
+  {
+    id: "reach-50",
+    label: "Reach 50m",
+    target: 50,
+    reward: 500,
+    progress: (ctx) => ctx.state.heightMaxReached,
+    format: (p, t) => `${Math.min(Math.floor(p), t)}/${t}m`,
+  },
+  {
+    id: "reach-100",
+    label: "Reach 100m",
+    target: 100,
+    reward: 1000,
+    progress: (ctx) => ctx.state.heightMaxReached,
+    format: (p, t) => `${Math.min(Math.floor(p), t)}/${t}m`,
+  },
+  {
+    id: "collect-15",
+    label: "Collect 15 bolts",
+    target: 15,
+    reward: 400,
+    progress: (ctx) => ctx.state.boltCount,
+  },
+  {
+    id: "collect-30",
+    label: "Collect 30 bolts",
+    target: 30,
+    reward: 800,
+    progress: (ctx) => ctx.state.boltCount,
+  },
+  {
+    id: "combo-5",
+    label: "Hit a 5x combo",
+    target: 5,
+    reward: 500,
+    progress: (ctx) => ctx.state.bestCombo,
+    format: (p, t) => `x${Math.min(Math.floor(p), t)}/x${t}`,
+  },
+  {
+    id: "combo-8",
+    label: "Hit an 8x combo",
+    target: 8,
+    reward: 1000,
+    progress: (ctx) => ctx.state.bestCombo,
+    format: (p, t) => `x${Math.min(Math.floor(p), t)}/x${t}`,
+  },
+  {
+    id: "near-miss-5",
+    label: "Land 5 near-misses",
+    target: 5,
+    reward: 600,
+    progress: (ctx) => ctx.nearMisses,
+  },
+  {
+    id: "survive-60",
+    label: "Survive 60s",
+    target: 60,
+    reward: 500,
+    progress: (ctx) => ctx.runTime,
+    format: (p, t) => `${Math.min(Math.floor(p), t)}/${t}s`,
+  },
+  {
+    id: "no-shield-break-45",
+    label: "Survive 45s without a shield break",
+    target: 45,
+    reward: 700,
+    progress: (ctx) => ctx.timeSinceLastShieldBreak,
+    format: (p, t) => `${Math.min(Math.floor(p), t)}/${t}s`,
+  },
+  {
+    id: "air-bolt-chain-3",
+    label: "Chain 3 air bolts",
+    target: 3,
+    reward: 500,
+    progress: (ctx) => ctx.state.bestAirBoltChain,
+  },
+  {
+    id: "challenge-zone-1",
+    label: "Clear 1 Challenge Zone",
+    target: 1,
+    reward: 600,
+    progress: (ctx) => ctx.state.completedChallengeZones,
+  },
+  {
+    id: "powerups-3",
+    label: "Collect 3 power-ups",
+    target: 3,
+    reward: 400,
+    progress: (ctx) => ctx.powerupsCollected,
+  },
+];
+
+function pickRandomContracts(count: number): ContractInstance[] {
+  const pool = [...CONTRACT_POOL];
+  const picked: ContractInstance[] = [];
+  for (let i = 0; i < count && pool.length > 0; i += 1) {
+    const idx = Math.floor(Math.random() * pool.length);
+    const [def] = pool.splice(idx, 1);
+    picked.push({ def, progress: 0, complete: false, celebrateTimer: 0 });
+  }
+  return picked;
+}
+
+function formatContractProgress(instance: ContractInstance): string {
+  const { def, progress } = instance;
+  if (def.format) {
+    return def.format(progress, def.target);
+  }
+  return `${Math.min(Math.floor(progress), def.target)}/${def.target}`;
+}
+
 export class Game {
   private renderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
@@ -332,6 +478,7 @@ export class Game {
   private aiGhost: AIGhost | null = null;
   private aiGhostEnabled: boolean = isAIGhostEnabled();
   private aiGhostButton: HTMLButtonElement | null = null;
+  private hudAiBadge: HTMLElement | null = null;
   private multiplayerPanel: HTMLDivElement | null = null;
   private multiplayerButton: HTMLButtonElement | null = null;
   private multiplayerStatus: HTMLDivElement | null = null;
@@ -379,6 +526,28 @@ export class Game {
   private tutorialFadeTimer: number | null = null;
   private tutorialHideTimer: number | null = null;
   private tutorialDismissHandler: (() => void) | null = null;
+
+  // Tracks the last sim-side score so score-pops reflect sim-earned points
+  // only. Contract bonuses generate their own pops at the moment they
+  // complete; they would double-count if routed through this diff.
+  private lastSimScore = 0;
+
+  // Run Contracts state.
+  private activeContracts: ContractInstance[] = [];
+  // Pre-rolled contracts shown on the title/game-over screen that will be
+  // committed when the player starts a new (non-daily) run.
+  private previewContracts: ContractInstance[] = [];
+  private contractBonus = 0;
+  private contractNearMisses = 0;
+  private contractPowerupsCollected = 0;
+  // elapsedTime at which the last shield_save event fired (for the
+  // "survive N seconds without a shield break" contract).
+  private contractLastShieldSaveAt = 0;
+  private contractRunStartAt = 0;
+  private contractsHudPanel!: HTMLDivElement;
+  private contractsHudList!: HTMLDivElement;
+  private contractsPreviewPanel!: HTMLDivElement;
+  private contractsPreviewList!: HTMLDivElement;
 
   private readonly zoneNames = [
     "BRONZE DEPTHS",
@@ -557,6 +726,7 @@ export class Game {
     if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !hudDoubleJumpCharges || !hudShieldCount || !soundToggleBtn || !closeCallOverlay || !shieldSaveOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective || !zoneAnnouncement) {
       throw new Error("Missing HUD elements");
     }
+    this.hudAiBadge = document.getElementById("hud-ai-badge");
 
     this.hud = hud;
     this.titleOverlay = titleOverlay;
@@ -747,6 +917,9 @@ export class Game {
     this.initAIGhost();
     this.setupAIGhostButton();
     this.setupDailyChallengeButton();
+    this.setupContractsUi(container);
+    this.rerollPreviewContracts();
+    this.renderContractsPreview();
     this.updateHud(dtZero());
     this.updateOverlayText();
     this.input.setTouchControlsVisible(false);
@@ -977,6 +1150,235 @@ export class Game {
     this.startGame();
   }
 
+  // -----------------------------------------------------------------------
+  // Run Contracts — UI, rolling, live tracking, completion bonuses.
+  // -----------------------------------------------------------------------
+
+  private setupContractsUi(container: HTMLElement): void {
+    // Live HUD panel — top-right, below the main HUD card. Matches the
+    // frosted-glass look of the powerup HUD so the two read as siblings.
+    const hudPanel = document.createElement("div");
+    Object.assign(hudPanel.style, {
+      position: "absolute",
+      top: "220px",
+      right: "20px",
+      width: "220px",
+      padding: "12px 14px",
+      borderRadius: "14px",
+      border: "1px solid rgba(255, 196, 120, 0.18)",
+      background: "linear-gradient(180deg, rgba(27, 18, 14, 0.78), rgba(13, 10, 9, 0.62))",
+      boxShadow: "0 12px 28px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.08)",
+      backdropFilter: "blur(10px)",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      color: "#f3d7b1",
+      pointerEvents: "none",
+      zIndex: "11",
+      display: "none",
+    } as CSSStyleDeclaration);
+
+    const hudHeading = document.createElement("div");
+    hudHeading.textContent = "CONTRACTS";
+    Object.assign(hudHeading.style, {
+      fontSize: "10px",
+      letterSpacing: "2.5px",
+      color: "#c7a271",
+      marginBottom: "8px",
+    } as CSSStyleDeclaration);
+    hudPanel.appendChild(hudHeading);
+
+    const hudList = document.createElement("div");
+    Object.assign(hudList.style, {
+      display: "grid",
+      gap: "6px",
+    } as CSSStyleDeclaration);
+    hudPanel.appendChild(hudList);
+    container.appendChild(hudPanel);
+
+    this.contractsHudPanel = hudPanel;
+    this.contractsHudList = hudList;
+
+    // Pre-run preview panel on the title overlay. Placed after the button
+    // stack so the PLAY / ACHIEVEMENTS / DAILY / MULTIPLAYER buttons remain
+    // the eye-grabbing primary CTAs, and the contracts are a useful but
+    // secondary "here's what you're signing up for" callout.
+    const previewPanel = document.createElement("div");
+    Object.assign(previewPanel.style, {
+      marginTop: "12px",
+      padding: "14px 16px",
+      borderRadius: "16px",
+      border: "1px solid rgba(255, 196, 120, 0.22)",
+      background: "linear-gradient(180deg, rgba(32, 22, 14, 0.86), rgba(14, 10, 8, 0.74))",
+      boxShadow: "0 14px 32px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 226, 176, 0.12)",
+      backdropFilter: "blur(10px)",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      color: "#f3d7b1",
+      width: "min(360px, calc(100vw - 40px))",
+      pointerEvents: "auto",
+      textAlign: "left",
+    } as CSSStyleDeclaration);
+
+    const previewHeading = document.createElement("div");
+    previewHeading.textContent = "RUN CONTRACTS · BONUSES ON COMPLETION";
+    Object.assign(previewHeading.style, {
+      fontSize: "11px",
+      letterSpacing: "2px",
+      color: "#c7a271",
+      marginBottom: "10px",
+    } as CSSStyleDeclaration);
+    previewPanel.appendChild(previewHeading);
+
+    const previewList = document.createElement("div");
+    Object.assign(previewList.style, {
+      display: "grid",
+      gap: "8px",
+    } as CSSStyleDeclaration);
+    previewPanel.appendChild(previewList);
+
+    // Reroll button — quality-of-life, lets the player swap contracts they
+    // don't feel like chasing that run.
+    const rerollBtn = document.createElement("button");
+    rerollBtn.type = "button";
+    rerollBtn.textContent = "REROLL";
+    Object.assign(rerollBtn.style, {
+      marginTop: "10px",
+      padding: "6px 14px",
+      borderRadius: "999px",
+      border: "1px solid rgba(255, 196, 120, 0.32)",
+      background: "linear-gradient(180deg, rgba(42, 28, 14, 0.94), rgba(18, 12, 6, 0.82))",
+      color: "#ffe19d",
+      cursor: "pointer",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      fontSize: "11px",
+      fontWeight: "700",
+      letterSpacing: "2px",
+    } as CSSStyleDeclaration);
+    rerollBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      playClick();
+      this.rerollPreviewContracts();
+      this.renderContractsPreview();
+    });
+    previewPanel.appendChild(rerollBtn);
+
+    this.contractsPreviewPanel = previewPanel;
+    this.contractsPreviewList = previewList;
+
+    // Insert before the leaderboard so it reads as part of the "what are you
+    // doing on this run?" block rather than a footer.
+    this.titleOverlay.insertBefore(previewPanel, this.titleLeaderboardPanel);
+  }
+
+  private rerollPreviewContracts(): void {
+    this.previewContracts = pickRandomContracts(3);
+  }
+
+  private renderContractsPreview(): void {
+    this.contractsPreviewList.innerHTML = this.previewContracts
+      .map((c) => `
+        <div style="display:grid; grid-template-columns: 14px 1fr auto; gap:10px; align-items:baseline; font-size:12px; letter-spacing:1px;">
+          <span style="color:#c7a271;">◯</span>
+          <span style="color:#f3d7b1;">${escapeHtml(c.def.label)}</span>
+          <span style="color:#ffaa44; font-weight:700;">+${c.def.reward}</span>
+        </div>
+      `)
+      .join("");
+  }
+
+  private renderContractsHud(): void {
+    this.contractsHudList.innerHTML = this.activeContracts
+      .map((c) => {
+        const tick = c.complete ? "✓" : "◯";
+        const tickColor = c.complete ? "#9aff9a" : "#c7a271";
+        const labelColor = c.complete ? "#cfeed0" : "#f3d7b1";
+        const labelDecoration = c.complete ? "line-through" : "none";
+        const progress = c.complete ? `+${c.def.reward}` : formatContractProgress(c);
+        const progressColor = c.complete ? "#9aff9a" : "#ffaa44";
+        const pulseScale = c.celebrateTimer > 0 ? 1 + c.celebrateTimer * 0.2 : 1;
+        return `
+          <div style="display:grid; grid-template-columns: 14px 1fr auto; gap:8px; align-items:baseline; font-size:11px; letter-spacing:0.8px; transform:scale(${pulseScale}); transform-origin:left center; transition: transform 120ms ease-out;">
+            <span style="color:${tickColor};">${tick}</span>
+            <span style="color:${labelColor}; text-decoration:${labelDecoration}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.def.label)}</span>
+            <span style="color:${progressColor}; font-weight:700; font-size:10px;">${progress}</span>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  private commitContractsForRun(): void {
+    if (this.isDailyChallenge) {
+      this.activeContracts = [];
+      this.contractsHudPanel.style.display = "none";
+      return;
+    }
+    if (this.previewContracts.length === 0) {
+      this.rerollPreviewContracts();
+    }
+    // Clone so in-run progress updates don't pollute the preview list.
+    this.activeContracts = this.previewContracts.map((c) => ({
+      def: c.def,
+      progress: 0,
+      complete: false,
+      celebrateTimer: 0,
+    }));
+    this.contractsHudPanel.style.display = "block";
+    this.renderContractsHud();
+  }
+
+  private resetContractRunCounters(): void {
+    this.contractBonus = 0;
+    this.contractNearMisses = 0;
+    this.contractPowerupsCollected = 0;
+    this.contractLastShieldSaveAt = this.elapsedTime;
+    this.contractRunStartAt = this.elapsedTime;
+  }
+
+  private updateContracts(dt: number): void {
+    if (this.activeContracts.length === 0 || !this.simState) {
+      return;
+    }
+
+    const runTime = Math.max(0, this.elapsedTime - this.contractRunStartAt);
+    const ctx: ContractCtx = {
+      state: this.simState,
+      nearMisses: this.contractNearMisses,
+      powerupsCollected: this.contractPowerupsCollected,
+      timeSinceLastShieldBreak: Math.max(0, this.elapsedTime - this.contractLastShieldSaveAt),
+      runTime,
+    };
+
+    let anyChanged = false;
+    for (const instance of this.activeContracts) {
+      if (instance.celebrateTimer > 0) {
+        instance.celebrateTimer = Math.max(0, instance.celebrateTimer - dt);
+        anyChanged = true;
+      }
+      if (instance.complete) {
+        continue;
+      }
+      const nextProgress = instance.def.progress(ctx);
+      if (nextProgress !== instance.progress) {
+        instance.progress = nextProgress;
+        anyChanged = true;
+      }
+      if (nextProgress >= instance.def.target) {
+        instance.complete = true;
+        instance.celebrateTimer = 0.5;
+        this.contractBonus += instance.def.reward;
+        this.score += instance.def.reward;
+        this.spawnScorePop(instance.def.reward);
+        this.showToast(`CONTRACT COMPLETE · ${instance.def.label} · +${instance.def.reward}`);
+        playAchievementUnlock();
+        anyChanged = true;
+      }
+    }
+
+    if (anyChanged) {
+      this.renderContractsHud();
+    }
+  }
+
   private openAchievementsPanel() {
     if (!this.achievementsPanel) {
       return;
@@ -1111,6 +1513,13 @@ export class Game {
     }
     this.clearGhostMeshes();
     this.resetAIGhost();
+
+    // Hide the live HUD panel and show a fresh preview on the title screen.
+    this.activeContracts = [];
+    this.contractsHudPanel.style.display = "none";
+    this.rerollPreviewContracts();
+    this.renderContractsPreview();
+    this.contractsPreviewPanel.style.display = "";
   }
 
   // -----------------------------------------------------------------------
@@ -1506,11 +1915,7 @@ export class Game {
   }
 
   private setupAIGhostButton(): void {
-    // FIXME: the AI ghost renders its own (seed=42) sim parallel to the
-    // player's run, and in practice the ghost mesh doesn't reliably appear.
-    // Disable the button until the feature is fixed so the title screen
-    // doesn't advertise something that looks like "just the normal game".
-    const AI_GHOST_READY = false;
+    const AI_GHOST_READY = true;
 
     const btn = document.createElement("button");
     btn.type = "button";
@@ -1598,6 +2003,11 @@ export class Game {
     }
 
     btn.textContent = "AI GHOST: ON";
+
+    // Launch the run immediately
+    if (this.state === GameState.Title || this.state === GameState.GameOver) {
+      this.startGame();
+    }
   }
 
   private resetAIGhost(): void {
@@ -1935,6 +2345,14 @@ export class Game {
     this.player.resetVisuals();
     this.resetVisualWorld();
 
+    // Commit Run Contracts before the first consumeState so the bonus starts
+    // at zero. Daily runs intentionally skip contracts — they already have a
+    // fixed daily objective.
+    this.resetContractRunCounters();
+    this.commitContractsForRun();
+    // Preview panel is a title-screen-only affordance; hide it during play.
+    this.contractsPreviewPanel.style.display = "none";
+
     const { state, events } = this.sim.reset();
     this.consumeState(state);
     this.syncVisuals(state);
@@ -2010,6 +2428,7 @@ export class Game {
     const { state, events } = this.sim.step(action, dt);
     this.consumeState(state);
     this.handleEvents(events, state);
+    this.updateContracts(dt);
     this.updatePlayerVisuals(dt, state.player, state.orbitAngle);
     this.syncVisuals(state);
     this.updateBouncyGearSquashes(dt);
@@ -2199,6 +2618,24 @@ export class Game {
     this.gameOverComboEl.textContent = `x${this.bestCombo}`;
     this.gameOverTimeEl.textContent = `${gameSeconds}s`;
     this.gameOverTotalEl.textContent = String(this.score);
+
+    const contractsRow = document.getElementById("go-contracts-row");
+    const contractsValue = document.getElementById("go-contracts");
+    if (contractsRow && contractsValue) {
+      if (this.contractBonus > 0 && !this.isDailyChallenge) {
+        const completed = this.activeContracts.filter((c) => c.complete).length;
+        contractsValue.textContent = `+${this.contractBonus} · ${completed}/${this.activeContracts.length}`;
+        contractsRow.classList.remove("hidden");
+      } else {
+        contractsRow.classList.add("hidden");
+      }
+    }
+
+    // Surface a fresh preview for the next run.
+    this.contractsHudPanel.style.display = "none";
+    this.rerollPreviewContracts();
+    this.renderContractsPreview();
+    this.contractsPreviewPanel.style.display = "";
     this.renderLeaderboardList(
       this.gameOverLeaderboardContext,
       this.gameOverLeaderboardList,
@@ -2315,8 +2752,12 @@ export class Game {
 
   private consumeState(state: SimState) {
     this.simState = state;
-    const previousScore = this.score;
-    this.score = state.score;
+    const simScoreDelta = state.score - this.lastSimScore;
+    this.lastSimScore = state.score;
+    // Fold the Run Contracts bonus into the displayed score so the main
+    // scoreboard and the post-run share/leaderboard pipeline pick it up
+    // for free.
+    this.score = state.score + this.contractBonus;
     this.heightScore = state.heightScore;
     this.heightMaxReached = state.heightMaxReached;
     this.boltCount = state.boltCount;
@@ -2327,8 +2768,8 @@ export class Game {
     this.bestCombo = state.bestCombo;
     this.inChallengeZone = state.inChallengeZone;
 
-    if (state.score > previousScore) {
-      this.spawnScorePop(state.score - previousScore);
+    if (simScoreDelta > 0) {
+      this.spawnScorePop(simScoreDelta);
     }
   }
 
@@ -2481,6 +2922,7 @@ export class Game {
           if (event.nearMiss) {
             this.triggerCloseCallFlash();
             this.nearMissSlowTimer = 0.12;
+            this.contractNearMisses += 1;
           }
           this.triggerLandingShake(Math.min(Math.abs(event.landingSpeed) * 0.01, 0.15));
           if (event.variant === "bouncy") {
@@ -2592,6 +3034,7 @@ export class Game {
           this.doubleJumpFlashTimer = 0.5;
           break;
         case "powerup_collect":
+          this.contractPowerupsCollected += 1;
           if (event.powerUpType === "double_jump") {
             this.landingEffectPosition.set(event.x, event.y, event.z);
             this.particles.spawnJumpSparks(this.landingEffectPosition);
@@ -2625,6 +3068,8 @@ export class Game {
           break;
         case "shield_save": {
           const remaining = event.shieldCountRemaining;
+          // Reset the "survive N seconds without a shield break" contract.
+          this.contractLastShieldSaveAt = this.elapsedTime;
           this.particles.spawnDeathBurst(this.player.mesh.position);
           this.cameraShakeOffset.set(
             randomRange(-0.2, 0.2),
@@ -3230,9 +3675,20 @@ export class Game {
     this.hudScore.textContent = String(this.score);
     this.hudBest.textContent = `${Math.max(this.saveData.bestHeight, this.heightMaxReached)}m`;
     this.hudBolts.textContent = String(this.boltCount);
+
+    const aiGs = this.aiGhostEnabled ? this.aiGhost?.getGhostState() : null;
+    const aiHeightStr = aiGs ? ` · AI ${Math.round(aiGs.height)}m` : "";
     this.hudStatus.textContent = this.isDailyChallenge
       ? `DAILY CHALLENGE · ${this.dailyChallengeDate} · HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`
-      : `HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
+      : `HEIGHT ${this.heightMaxReached}m${aiHeightStr} · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
+
+    if (this.hudAiBadge) {
+      if (this.aiGhostEnabled) {
+        this.hudAiBadge.classList.remove("hidden");
+      } else {
+        this.hudAiBadge.classList.add("hidden");
+      }
+    }
     this.updateComboHud(this.simState?.comboMultiplier ?? 1);
 
     const djCharges = this.simState?.player.doubleJumpCharges ?? 0;
