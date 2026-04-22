@@ -633,6 +633,16 @@ export class Game {
     this.titleOverlay.addEventListener("click", handleOverlayActivate);
     this.titleOverlay.addEventListener("touchend", handleOverlayActivate, { passive: false });
 
+    // PLAY button — the former pulsing prompt text, now a proper button
+    const handlePlayActivate = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (this.state !== GameState.Title && this.state !== GameState.GameOver) return;
+      this.startGame();
+    };
+    this.titlePrompt.addEventListener("click", handlePlayActivate);
+    this.titlePrompt.addEventListener("touchend", handlePlayActivate, { passive: false });
+
     this.resetVisualWorld();
     const { state } = this.sim.reset();
     this.consumeState(state);
@@ -753,22 +763,13 @@ export class Game {
 
     const button = document.createElement("button");
     button.type = "button";
+    button.className = "title-action-btn";
     button.textContent = "MULTIPLAYER";
     Object.assign(button.style, {
-      marginTop: "6px",
-      marginBottom: "18px",
-      padding: "10px 22px",
-      borderRadius: "999px",
       border: "1px solid rgba(127, 214, 255, 0.45)",
       background: "linear-gradient(180deg, rgba(14, 32, 46, 0.92), rgba(8, 16, 24, 0.82))",
       boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(173, 232, 255, 0.18)",
       color: "#d7f8ff",
-      cursor: "pointer",
-      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
-      fontSize: "13px",
-      fontWeight: "700",
-      letterSpacing: "3px",
-      pointerEvents: "auto",
     } as CSSStyleDeclaration);
     button.addEventListener("click", (event) => {
       event.preventDefault();
@@ -781,7 +782,12 @@ export class Game {
       void this.openMultiplayerLobby();
     }, { passive: false });
     this.multiplayerButton = button;
-    this.titlePrompt.insertAdjacentElement("afterend", button);
+    const actions = document.getElementById("title-actions");
+    if (actions) {
+      actions.appendChild(button);
+    } else {
+      this.titlePrompt.insertAdjacentElement("afterend", button);
+    }
 
     const panel = document.createElement("div");
     Object.assign(panel.style, {
@@ -1141,22 +1147,13 @@ export class Game {
   private setupAIGhostButton(): void {
     const btn = document.createElement("button");
     btn.type = "button";
+    btn.className = "title-action-btn";
     btn.textContent = this.aiGhostEnabled ? "AI GHOST: ON" : "RACE THE AI";
     Object.assign(btn.style, {
-      marginTop: "6px",
-      marginBottom: "18px",
-      padding: "10px 22px",
-      borderRadius: "999px",
       border: "1px solid rgba(255, 196, 120, 0.45)",
       background: "linear-gradient(180deg, rgba(46, 32, 14, 0.92), rgba(24, 16, 8, 0.82))",
       boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 226, 176, 0.18)",
       color: "#ffe1a9",
-      cursor: "pointer",
-      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
-      fontSize: "13px",
-      fontWeight: "700",
-      letterSpacing: "3px",
-      pointerEvents: "auto",
     } as CSSStyleDeclaration);
 
     btn.addEventListener("click", (event) => {
@@ -1172,9 +1169,14 @@ export class Game {
 
     this.aiGhostButton = btn;
 
-    // Insert after multiplayer button if present, else after prompt text
-    const anchor = this.multiplayerButton ?? this.titlePrompt;
-    anchor.insertAdjacentElement("afterend", btn);
+    // Append into the title-actions column so it stacks under MULTIPLAYER.
+    const actions = document.getElementById("title-actions");
+    if (actions) {
+      actions.appendChild(btn);
+    } else {
+      const anchor = this.multiplayerButton ?? this.titlePrompt;
+      anchor.insertAdjacentElement("afterend", btn);
+    }
   }
 
   private async handleAIGhostButtonClick(): Promise<void> {
@@ -1781,7 +1783,7 @@ export class Game {
       this.titleTagline.textContent = `SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m · BEST ${this.highScore}`;
       this.titleTagline.classList.remove("new-best");
     }
-    this.titlePrompt.textContent = this.input.isTouchDevice() ? "TAP TO RESTART" : "PRESS SPACE TO RESTART";
+    this.titlePrompt.textContent = "RESTART";
 
     const gameSeconds = Math.floor(state.gameTime);
     this.gameOverHeightEl.textContent = String(this.heightScore);
@@ -2702,7 +2704,7 @@ export class Game {
       this.titleBest.textContent = "";
       this.titleBest.classList.add("hidden");
     }
-    this.titlePrompt.textContent = this.input.isTouchDevice() ? "TAP TO CLIMB" : "PRESS SPACE OR CLICK TO CLIMB";
+    this.titlePrompt.textContent = "PLAY";
     this.shareScoreBtn.classList.add("hidden");
     this.hudControls.textContent = this.input.isTouchDevice()
       ? "LEFT JOYSTICK TO MOVE · JUMP TO LEAP"

@@ -364,9 +364,44 @@
       margin-bottom: 28px;
       text-align: center;
     }
+    #title-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .title-action-btn {
+      width: min(280px, calc(100vw - 64px));
+      padding: 12px 28px;
+      border-radius: 999px;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      cursor: pointer;
+      pointer-events: auto;
+      transition: background 120ms ease-out, border-color 120ms ease-out, transform 120ms ease-out;
+    }
+    .title-action-btn:active {
+      transform: translateY(1px);
+    }
     #title-overlay .prompt {
-      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace; font-size: 18px; color: #ffcc00;
-      animation: pulse 1.5s ease-in-out infinite; text-align: center;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      color: #ffe1a9;
+      border: 1px solid rgba(255, 196, 120, 0.55);
+      background: linear-gradient(180deg, rgba(64, 40, 18, 0.95), rgba(28, 18, 10, 0.88));
+      box-shadow: 0 14px 32px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255, 226, 176, 0.22), 0 0 24px rgba(255, 170, 68, 0.22);
+      animation: play-pulse 1.8s ease-in-out infinite;
+    }
+    #title-overlay .prompt:hover {
+      background: linear-gradient(180deg, rgba(82, 54, 26, 0.98), rgba(40, 26, 14, 0.92));
+      border-color: rgba(255, 220, 140, 0.85);
+    }
+    @keyframes play-pulse {
+      0%, 100% { box-shadow: 0 14px 32px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255, 226, 176, 0.22), 0 0 24px rgba(255, 170, 68, 0.22); }
+      50%      { box-shadow: 0 14px 32px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255, 226, 176, 0.28), 0 0 40px rgba(255, 204, 0, 0.55); }
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
     @keyframes glow {
@@ -767,7 +802,9 @@
         <h1>CLOCKWORK CLIMB</h1>
         <div class="tagline">GAMEDEV.JS JAM 2026 — Theme: MACHINES</div>
         <div id="title-best" class="hidden"></div>
-        <div class="prompt">PRESS SPACE OR CLICK TO CLIMB</div>
+        <div id="title-actions">
+          <button type="button" class="prompt title-action-btn">PLAY</button>
+        </div>
       </div>
       <div class="game-over-card game-over-layout hidden">
         <div class="stat-row"><span class="stat-label">HEIGHT SCORE</span><span class="stat-value" id="go-height"></span></div>
