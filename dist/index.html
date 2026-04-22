@@ -548,17 +548,17 @@
     @media (min-aspect-ratio: 16/10) {
       #title-overlay {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+        grid-template-columns: minmax(260px, 320px) minmax(320px, 1fr) minmax(260px, 340px);
         grid-template-areas:
-          "title leaderboard"
-          "preview leaderboard"
-          "gameover leaderboard"
-          "share leaderboard";
+          "preview title leaderboard"
+          "preview gameover leaderboard"
+          "preview share leaderboard";
         align-items: start;
         align-content: start;
-        justify-items: start;
+        justify-items: stretch;
         column-gap: 24px;
         row-gap: 12px;
+        padding: 24px;
       }
       #title-overlay > .title-copy-panel {
         grid-area: title;
@@ -568,21 +568,23 @@
       }
       #title-overlay > .contracts-preview-panel {
         grid-area: preview;
-        width: min(420px, 100%);
+        width: 100%;
         margin-top: 0;
-        justify-self: center;
+        justify-self: start;
+        align-self: stretch;
       }
-      #title-overlay > .title-leaderboard-panel {
+      #title-overlay > .title-leaderboard-panel,
+      #title-overlay > .game-over-leaderboard-panel {
         grid-area: leaderboard;
         position: static;
-        width: min(340px, 100%);
+        width: 100%;
         margin: 0;
         justify-self: end;
         align-self: start;
       }
       #title-overlay > .game-over-card {
         grid-area: gameover;
-        width: min(400px, 100%);
+        width: min(420px, 100%);
         justify-self: center;
         margin-bottom: 0;
       }
@@ -590,13 +592,6 @@
         grid-area: share;
         justify-self: center;
         margin-bottom: 0;
-      }
-      #title-overlay > .game-over-leaderboard-panel {
-        grid-area: leaderboard;
-        width: min(400px, 100%);
-        margin: 0;
-        justify-self: end;
-        align-self: start;
       }
       .game-over-card {
         padding: 14px 20px;
@@ -693,6 +688,42 @@
         padding: 8px 20px;
         font-size: 12px;
         letter-spacing: 2px;
+      }
+    }
+    @media (min-aspect-ratio: 16/10) and (max-height: 820px) {
+      #title-overlay {
+        grid-template-columns: minmax(260px, 320px) minmax(320px, 1fr) minmax(260px, 340px);
+        grid-template-areas:
+          "preview title leaderboard"
+          "preview gameover leaderboard"
+          "preview share leaderboard";
+        column-gap: 16px;
+        row-gap: 10px;
+        padding: 16px 20px;
+      }
+      #title-overlay > .contracts-preview-panel {
+        width: 100%;
+        margin-top: 0;
+        padding: 10px 14px;
+      }
+      #title-overlay > .title-copy-panel {
+        width: min(420px, 100%);
+        margin-bottom: 0;
+      }
+      #title-overlay > .title-leaderboard-panel,
+      #title-overlay > .game-over-leaderboard-panel {
+        width: 100%;
+        margin: 0;
+      }
+      #title-overlay > .game-over-card {
+        width: min(420px, 100%);
+        margin-bottom: 0;
+      }
+      #title-overlay > #share-score-btn {
+        margin-bottom: 0;
+      }
+      .game-over-card {
+        padding: 14px 18px;
       }
     }
     #share-score-btn {
