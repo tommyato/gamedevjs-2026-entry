@@ -3053,16 +3053,19 @@ export class Game {
     void writeSaveData(JSON.stringify(nextSaveData)).catch((error: unknown) => {
       console.error("Failed to save run data", error);
     });
-    void submitScores({
-      score: this.score,
-      height: this.heightMaxReached,
-      combo: this.bestCombo,
-    }).catch((error: unknown) => {
+    void submitScores(
+      {
+        score: this.score,
+        height: this.heightMaxReached,
+        combo: this.bestCombo,
+      },
+      this.getLocalUsername(),
+    ).catch((error: unknown) => {
       console.error("Failed to submit score", error);
     });
     if (this.isDailyChallenge) {
       this.writeDailyBest(this.dailyChallengeDate, this.score);
-      void submitDailyScore(this.score).catch((error: unknown) => {
+      void submitDailyScore(this.score, this.getLocalUsername()).catch((error: unknown) => {
         console.error("Failed to submit daily score", error);
       });
     }

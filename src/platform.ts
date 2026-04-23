@@ -246,7 +246,10 @@ export function getUsername(): string {
   return user?.username ?? DEFAULT_USERNAME;
 }
 
-export async function submitScores(input: { score: number; height: number; combo: number }) {
+export async function submitScores(
+  input: { score: number; height: number; combo: number },
+  username?: string,
+) {
   const wavedash = getWavedashSdkSync();
   await Promise.allSettled([
     uploadLeaderboardValue(wavedash, "high-score", input.score),
@@ -254,18 +257,20 @@ export async function submitScores(input: { score: number; height: number; combo
     uploadLeaderboardValue(wavedash, "best-combo", input.combo),
   ]);
 
-  const username = getUsername();
-  writeLocalLeaderboardEntry("high-score", { username, score: input.score });
-  writeLocalLeaderboardEntry("highest-climb", { username, score: input.height });
-  writeLocalLeaderboardEntry("best-combo", { username, score: input.combo });
+  // When wavedash is active, it is the authoritative identity; otherwise fall
+  // back to the caller-supplied coolname (or DEFAULT_USERNAME as last resort).
+  const effectiveUsername = wavedash ? getUsername() : (username ?? DEFAULT_USERNAME);
+  writeLocalLeaderboardEntry("high-score", { username: effectiveUsername, score: input.score });
+  writeLocalLeaderboardEntry("highest-climb", { username: effectiveUsername, score: input.height });
+  writeLocalLeaderboardEntry("best-combo", { username: effectiveUsername, score: input.combo });
 }
 
-export async function submitDailyScore(score: number) {
+export async function submitDailyScore(score: number, username?: string) {
   const wavedash = getWavedashSdkSync();
   await uploadLeaderboardValue(wavedash, "daily-score", score);
 
-  const username = getUsername();
-  writeLocalLeaderboardEntry("daily-score", { username, score });
+  const effectiveUsername = wavedash ? getUsername() : (username ?? DEFAULT_USERNAME);
+  writeLocalLeaderboardEntry("daily-score", { username: effectiveUsername, score });
 }
 
 export async function fetchLeaderboardScores(slug: LeaderboardSlug = "high-score"): Promise<WavedashLeaderboardEntry[]> {
