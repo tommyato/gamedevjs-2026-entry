@@ -4,6 +4,12 @@ This document describes the reinforcement-learning pipeline fixes applied on
 2026-04-22. The goal was to make the training/ghost infrastructure _truthful_
 before any reward redesign or retraining.
 
+**2026-04-22 (evening) — Reward redesign to eliminate bunny-hop exploit:**
+The initial reward function gave +0.3 per `gear_land` regardless of progress,
+allowing agents to farm rewards by repeatedly jumping on the same low gear.
+Eval showed mean height of 3.0m with 121 landings but only 1-3 unique gears.
+See "Reward Structure (2026-04-22 v2)" below for the new design.
+
 ---
 
 ## What was fixed
@@ -108,9 +114,54 @@ python scripts/eval-model.py dist/model.onnx --max-steps 20000
 | `max_height` | Highest point reached this episode (metres) |
 | `deaths` | Number of `death` events (falls below camera - 12m) |
 | `gear_landings` | Number of successful gear landings (`gear_land` events) |
+| `unique_gears_landed` | **NEW (v2)** — Count of distinct gears landed on (exploit detection) |
+| `gear_diversity` | **NEW (v2)** — `unique / total_landings`. Low values (<0.5) indicate repeated farming |
+| `repeat_land_count` | **NEW (v2)** — Consecutive re-lands on same gear (direct exploit signature) |
 | `jump_count` | Intentional jumps: `jump` + `bounce_jump` + `double_jump` |
 | `airborne_jumps` | `double_jump` events only — jumps made while airborne |
-| `jump_rate` | `jump_count / steps` — action frequency proxy |
+
+---
+
+## Reward Structure (2026-04-22 v2) — Anti-Exploit
+
+The original reward function (`train.py` lines 83-144) gave **+0.3 per gear_land**
+with no tracking of progress or gear identity. Agents exploited this by bunny-
+hopping on the same low gear:
+- Baseline eval: 3.0m mean height, 121 landings, ~1-3 unique gears per episode
+- 211 jumps at 1m height = obvious degenerate loop
+
+**New design (2026-04-22 evening):**
+
+### Primary objective: height gain
+- **+1.0 per meter of `heightMaxReached` gain** (tracked step-to-step via closure)
+- Small dense reward: +0.01 × `heightNorm` per step (value-function stability)
+
+### Anti-exploit mechanisms
+1. **Gear landing reward reduced**: +0.05 (was +0.3) — just a "skill signal", not primary
+2. **Unique gear bonus**: +0.1 for first landing on a new `gearId`
+3. **Repeat-land penalty**: **-0.2** for re-landing same gear (kills bunny-hop loop)
+4. **Jump cost**: -0.01 per jump (small pressure against spam)
+
+### Death penalty
+- **-5.0** (was -1.0) — must be much larger than local farming rewards
+
+### Secondary rewards (unchanged scale)
+- Bolt collect: +0.15
+- Combo up: +0.2
+- Milestone: +1.0 (was +0.5)
+- Piston launch: +0.1
+- Power-up: +0.1
+
+### Tracking state
+`compute_reward` now maintains step-to-step context via function attributes
+(`_prev_height`, `_landed_gears`). This is single-env safe; vectorized training
+would need per-env state dicts.
+
+### Why this works
+1. Agent must gain height to get positive reward (no reward for staying at 1m)
+2. Re-landing same gear is net-negative: +0.05 - 0.2 = **-0.15**
+3. Death wipes out 50+ steps of small local rewards
+4. Milestone events (+1.0 every 10-20m) reinforce the height objective
 
 ---
 

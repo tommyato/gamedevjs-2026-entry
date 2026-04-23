@@ -81,7 +81,15 @@ if hasattr(signal, "SIGPIPE"):
 # ---------------------------------------------------------------------------
 
 def compute_reward(events: list[dict], state: dict, obs: np.ndarray | None = None) -> float:
-    """Clockwork Climb reward shaping.
+    """Clockwork Climb reward shaping — progress-based, anti-exploit.
+
+    The agent previously exploited repeated gear_land events by bunny-hopping
+    on the same low gear. This version rewards actual upward progress:
+      1. Height gain (delta on heightMaxReached) is the primary signal
+      2. Gear landings give a small fixed reward (reduced from 0.3 to 0.05)
+      3. Repeated landings on the same gear are penalized via landing_penalty
+      4. Jumps have a small cost to discourage spam
+      5. Death is heavily penalized relative to local rewards
 
     Events: gear_land, bolt_collect, combo_up, combo_break, milestone,
     piston_launch, death, death_start, bounce_jump, powerup_collect, etc.
@@ -112,35 +120,75 @@ def compute_reward(events: list[dict], state: dict, obs: np.ndarray | None = Non
     """
     reward = 0.0
 
+    # Primary: reward upward progress via heightMaxReached delta
+    # state["heightMaxReached"] comes from the sim; track delta step-to-step
+    if obs is not None and state:
+        current_height = state.get("heightMaxReached", 0.0)
+        # Store previous height in a closure-like dict attached to this function
+        if not hasattr(compute_reward, "_prev_height"):
+            compute_reward._prev_height = {}
+        # Use id(state) as episode key (fragile but works for single-env training)
+        # Better: track via env step counter, but we don't have that here
+        prev_height = compute_reward._prev_height.get("last", 0.0)
+        height_gain = max(0.0, current_height - prev_height)
+        compute_reward._prev_height["last"] = current_height
+        
+        # Reward height gain strongly (primary objective)
+        # 1 meter = +1.0 reward. At 120m scale, this is substantial.
+        reward += height_gain
+        
+        # Small dense reward for maintaining height (keeps value function stable)
+        height_norm = float(obs[16])  # heightMaxReached / 120
+        reward += 0.01 * height_norm
+
+    # Track landed gears to penalize repeat-land exploit
+    if not hasattr(compute_reward, "_landed_gears"):
+        compute_reward._landed_gears = set()
+    
+    # Track jump count to add small cost
+    jump_cost = 0.0
+
     for ev in events:
         t = ev.get("type")
         if t == "gear_land":
-            reward += 0.3    # primary objective: land on gears
+            # Small fixed reward for successful landing (skill signal)
+            reward += 0.05
+            
+            # Penalize repeated landings on same gear
+            gear_id = ev.get("gearId")
+            if gear_id is not None:
+                if gear_id in compute_reward._landed_gears:
+                    # Heavy penalty for re-landing same gear (anti-exploit)
+                    reward -= 0.2
+                else:
+                    compute_reward._landed_gears.add(gear_id)
+                    # Small bonus for landing on a NEW gear (exploration)
+                    reward += 0.1
+        
         elif t == "bolt_collect":
-            reward += 0.1    # secondary: collect bolts
+            reward += 0.15   # secondary: collect bolts (increased slightly)
         elif t == "combo_up":
             reward += 0.2    # encourage combos
         elif t == "milestone":
-            reward += 0.5    # height milestones
+            reward += 1.0    # height milestones (increased from 0.5)
         elif t == "piston_launch":
-            reward += 0.15   # piston launches = height gain
+            reward += 0.1    # piston launches help but don't dominate
         elif t == "bounce_jump":
-            reward += 0.1    # bouncy gear utilization
+            reward += 0.05   # bouncy gear utilization
         elif t == "powerup_collect":
             reward += 0.1    # power-ups
         elif t == "death" or t == "death_start":
-            reward -= 1.0    # death penalty
+            reward -= 5.0    # death heavily penalized (was -1.0)
+            # Reset episode-local tracking on death
+            compute_reward._landed_gears.clear()
+            if hasattr(compute_reward, "_prev_height"):
+                compute_reward._prev_height["last"] = 0.0
+        
+        # Track jumps for cost
+        elif t in ("jump", "bounce_jump", "double_jump"):
+            jump_cost += 0.01  # small cost per jump to discourage spam
 
-    # Per-step height reward (dense signal for climbing)
-    if obs is not None:
-        height_norm = float(obs[16])  # index 16 = heightNorm
-        reward += 0.005 * height_norm  # small ongoing reward for being high
-
-        # Reward for being below a gear (can jump to it)
-        active_gear_dy = float(obs[9])  # active gear relative y
-        if active_gear_dy > 0:
-            reward += 0.002  # reward being below a gear
-
+    reward -= jump_cost
     return reward
 
 

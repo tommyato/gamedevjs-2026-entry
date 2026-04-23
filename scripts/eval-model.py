@@ -136,6 +136,12 @@ def run_episode(
     jump_count = 0
     airborne_jumps = 0
     steps = 0
+    
+    # Track unique gears landed to detect bunny-hop exploit
+    unique_gears_landed = set()
+    # Track consecutive re-lands on same gear (exploit signature)
+    last_gear_id = None
+    repeat_land_count = 0
 
     for _ in range(max_steps):
         # Greedy argmax over logits (same as browser-side OnnxPolicy).
@@ -154,18 +160,31 @@ def run_episode(
             t = ev.get("type")
             if t == "gear_land":
                 gear_landings += 1
+                gear_id = ev.get("gearId")
+                if gear_id is not None:
+                    unique_gears_landed.add(gear_id)
+                    # Track consecutive re-lands (exploit detection)
+                    if gear_id == last_gear_id:
+                        repeat_land_count += 1
+                    last_gear_id = gear_id
             elif t in _JUMP_EVENTS:
                 jump_count += 1
                 if t in _AIRBORNE_JUMP_EVENTS:
                     airborne_jumps += 1
             elif t == "death":
                 deaths += 1
+                # Reset gear tracking on death
+                last_gear_id = None
 
         if terminated:
             break
 
     jump_rate = jump_count / max(1, steps)
     airborne_jump_rate = airborne_jumps / max(1, jump_count)
+    unique_gear_count = len(unique_gears_landed)
+    # Ratio of unique gears to total landings — should be high for real climbing
+    # Low ratio (e.g., <0.5) indicates repeated farming of same gear(s)
+    gear_diversity = unique_gear_count / max(1, gear_landings)
 
     return {
         "max_height": max_height,
@@ -175,6 +194,9 @@ def run_episode(
         "airborne_jumps": airborne_jumps,
         "jump_rate": jump_rate,
         "airborne_jump_rate": airborne_jump_rate,
+        "unique_gears_landed": unique_gear_count,
+        "gear_diversity": gear_diversity,
+        "repeat_land_count": repeat_land_count,
         "steps": steps,
     }
 
@@ -283,9 +305,10 @@ def main() -> int:
         "height={max_height:7.1f}m  "
         "deaths={deaths}  "
         "gear_lands={gear_landings:4d}  "
+        "unique={unique_gears_landed:3d}  "
+        "diversity={gear_diversity:.2f}  "
         "jumps={jump_count:4d}  "
-        "airborne={airborne_jumps:3d}  "
-        "jump_rate={jump_rate:.4f}"
+        "airborne={airborne_jumps:3d}"
     )
 
     all_results: list[dict] = []
@@ -306,8 +329,8 @@ def main() -> int:
 
     # Summary
     summary_keys = [
-        "max_height", "deaths", "gear_landings",
-        "jump_count", "airborne_jumps", "jump_rate",
+        "max_height", "deaths", "gear_landings", "unique_gears_landed",
+        "gear_diversity", "repeat_land_count", "jump_count", "airborne_jumps",
     ]
     print()
     print("=" * 64)
