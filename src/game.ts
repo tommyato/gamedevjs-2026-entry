@@ -3170,6 +3170,7 @@ export class Game {
           playJump(1.45);
           this.cameraKick = Math.max(this.cameraKick, 0.18);
           this.player.bouncyLaunch();
+          this.triggerBouncyGearSquash(event.gearId);
           break;
         case "double_jump":
           this.landingEffectPosition.set(event.x, event.y, event.z);

@@ -1232,7 +1232,7 @@ export class ClockworkClimbSimulation {
       player.onGround = false;
       if (isBouncy) {
         // bounce_jump supersedes jump — handler includes all effects
-        this.events.push({ type: "bounce_jump", x: player.x, y: player.y, z: player.z });
+        this.events.push({ type: "bounce_jump", x: player.x, y: player.y, z: player.z, gearId: activeGear!.id });
       } else {
         this.events.push({ type: "jump", x: player.x, y: player.y, z: player.z });
       }

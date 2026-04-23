@@ -122,7 +122,7 @@ export type SimEvent =
   | { type: "gear_block"; gearId: number; x: number; y: number; z: number; impactSpeed: number }
   | { type: "zone_change"; zoneIndex: number }
   | { type: "achievement"; id: string }
-  | { type: "bounce_jump"; x: number; y: number; z: number }
+  | { type: "bounce_jump"; x: number; y: number; z: number; gearId: number }
   | { type: "powerup_collect"; powerUpType: "bolt_magnet" | "slow_mo" | "shield" | "double_jump" | "gear_freeze"; x: number; y: number; z: number }
   | { type: "shield_save"; x: number; y: number; z: number; shieldCountRemaining: number }
   | { type: "challenge_zone_enter"; zoneCenter: number }
