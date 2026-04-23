@@ -2123,8 +2123,14 @@ export class Game {
   }
 
   private resetAIGhost(): void {
-    if (!this.aiGhostEnabled || this.isDailyChallenge || !this.aiGhost?.isReady()) return;
-    this.aiGhost.reset();
+    if (!this.aiGhostEnabled || !this.aiGhost?.isReady()) return;
+    // Use the same seed as the player's current run so the ghost sees the
+    // same gear layout. Daily runs use the calendar seed; normal runs use
+    // the session-rolled seed.
+    const seed = this.isDailyChallenge
+      ? dailySeed(this.dailyChallengeDate)
+      : this.regularSeed;
+    this.aiGhost.reset(seed);
   }
 
   private updateAIGhost(dt: number): void {
@@ -2512,9 +2518,7 @@ export class Game {
       this.aiGhostButton.style.display = "none";
     }
     this.clearGhostMeshes();
-    if (!this.isDailyChallenge) {
-      this.resetAIGhost();
-    }
+    this.resetAIGhost();
   }
 
   private pauseGame() {

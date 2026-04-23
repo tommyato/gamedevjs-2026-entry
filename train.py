@@ -277,7 +277,8 @@ class GameEnv(gym.Env):
         resp = self._send({"op": "step", "action": int(action)})
         obs = _parse_obs(resp["obs"])
         events = resp.get("events", [])
-        reward = float(compute_reward(events, {}, obs))
+        state = resp.get("state", {})
+        reward = float(compute_reward(events, state, obs))
         terminated = bool(resp.get("terminated", False))
         self._steps += 1
         truncated = self._steps >= self._max_steps

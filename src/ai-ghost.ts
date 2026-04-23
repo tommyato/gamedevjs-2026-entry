@@ -297,9 +297,14 @@ export class AIGhost {
     return this.loaded && (this.mlp !== null || this.onnx !== null);
   }
 
-  /** Reset the AI simulation for a new game. */
-  reset(): void {
-    this.sim = new ClockworkClimbSimulation({ seed: 42 });
+  /** Reset the AI simulation for a new game using the given seed.
+   *
+   * Pass the same seed as the player's current run so the ghost races
+   * an identical layout. Normal runs use the run's randomly-rolled seed;
+   * daily challenges use the calendar-derived daily seed.
+   */
+  reset(seed: number): void {
+    this.sim = new ClockworkClimbSimulation({ seed });
     this.sim.reset();
     // Transition from title to playing
     this.sim.step({ moveX: 0, moveY: 0, jump: true });
