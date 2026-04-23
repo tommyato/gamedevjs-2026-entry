@@ -6,17 +6,21 @@ import {
   getAudioEnabled,
   initAudio,
   playAchievementUnlock,
+  playBouncyGearBounce,
   playClick,
   playCollect,
   playComboLand,
+  playCrumbleGearCrack,
   playGearBonk,
   playGearTick,
   playHit,
   playJump,
   playLand,
+  playMagnetPulse,
   playMilestone,
   playPistonLaunch,
   playSteamHiss,
+  playWindGust,
   setAudioEnabled,
   setMusicIntensity,
   setTickRate,
@@ -551,6 +555,35 @@ export class Game {
   private readonly gearTickNextTimes = new Map<number, number>();
   // Per-gear squash animation time (seconds since landing) for bouncy gears.
   private readonly bouncyGearSquashTimers = new Map<number, number>();
+
+  // Depth-gradient background (ShaderMaterial full-screen quad)
+  private gradientShaderMat: THREE.ShaderMaterial | null = null;
+
+  // Biome ambient bokeh particles — drift upward, color/speed per biome
+  private biomeParticles: THREE.Points | null = null;
+  private biomeParticleGeo: THREE.BufferGeometry | null = null;
+  private readonly biomeParticlePositions = new Float32Array(150 * 3);
+  private readonly biomeParticleSpeeds = new Float32Array(150);
+  private readonly biomeParticleCurrentColor = new THREE.Color(0xff5010);
+  private readonly biomeParticleFromColor = new THREE.Color(0xff5010);
+  private readonly biomeParticleToColor = new THREE.Color(0xff5010);
+  private biomeParticleLerpStart = -10;
+  private biomeParticleFromOpacity = 0.6;
+  private biomeParticleToOpacity = 0.6;
+  private biomeParticleCurrentOpacity = 0.6;
+  private biomeParticleFromSpeed = 1.3;
+  private biomeParticleToSpeed = 1.3;
+  private biomeParticleCurrentSpeed = 1.3;
+  private biomeFlickerFreq = 0;
+  private lastBiomeParticleIndex = -1;
+
+  // Per-gear crumble SFX edge-detection (armed / falling state transitions)
+  private readonly crumbleSfxArmed = new Map<number, boolean>();
+  private readonly crumbleSfxFalling = new Map<number, boolean>();
+
+  // Per-gear wind-gust and magnet-pulse SFX rate-limiters
+  private readonly windGustNextTimes = new Map<number, number>();
+  private readonly magnetPulseNextTimes = new Map<number, number>();
   private backgroundGenerationHeight = 0;
   private cameraKick = 0;
   private readonly cameraDistancePulses: CameraDistancePulse[] = [];
@@ -656,9 +689,46 @@ export class Game {
     container.insertBefore(this.renderer.domElement, container.firstChild);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x140d0a);
+    this.scene.background = new THREE.Color(0x000000); // Gradient plane carries biome color
     this.scene.fog = new THREE.FogExp2(0x140d0a, 0.014);
     this.scene.add(this.titleBackdropGroup);
+
+    // Full-screen depth-gradient plane — black at screen edges, biome color at center.
+    // Vertex shader outputs NDC directly (bypasses MVP), so no camera parenting needed.
+    {
+      const gradGeo = new THREE.PlaneGeometry(2, 2);
+      const gradMat = new THREE.ShaderMaterial({
+        uniforms: {
+          biomeColor: { value: new THREE.Color(0x1a0600) }, // Workshop warm dark
+          aspectRatio: { value: window.innerWidth / window.innerHeight },
+        },
+        vertexShader: [
+          "varying vec2 vUv;",
+          "void main() {",
+          "  vUv = uv;",
+          "  gl_Position = vec4(position, 1.0);",
+          "}",
+        ].join("\n"),
+        fragmentShader: [
+          "uniform vec3 biomeColor;",
+          "uniform float aspectRatio;",
+          "varying vec2 vUv;",
+          "void main() {",
+          "  vec2 c = (vUv - 0.5) * vec2(aspectRatio, 1.0);",
+          "  float dist = clamp(length(c) * 1.85, 0.0, 1.0);",
+          "  float weight = 1.0 - dist * dist;",
+          "  gl_FragColor = vec4(biomeColor * weight, 1.0);",
+          "}",
+        ].join("\n"),
+        depthTest: false,
+        depthWrite: false,
+      });
+      const gradMesh = new THREE.Mesh(gradGeo, gradMat);
+      gradMesh.renderOrder = -1000;
+      gradMesh.frustumCulled = false;
+      this.scene.add(gradMesh);
+      this.gradientShaderMat = gradMat;
+    }
 
     this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 1000);
     this.camera.position.set(0, 6.8, 11.2);
@@ -752,6 +822,7 @@ export class Game {
     this.scene.add(this.ghostGroup);
     this.player.enableTopDownShadow(this.topDownShadow.uniforms);
     this.scene.add(this.player.mesh);
+    this.initBiomeParticles();
     this.landingCueGroup.add(this.landingCueGlow, this.landingCueRing, this.landingCueCore);
     this.landingCueGroup.rotation.x = -Math.PI / 2;
     this.landingCueGroup.visible = false;
@@ -2372,6 +2443,10 @@ export class Game {
     this.bolts = [];
     this.gearTickNextTimes.clear();
     this.bouncyGearSquashTimers.clear();
+    this.crumbleSfxArmed.clear();
+    this.crumbleSfxFalling.clear();
+    this.windGustNextTimes.clear();
+    this.magnetPulseNextTimes.clear();
     this.backgroundGroup.clear();
     this.backgroundDecorations = [];
     this.clearTitleBackdrop();
@@ -3100,6 +3175,10 @@ export class Game {
       this.visualGearMap.delete(id);
       this.gearTickNextTimes.delete(id);
       this.bouncyGearSquashTimers.delete(id);
+      this.crumbleSfxArmed.delete(id);
+      this.crumbleSfxFalling.delete(id);
+      this.windGustNextTimes.delete(id);
+      this.magnetPulseNextTimes.delete(id);
     }
 
     for (const simGear of state.gears) {
@@ -3201,6 +3280,22 @@ export class Game {
     gear.mesh.position.set(simGear.x, getRenderedGearY(simGear), simGear.z);
     gear.mesh.rotation.y = simGear.currentRotation;
     gear.syncCrumbleVisuals(simGear.crumbleArmed, simGear.crumbleTimer, simGear.crumbleFallDistance);
+
+    // Crumble SFX: detect arm → fall transitions and fire sounds
+    if (simGear.variant === "crumbling" && this.state === GameState.Playing) {
+      const wasArmed = this.crumbleSfxArmed.get(simGear.id) ?? false;
+      const wasFalling = this.crumbleSfxFalling.get(simGear.id) ?? false;
+      const isArmed = simGear.crumbleArmed;
+      const isFalling = simGear.crumbleFallVelocity > 0;
+      if (isArmed && !wasArmed) {
+        playCrumbleGearCrack("arm");
+      }
+      if (isFalling && !wasFalling) {
+        playCrumbleGearCrack("fall");
+      }
+      this.crumbleSfxArmed.set(simGear.id, isArmed);
+      this.crumbleSfxFalling.set(simGear.id, isFalling);
+    }
 
     // Spawn fade: gears born during play fade in over 0.45s (smoothstep).
     // Boot gears have spawnTime = -Infinity → age = Infinity → fade = 1 (no effect).
@@ -3347,6 +3442,7 @@ export class Game {
           this.particles.spawnJumpSteam(this.landingEffectPosition);
           this.particles.spawnJumpSteam(this.landingEffectPosition);
           playJump(1.45);
+          playBouncyGearBounce(1.0);
           this.cameraKick = Math.max(this.cameraKick, 0.18);
           this.player.bouncyLaunch();
           this.triggerBouncyGearSquash(event.gearId);
@@ -3464,19 +3560,39 @@ export class Game {
             const angularSpeed = Math.abs(getSimGearAngularVelocity(simGear));
             if (angularSpeed < 0.05) {
               this.gearTickNextTimes.delete(simGear.id);
-              continue;
+            } else {
+              const teethInterval = (Math.PI * 2) / Math.max(angularSpeed * Math.max(6, Math.floor(gear.radius * 10)), 0.001);
+              const interval = THREE.MathUtils.clamp(teethInterval, 0.25, 1.25);
+              const nextTickAt = this.gearTickNextTimes.get(simGear.id) ?? this.elapsedTime + interval;
+              if (this.elapsedTime >= nextTickAt) {
+                playGearTick(distance, angularSpeed);
+                this.gearTickNextTimes.set(simGear.id, this.elapsedTime + interval);
+              } else if (!this.gearTickNextTimes.has(simGear.id)) {
+                this.gearTickNextTimes.set(simGear.id, nextTickAt);
+              }
             }
-            const teethInterval = (Math.PI * 2) / Math.max(angularSpeed * Math.max(6, Math.floor(gear.radius * 10)), 0.001);
-            const interval = THREE.MathUtils.clamp(teethInterval, 0.25, 1.25);
-            const nextTickAt = this.gearTickNextTimes.get(simGear.id) ?? this.elapsedTime + interval;
-            if (this.elapsedTime >= nextTickAt) {
-              playGearTick(distance, angularSpeed);
-              this.gearTickNextTimes.set(simGear.id, this.elapsedTime + interval);
-            } else if (!this.gearTickNextTimes.has(simGear.id)) {
-              this.gearTickNextTimes.set(simGear.id, nextTickAt);
+
+            // Wind gust SFX — once per wind-ring cycle (1.4 s) when nearby
+            if (simGear.variant === "wind") {
+              const nextGustAt = this.windGustNextTimes.get(simGear.id) ?? 0;
+              if (this.elapsedTime >= nextGustAt) {
+                playWindGust(distance);
+                this.windGustNextTimes.set(simGear.id, this.elapsedTime + 1.4);
+              }
+            }
+
+            // Magnet pulse SFX — once per magnet cycle (1.2 s) when nearby
+            if (simGear.variant === "magnetic") {
+              const nextPulseAt = this.magnetPulseNextTimes.get(simGear.id) ?? 0;
+              if (this.elapsedTime >= nextPulseAt) {
+                playMagnetPulse(distance);
+                this.magnetPulseNextTimes.set(simGear.id, this.elapsedTime + 1.2);
+              }
             }
           } else {
             this.gearTickNextTimes.delete(simGear.id);
+            this.windGustNextTimes.delete(simGear.id);
+            this.magnetPulseNextTimes.delete(simGear.id);
           }
         }
       }
@@ -3566,6 +3682,7 @@ export class Game {
 
     this.updateSteam(dt);
     this.particles.update(dt, this.player.mesh.position, this.camera);
+    this.updateBiomeParticles(dt);
   }
 
   private updateCamera(dt: number, state: SimState) {
@@ -4523,12 +4640,9 @@ export class Game {
     this.zoneBgColor.setHex(from.bg);
     this.zoneNextBgColor.setHex(to.bg);
     this.currentFogColor.copy(this.zoneBgColor).lerp(this.zoneNextBgColor, t);
+    // Keep scene.background black — the gradient plane carries the biome color now.
+    // (sceneBackgroundColor kept for reference but not applied to background.)
     this.sceneBackgroundColor.copy(this.currentFogColor);
-    if (this.scene.background instanceof THREE.Color) {
-      this.scene.background.copy(this.sceneBackgroundColor);
-    } else {
-      this.scene.background = this.sceneBackgroundColor.clone();
-    }
 
     if (this.scene.fog instanceof THREE.FogExp2) {
       this.scene.fog.color.copy(this.currentFogColor);
@@ -4542,6 +4656,26 @@ export class Game {
     this.ambientLight.intensity = THREE.MathUtils.lerp(from.ambientIntensity, to.ambientIntensity, t);
 
     this.bloomPass.strength = THREE.MathUtils.lerp(from.bloom, to.bloom, t) + this.challengeZoneBloomBoost;
+
+    // Gradient plane: drive biome color from ambient at reduced intensity (creates visible
+    // but not blinding atmospheric glow at screen center, fading to black at edges).
+    if (this.gradientShaderMat) {
+      this.gradientShaderMat.uniforms.biomeColor.value.copy(this.currentAmbientColor).multiplyScalar(0.22);
+    }
+
+    // Biome particle cross-fade: detect zone change and start a 2-second lerp.
+    if (currentZoneIndex !== this.lastBiomeParticleIndex) {
+      this.lastBiomeParticleIndex = currentZoneIndex;
+      const cfg = BIOME_PARTICLE_CONFIGS[currentZoneIndex];
+      this.biomeParticleFromColor.copy(this.biomeParticleCurrentColor);
+      this.biomeParticleToColor.setHex(cfg.color);
+      this.biomeParticleFromOpacity = this.biomeParticleCurrentOpacity;
+      this.biomeParticleToOpacity = cfg.opacity;
+      this.biomeParticleFromSpeed = this.biomeParticleCurrentSpeed;
+      this.biomeParticleToSpeed = cfg.speed;
+      this.biomeFlickerFreq = cfg.flickerFreq;
+      this.biomeParticleLerpStart = this.elapsedTime;
+    }
   }
 
   private updatePlayerLight(dt: number) {
@@ -4648,6 +4782,9 @@ export class Game {
     this.renderer.setSize(width, height);
     this.composer.setSize(width, height);
     this.bloomPass.setSize(width, height);
+    if (this.gradientShaderMat) {
+      this.gradientShaderMat.uniforms.aspectRatio.value = width / height;
+    }
     this.applyHudRailState();
   }
 
@@ -4677,6 +4814,92 @@ export class Game {
       maxHeight = Math.max(maxHeight, gear.y);
     }
     return maxHeight;
+  }
+
+  // ── Biome ambient particles ────────────────────────────────────────────────
+
+  private initBiomeParticles(): void {
+    const COUNT = 150;
+    const pos = this.biomeParticlePositions;
+    const speeds = this.biomeParticleSpeeds;
+    const cx = this.camera.position.x;
+    const cy = this.camera.position.y;
+    const cz = this.camera.position.z;
+
+    for (let i = 0; i < COUNT; i++) {
+      pos[i * 3]     = cx + randomRange(-16, 16);
+      pos[i * 3 + 1] = cy + randomRange(-12, 20);
+      pos[i * 3 + 2] = cz + randomRange(-26, 8);
+      speeds[i] = randomRange(0.5, 2.0);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+
+    const mat = new THREE.PointsMaterial({
+      color: new THREE.Color(0xff5010), // Workshop amber initial
+      size: 0.38,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const pts = new THREE.Points(geo, mat);
+    pts.renderOrder = -900; // behind scene, in front of gradient plane
+    pts.frustumCulled = false;
+    this.scene.add(pts);
+    this.biomeParticles = pts;
+    this.biomeParticleGeo = geo;
+  }
+
+  private updateBiomeParticles(dt: number): void {
+    if (!this.biomeParticles || !this.biomeParticleGeo) {
+      return;
+    }
+
+    const COUNT = 150;
+    const LERP_DUR = 2.0;
+    const raw = Math.min((this.elapsedTime - this.biomeParticleLerpStart) / LERP_DUR, 1);
+    const st = raw * raw * (3 - 2 * raw); // smoothstep
+
+    this.biomeParticleCurrentColor.copy(this.biomeParticleFromColor).lerp(this.biomeParticleToColor, st);
+    this.biomeParticleCurrentOpacity = THREE.MathUtils.lerp(this.biomeParticleFromOpacity, this.biomeParticleToOpacity, st);
+    this.biomeParticleCurrentSpeed = THREE.MathUtils.lerp(this.biomeParticleFromSpeed, this.biomeParticleToSpeed, st);
+
+    const mat = this.biomeParticles.material as THREE.PointsMaterial;
+    mat.color.copy(this.biomeParticleCurrentColor);
+    let opacity = this.biomeParticleCurrentOpacity;
+    if (this.biomeFlickerFreq > 0) {
+      // Storm Deck: fast staccato blink; Cosmic Void: slow glow pulse
+      opacity *= 0.55 + 0.45 * Math.abs(Math.sin(this.elapsedTime * this.biomeFlickerFreq));
+    }
+    mat.opacity = opacity;
+
+    const pos = this.biomeParticlePositions;
+    const speeds = this.biomeParticleSpeeds;
+    const cx = this.camera.position.x;
+    const cy = this.camera.position.y;
+    const cz = this.camera.position.z;
+    const top = cy + 20;
+    const bot = cy - 12;
+
+    for (let i = 0; i < COUNT; i++) {
+      const idx = i * 3;
+      pos[idx + 1] += speeds[i] * this.biomeParticleCurrentSpeed * dt;
+
+      if (
+        pos[idx + 1] > top ||
+        Math.abs(pos[idx] - cx) > 20 ||
+        Math.abs(pos[idx + 2] - cz) > 30
+      ) {
+        pos[idx]     = cx + randomRange(-16, 16);
+        pos[idx + 1] = bot + randomRange(0, 5);
+        pos[idx + 2] = cz + randomRange(-26, 8);
+      }
+    }
+    this.biomeParticleGeo.attributes.position.needsUpdate = true;
   }
 }
 
@@ -4775,6 +4998,20 @@ function getDifficultyBand(height: number): DifficultyBand {
     verticalMin: 2.5,
   };
 }
+
+// Ambient bokeh particle styles per biome zone (matches zone index in updateEnvironment).
+const BIOME_PARTICLE_CONFIGS = [
+  // Workshop (0–25m): warm amber ember sparks
+  { color: 0xff5010, opacity: 0.60, speed: 1.3, flickerFreq: 0 },
+  // Storm Deck (25–50m): pale blue/white electric sparks — fast staccato flicker
+  { color: 0x88ddff, opacity: 0.70, speed: 2.0, flickerFreq: 12 },
+  // Brass Cathedral (50–75m): rich gold motes, denser and slower
+  { color: 0xffcc20, opacity: 0.72, speed: 0.9, flickerFreq: 0 },
+  // Chrome Spire (75–100m): icy cyan/white drifting snow or chrome flecks
+  { color: 0xd4f0ff, opacity: 0.55, speed: 0.65, flickerFreq: 0 },
+  // Cosmic Void (100m+): magenta/violet points with slow glow pulse
+  { color: 0xcc44ff, opacity: 0.78, speed: 1.6, flickerFreq: 2.2 },
+] as const;
 
 function randomRange(min: number, max: number): number {
   return min + Math.random() * (max - min);

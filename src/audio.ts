@@ -374,6 +374,227 @@ export function playGearBonk(strength: number = 1) {
   thud.stop(t + 0.16);
 }
 
+/** Boingy rubber-ball bounce — springy elastic feel, clearly distinct from playGearBonk. */
+export function playBouncyGearBounce(strength: number = 1) {
+  if (!ctx || !masterGain) {
+    return;
+  }
+  const t = ctx.currentTime;
+  const s = Math.max(0.3, Math.min(1.8, strength));
+
+  // Main boing: triangle wave pitch rises sharply then falls slowly
+  const boing = ctx.createOscillator();
+  boing.type = "triangle";
+  boing.frequency.setValueAtTime(280 * s, t);
+  boing.frequency.exponentialRampToValueAtTime(780 * s, t + 0.055);
+  boing.frequency.exponentialRampToValueAtTime(190 * s, t + 0.30);
+
+  // Slightly detuned partial for rubber character
+  const partial = ctx.createOscillator();
+  partial.type = "triangle";
+  partial.frequency.setValueAtTime(272 * s, t);
+  partial.frequency.exponentialRampToValueAtTime(755 * s, t + 0.058);
+  partial.frequency.exponentialRampToValueAtTime(184 * s, t + 0.30);
+
+  // Resonant bandpass sweeps with the pitch
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(360 * s, t);
+  filter.frequency.exponentialRampToValueAtTime(1100, t + 0.055);
+  filter.frequency.exponentialRampToValueAtTime(260, t + 0.30);
+  filter.Q.setValueAtTime(5.5, t);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.001, t);
+  gain.gain.exponentialRampToValueAtTime(0.10 + s * 0.04, t + 0.016);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.33);
+
+  boing.connect(filter);
+  partial.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+  boing.start(t);
+  partial.start(t);
+  boing.stop(t + 0.35);
+  partial.stop(t + 0.35);
+}
+
+/**
+ * Two-stage crumble-gear lifecycle sound.
+ *  "arm"  — subtle warning crack: high-freq noise burst + low structural groan.
+ *  "fall" — heavy rumbling collapse: low noise with downward pitch sweep.
+ */
+export function playCrumbleGearCrack(stage: "arm" | "fall") {
+  if (!ctx || !masterGain) {
+    return;
+  }
+  const t = ctx.currentTime;
+
+  if (stage === "arm") {
+    // Short high-frequency crack (structural stress)
+    const crackDur = 0.09;
+    const crackBuf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * crackDur), ctx.sampleRate);
+    const crackData = crackBuf.getChannelData(0);
+    for (let i = 0; i < crackData.length; i++) {
+      crackData[i] = (Math.random() * 2 - 1) * (1 - i / crackData.length);
+    }
+    const crackSrc = ctx.createBufferSource();
+    crackSrc.buffer = crackBuf;
+    const crackFilter = ctx.createBiquadFilter();
+    crackFilter.type = "highpass";
+    crackFilter.frequency.setValueAtTime(3400, t);
+    const crackGain = ctx.createGain();
+    crackGain.gain.setValueAtTime(0.08, t);
+    crackGain.gain.exponentialRampToValueAtTime(0.001, t + crackDur);
+    crackSrc.connect(crackFilter);
+    crackFilter.connect(crackGain);
+    crackGain.connect(masterGain);
+    crackSrc.start(t);
+    crackSrc.stop(t + crackDur + 0.01);
+
+    // Low groaning tone — suggests something is about to give
+    const groan = ctx.createOscillator();
+    groan.type = "sawtooth";
+    groan.frequency.setValueAtTime(96, t);
+    groan.frequency.exponentialRampToValueAtTime(62, t + 0.20);
+    const groanFilter = ctx.createBiquadFilter();
+    groanFilter.type = "lowpass";
+    groanFilter.frequency.setValueAtTime(440, t);
+    groanFilter.Q.setValueAtTime(3.5, t);
+    const groanGain = ctx.createGain();
+    groanGain.gain.setValueAtTime(0.001, t);
+    groanGain.gain.exponentialRampToValueAtTime(0.05, t + 0.022);
+    groanGain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+    groan.connect(groanFilter);
+    groanFilter.connect(groanGain);
+    groanGain.connect(masterGain);
+    groan.start(t);
+    groan.stop(t + 0.26);
+  } else {
+    // Heavy low rumble (falling collapse)
+    const rumbDur = 0.58;
+    const rumbBuf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * rumbDur), ctx.sampleRate);
+    const rumbData = rumbBuf.getChannelData(0);
+    for (let i = 0; i < rumbData.length; i++) {
+      const env = 1 - i / rumbData.length;
+      rumbData[i] = (Math.random() * 2 - 1) * env * env;
+    }
+    const rumbSrc = ctx.createBufferSource();
+    rumbSrc.buffer = rumbBuf;
+    const rumbFilter = ctx.createBiquadFilter();
+    rumbFilter.type = "lowpass";
+    rumbFilter.frequency.setValueAtTime(400, t);
+    rumbFilter.frequency.exponentialRampToValueAtTime(70, t + rumbDur);
+    const rumbGain = ctx.createGain();
+    rumbGain.gain.setValueAtTime(0.001, t);
+    rumbGain.gain.linearRampToValueAtTime(0.19, t + 0.04);
+    rumbGain.gain.exponentialRampToValueAtTime(0.001, t + rumbDur);
+    rumbSrc.connect(rumbFilter);
+    rumbFilter.connect(rumbGain);
+    rumbGain.connect(masterGain);
+    rumbSrc.start(t);
+    rumbSrc.stop(t + rumbDur + 0.01);
+
+    // Downward pitch sweep — the fall itself
+    const sweep = ctx.createOscillator();
+    sweep.type = "triangle";
+    sweep.frequency.setValueAtTime(115, t);
+    sweep.frequency.exponentialRampToValueAtTime(20, t + 0.62);
+    const sweepGain = ctx.createGain();
+    sweepGain.gain.setValueAtTime(0.001, t);
+    sweepGain.gain.exponentialRampToValueAtTime(0.14, t + 0.026);
+    sweepGain.gain.exponentialRampToValueAtTime(0.001, t + 0.62);
+    sweep.connect(sweepGain);
+    sweepGain.connect(masterGain);
+    sweep.start(t);
+    sweep.stop(t + 0.64);
+  }
+}
+
+/** Airy wind whoosh — filtered noise with slow attack/decay, distance-attenuated. */
+export function playWindGust(distance: number) {
+  if (!ctx || !masterGain) {
+    return;
+  }
+  const distFactor = Math.max(0, 1 - Math.min(distance, 15) / 15);
+  if (distFactor <= 0) {
+    return;
+  }
+
+  const t = ctx.currentTime;
+  const dur = 0.95;
+  const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    const env = Math.sin((i / data.length) * Math.PI); // 0→1→0 bell envelope
+    data[i] = (Math.random() * 2 - 1) * env;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+
+  // Airy bandpass: 1.5–3 kHz range
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(2400, t);
+  filter.frequency.exponentialRampToValueAtTime(1600, t + dur * 0.55);
+  filter.Q.setValueAtTime(0.65, t);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.001, t);
+  gain.gain.linearRampToValueAtTime(0.058 * distFactor, t + 0.11); // slow attack
+  gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+  src.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+  src.start(t);
+  src.stop(t + dur + 0.02);
+}
+
+/**
+ * Humming magnetic-field pulse — triangle at ~145 Hz with second harmonic,
+ * pulsed gain envelope for "charged throb" feel. Distance-attenuated.
+ */
+export function playMagnetPulse(distance: number) {
+  if (!ctx || !masterGain) {
+    return;
+  }
+  const distFactor = Math.max(0, 1 - Math.min(distance, 15) / 15);
+  if (distFactor <= 0) {
+    return;
+  }
+
+  const t = ctx.currentTime;
+  const baseFreq = 145;
+
+  const osc1 = ctx.createOscillator();
+  osc1.type = "triangle";
+  osc1.frequency.setValueAtTime(baseFreq, t);
+
+  const osc2 = ctx.createOscillator();
+  osc2.type = "sine";
+  osc2.frequency.setValueAtTime(baseFreq * 2, t);
+
+  // Pulsed gain envelope simulates LFO-style amplitude modulation (~5.5 Hz throb)
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.001, t);
+  gain.gain.exponentialRampToValueAtTime(0.062 * distFactor, t + 0.04);
+  gain.gain.exponentialRampToValueAtTime(0.024 * distFactor, t + 0.13);
+  gain.gain.exponentialRampToValueAtTime(0.056 * distFactor, t + 0.22);
+  gain.gain.exponentialRampToValueAtTime(0.020 * distFactor, t + 0.31);
+  gain.gain.exponentialRampToValueAtTime(0.050 * distFactor, t + 0.40);
+  gain.gain.exponentialRampToValueAtTime(0.018 * distFactor, t + 0.49);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.68);
+
+  osc1.connect(gain);
+  osc2.connect(gain);
+  gain.connect(masterGain);
+  osc1.start(t);
+  osc2.start(t);
+  osc1.stop(t + 0.70);
+  osc2.stop(t + 0.70);
+}
+
 /** Escalating pitch combo sound — call with combo multiplier (1..5). */
 export function playComboLand(comboMultiplier: number) {
   if (!ctx || !masterGain) {
