@@ -2043,13 +2043,21 @@ export class Game {
   }
 
   private setupAIGhostButton(): void {
-    const AI_GHOST_READY = true;
+    // Hidden for now: scripted planner gets stuck when one gear blocks the
+    // direct jump path to another (live feedback 2026-04-23). Re-enable once
+    // we replace this with a recorded-human-ghost system ("Play a Ghost").
+    const AI_GHOST_READY = false;
 
     const btn = document.getElementById("title-btn-raceai") as HTMLButtonElement | null;
     if (!btn) return;
-    btn.textContent = AI_GHOST_READY
-      ? (this.aiGhostEnabled ? "AI: ON" : "RACE AI")
-      : "RACE AI · SOON";
+
+    if (!AI_GHOST_READY) {
+      btn.style.display = "none";
+      this.aiGhostButton = btn;
+      return;
+    }
+
+    btn.textContent = this.aiGhostEnabled ? "AI: ON" : "RACE AI";
     Object.assign(btn.style, {
       border: "1px solid rgba(255, 196, 120, 0.45)",
       background: "linear-gradient(180deg, rgba(46, 32, 14, 0.92), rgba(24, 16, 8, 0.82))",
@@ -2057,22 +2065,16 @@ export class Game {
       color: "#ffe1a9",
     } as CSSStyleDeclaration);
 
-    if (!AI_GHOST_READY) {
-      btn.disabled = true;
-      btn.setAttribute("aria-disabled", "true");
-      btn.title = "Race the AI is being re-tuned — coming back soon.";
-    } else {
-      btn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void this.handleAIGhostButtonClick();
-      });
-      btn.addEventListener("touchend", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void this.handleAIGhostButtonClick();
-      }, { passive: false });
-    }
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.handleAIGhostButtonClick();
+    });
+    btn.addEventListener("touchend", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.handleAIGhostButtonClick();
+    }, { passive: false });
 
     this.aiGhostButton = btn;
   }
