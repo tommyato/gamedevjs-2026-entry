@@ -126,12 +126,14 @@ export class ParticleSystem {
           // Rings contract inward: scale lerps from initial down to 0.02
           const currentScale = THREE.MathUtils.lerp(particle.initialScale.x, 0.02, t);
           particle.mesh.scale.setScalar(currentScale);
-          // Ease: most of life stays readable, quick final fade
-          material.opacity = (1 - t * t) * 0.95;
+          // Fade in from 0.3 to peak 0.85 at t=0.2, then fade out to 0 by end
+          const fadeIn = Math.min(t / 0.2, 1.0);
+          const fadeOut = 1.0 - Math.pow(Math.max((t - 0.2) / 0.8, 0), 1.5);
+          material.opacity = fadeIn * fadeOut * 0.85;
           // Color lerp: brass/gold → warm white over lifetime
           material.color.lerpColors(this.trailColorStart, this.trailColorEnd, t);
-          // Billboard ring to face camera
-          particle.mesh.lookAt(camera.position);
+          // Orient horizontally (cylinder slice) — ring lies flat in XZ plane
+          particle.mesh.rotation.set(Math.PI / 2, 0, 0);
         } else if (particle.kind === "steam") {
           material.opacity = fade * 0.55;
         } else {

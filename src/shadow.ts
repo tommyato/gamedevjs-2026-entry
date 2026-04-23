@@ -4,16 +4,16 @@ export const TOP_DOWN_SHADOW_LAYER = 1;
 const SHADOW_MAP_SIZE = 1024;
 const SHADOW_FRUSTUM_HALF = 16;
 // Gears are ~2.5u apart vertically on average (difficulty bands verticalMin/Max: 1.4–3.0).
-// We only want shadows from gears "directly above and vertically near" — roughly 2× that
-// spacing. Tight Y bounds also prevent gears far above/below from bleeding into the depth
-// map (which was producing phantom shadows on gears from off-screen casters above, and
-// could produce order-dependent artifacts from gears below).
+// We want shadows from gears directly above to cast onto gears below, even when the player
+// is airborne (up to ~4u above a gear). Anchor the shadow camera to look down at a point
+// below the player so the frustum covers a wider vertical range beneath.
 const SHADOW_CAMERA_HEIGHT = 6;
-const SHADOW_CAMERA_LOOK_OFFSET = 0;
+// Look down at a point 3 units below player — shifts the frustum coverage downward
+const SHADOW_CAMERA_LOOK_OFFSET = 3;
 const SHADOW_NEAR = 0.1;
-// Covers roughly [player.y + 5.9, player.y − 2]: gears up to ~6u above cast, receivers
-// down to the gear the player is standing on (~0.5u below feet) get shaded.
-const SHADOW_FAR = 8;
+// With camera at player.y + 6 looking at player.y - 3, the frustum covers more range below.
+// This allows gear-to-gear shadows to persist when the player jumps.
+const SHADOW_FAR = 12;
 const SHADOW_DARKNESS = 0.48;
 
 export type TopDownShadowUniforms = {
