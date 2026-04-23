@@ -2491,7 +2491,7 @@ export class Game {
       const record = this.ghostRecorder.buildRecord({
         id: `cc-${utcDateKey()}`,
         name: this.getLocalUsername(),
-        seed: CHALLENGE_SEED,
+        seed: this.isChallengeMode ? CHALLENGE_SEED : this.regularSeed,
         score: this.score,
         height: this.heightMaxReached,
       });
@@ -2504,6 +2504,7 @@ export class Game {
             name: record.name,
             score: record.score,
             height: record.height,
+            seed: record.seed,
             frames: record.frames,
           }).then((id) => {
             if (id) console.log(`[remote-ghosts] Submitted ghost — id=${id}, score=${score}, threshold=${threshold}`);
@@ -2758,12 +2759,13 @@ export class Game {
   private startGame() {
     const wasGameOver = this.state === GameState.GameOver;
     if (this.isChallengeMode) {
-      // Lock the tower layout to the challenge seed so the recorded ghost
-      // (whether we're playing it back or recording a new one) sees the
-      // same gears the player sees. Daily mode wins if both are set —
-      // startDailyChallenge runs first and would disable challenge mode.
+      // Lock the tower layout to the picked ghost's seed so the player sees
+      // exactly the same gear layout the ghost was recorded on. Falls back to
+      // CHALLENGE_SEED for the on-disk local ghost (which was always recorded
+      // on that seed). Daily mode wins if both are set — startDailyChallenge
+      // runs first and would disable challenge mode.
       this.isDailyChallenge = false;
-      this.sim.setSeed(CHALLENGE_SEED);
+      this.sim.setSeed(this.ghostChallengeRecord?.seed ?? CHALLENGE_SEED);
     } else if (!this.isDailyChallenge) {
       this.dailyChallengeDate = utcDateKey();
       this.dailyPreviousBest = null;

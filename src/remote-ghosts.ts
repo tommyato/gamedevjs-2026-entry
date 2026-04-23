@@ -5,13 +5,13 @@
  * multi-game endpoint `/games/clockwork-climb/ghosts` on api.tommyato.com.
  *
  * The server stores frames opaquely. Wire format here is a small adapter:
- *   server row   { id, name, score, distance, grade, frames, ts }
+ *   server row   { id, name, score, distance, grade, seed, frames, ts }
  *   CC GhostRecord { id, name, seed, score, height, durationMs, frames }
  *
  * We pack `height` into the server's `distance` column on submit, and unpack
- * it back on fetch. `seed` is fixed to CHALLENGE_SEED since every CC ghost
- * run uses the same tower. `durationMs` is recovered from the last frame's
- * timestamp.
+ * it back on fetch. `seed` is sent and fetched so each ghost brings its own
+ * tower layout; old rows without seed fall back to CHALLENGE_SEED. `durationMs`
+ * is recovered from the last frame's timestamp.
  */
 
 import type { GhostFrame, GhostRecord } from "./ghost-recorder";
@@ -27,6 +27,7 @@ type ServerGhostRow = {
   score?: unknown;
   distance?: unknown;
   grade?: unknown;
+  seed?: unknown;
   frames?: unknown;
   ts?: unknown;
 };
@@ -45,10 +46,13 @@ function adaptServerGhost(row: ServerGhostRow): GhostRecord | null {
   const last = frames[frames.length - 1];
   const durationMs = typeof last?.t === "number" ? last.t : 0;
   const height = typeof row.distance === "number" ? row.distance : 0;
+  // Prefer the stored seed; fall back to CHALLENGE_SEED for old rows that
+  // predate per-run seed storage.
+  const seed = typeof row.seed === "number" ? row.seed : CHALLENGE_SEED;
   return {
     id: row.id,
     name: row.name,
-    seed: CHALLENGE_SEED,
+    seed,
     score: row.score,
     height,
     durationMs,
@@ -77,11 +81,13 @@ export async function fetchGhosts(limit = 5): Promise<GhostRecord[]> {
 }
 
 /** Upload a ghost recording. Returns server id or null on any failure.
- *  `height` is sent in the server's `distance` slot — see file header. */
+ *  `height` is sent in the server's `distance` slot — see file header.
+ *  `seed` is stored so playback can reconstruct the exact tower layout. */
 export async function submitGhost(entry: {
   name: string;
   score: number;
   height: number;
+  seed: number;
   frames: GhostFrame[];
 }): Promise<string | null> {
   try {
@@ -93,6 +99,7 @@ export async function submitGhost(entry: {
         score: entry.score,
         distance: Math.round(entry.height),
         grade: "",
+        seed: entry.seed,
         frames: entry.frames,
       }),
       signal: AbortSignal.timeout(8000),
