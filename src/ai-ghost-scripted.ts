@@ -310,9 +310,25 @@ export class ScriptedPolicy {
           // Sweet spot: outside ceiling-block travel zone, within jump threshold.
           jump = true;
         } else if (lateralDist <= minLat) {
-          // Too close — reverse direction until the safe launch distance is reached.
-          moveXFinal = -moveX;
-          moveYFinal = -moveY;
+          // Too close for a safe jump.  Move toward the far side of the active gear
+          // (direction: target → activeGear center) so the player traverses the gear
+          // and reaches a lateral distance > minLat before jumping.  This avoids the
+          // failure mode of reversing toward the gear's near edge and walking off.
+          const activeGear =
+            activeGearId !== null ? gears.find((g) => g.id === activeGearId) ?? null : null;
+          if (activeGear) {
+            const { moveX: mx, moveY: my } = worldToAction(
+              activeGear.x - target.x,
+              activeGear.z - target.z,
+              orbitAngle
+            );
+            moveXFinal = mx;
+            moveYFinal = my;
+          } else {
+            // No active gear — fall back to direct reverse.
+            moveXFinal = -moveX;
+            moveYFinal = -moveY;
+          }
         }
         // else lateralDist > JUMP_THRESHOLD: keep approaching (default toward target).
       }
