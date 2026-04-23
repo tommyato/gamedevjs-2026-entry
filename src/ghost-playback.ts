@@ -179,7 +179,7 @@ export async function loadGhostChallenge(url = "ghost-challenge.json"): Promise<
     const res = await fetch(url, { cache: "no-cache" });
     if (!res.ok) {
       if (res.status === 404) {
-        console.info("[ghost-playback] No ghost-challenge.json yet — capture a run with ?capture=1 first.");
+        console.info("[ghost-playback] No ghost available yet — the pool is still empty.");
       } else {
         console.warn(`[ghost-playback] ghost-challenge.json fetch failed: ${res.status}`);
       }

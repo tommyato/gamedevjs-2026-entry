@@ -1041,6 +1041,46 @@
       overflow: auto;
     }
     .hidden { display: none !important; }
+    /* Username editor — appears on both title and game-over screens */
+    .cc-username-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: min(320px, calc(100vw - 48px));
+    }
+    .cc-username-label {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: #c7a271;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .cc-username-input {
+      flex: 1;
+      min-width: 0;
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(127, 214, 255, 0.34);
+      background: rgba(10, 21, 28, 0.72);
+      color: #d7f8ff;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      outline: none;
+      transition: border-color 120ms ease-out, background 120ms ease-out;
+    }
+    .cc-username-input:focus {
+      border-color: rgba(127, 214, 255, 0.65);
+      background: rgba(14, 28, 42, 0.88);
+    }
+    .cc-username-gameover {
+      width: 100%;
+      max-width: 380px;
+      justify-content: center;
+      margin-bottom: 6px;
+    }
     @media (max-width: 1024px) {
       /* Stack game-over on mobile/tablet */
       .game-over-view {
@@ -1257,6 +1297,10 @@
         <button type="button" id="title-contracts-reroll">REROLL</button>
       </div>
       <div id="title-actions">
+        <div class="cc-username-row">
+          <label class="cc-username-label" for="title-username-input">YOUR NAME</label>
+          <input type="text" id="title-username-input" class="cc-username-input" maxlength="24" autocomplete="off" spellcheck="false" placeholder="loading…" />
+        </div>
         <button type="button" class="prompt title-action-btn title-play-primary" id="title-play-btn">PLAY</button>
         <div class="title-mode-row">
           <button type="button" class="title-action-btn" id="title-btn-daily">DAILY</button>
@@ -1287,6 +1331,10 @@
           <div id="gameover-unlocks" class="hidden"></div>
         </div>
         <div class="game-over-footer">
+          <div class="cc-username-row cc-username-gameover">
+            <label class="cc-username-label" for="gameover-username-input">YOUR NAME</label>
+            <input type="text" id="gameover-username-input" class="cc-username-input" maxlength="24" autocomplete="off" spellcheck="false" placeholder="loading…" />
+          </div>
           <div class="gameover-actions">
             <button id="gameover-achievements" type="button" class="title-action-btn">ACHIEVEMENTS</button>
             <button id="gameover-leaderboard" type="button" class="title-action-btn">LEADERBOARD</button>

@@ -1,19 +1,15 @@
 /**
  * Ghost Recorder — records the player's position over time during a run so the
- * frames can be saved to JSON, checked into the repo, and played back as a
- * translucent "ghost" for other players to race against (async multiplayer).
+ * frames can be submitted to the server and played back as a translucent "ghost"
+ * for other players to race against (async multiplayer).
  *
  * Modeled after Shatter Drift's `src/ghost.ts` (`GhostRecorder` / `GhostRecord`).
  * Clockwork Climb is a vertical tower-climb, so we store `x, y, z` directly —
  * the simulation already exposes Cartesian world coords on `SimPlayer`.
  *
- * Capture mode: add `?capture=1` to the URL. On death/finish the recording is
- * logged to the console and offered as a downloadable `ghost-challenge.json`.
- *
- * Playback mode: Tommy drops the recorded JSON at `public/ghost-challenge.json`,
- * flips `GHOST_CHALLENGE_READY` on in `game.ts`, and the PLAY A GHOST button
- * becomes available on the title screen. The challenge run uses `CHALLENGE_SEED`
- * so the gear layout matches what the ghost recorded on.
+ * Recording happens every run unconditionally. Server submission is gated on the
+ * score threshold returned by `fetchGhostUploadThreshold()` in `remote-ghosts.ts`
+ * so only top-pool-qualifying runs reach the shared ghost pool.
  */
 
 /** Compact per-frame record. ~35 bytes as JSON at 2 decimals. */
@@ -136,37 +132,3 @@ export class GhostRecorder {
   }
 }
 
-/** Check for `?capture=1` or `?capture=true` in the URL. */
-export function isCaptureModeEnabled(): boolean {
-  try {
-    const p = new URLSearchParams(window.location.search).get("capture");
-    return p === "1" || p === "true";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Trigger a browser download of a GhostRecord as JSON. Also logs the JSON to
- * the console so it can be copy-pasted from headless environments.
- */
-export function downloadGhostRecord(record: GhostRecord, filename = "ghost-challenge.json"): void {
-  const json = JSON.stringify(record);
-  console.log(`[ghost-recorder] Captured ${record.frames.length} frames (${record.durationMs}ms, ${record.height}m, seed 0x${record.seed.toString(16)}).`);
-  console.log("[ghost-recorder] JSON payload follows — copy into public/ghost-challenge.json:");
-  console.log(json);
-  try {
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (err) {
-    console.warn("[ghost-recorder] Download failed (expected in headless):", err);
-  }
-}

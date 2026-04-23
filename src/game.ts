@@ -60,16 +60,16 @@ import { AIGhost, getAIGhostModelUrl, isAIGhostEnabled } from "./ai-ghost";
 import {
   CHALLENGE_SEED,
   GhostRecorder,
-  downloadGhostRecord,
-  isCaptureModeEnabled,
   type GhostRecord,
 } from "./ghost-recorder";
 import { GhostPlayback, loadGhostChallenge } from "./ghost-playback";
 import {
   fetchGhosts as fetchRemoteGhosts,
+  fetchGhostUploadThreshold,
   submitGhost as submitRemoteGhost,
   pickRandom as pickRandomGhost,
 } from "./remote-ghosts";
+import { getLocalUsername as getCoolLocalUsername, setLocalUsername as setCoolLocalUsername } from "./coolname";
 import { MultiplayerManager, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
 import { applyTopDownShadowToObject, TopDownShadowSystem } from "./shadow";
@@ -538,7 +538,6 @@ export class Game {
   // PLAY A GHOST — human-recorded playback challenge. Replaces the scripted
   // AI ghost with a translucent playback of a recorded run on a fixed seed.
   private readonly ghostRecorder = new GhostRecorder();
-  private readonly captureMode = isCaptureModeEnabled();
   private ghostChallengeRecord: GhostRecord | null = null;
   private ghostPlayback: GhostPlayback | null = null;
   private isChallengeMode = false;
@@ -1142,6 +1141,7 @@ export class Game {
     this.initAIGhost();
     this.setupAIGhostButton();
     void this.setupGhostChallenge();
+    this.setupUsernameUi();
     this.setupDailyChallengeButton();
     this.setupContractsUi(container);
     this.rerollPreviewContracts();
@@ -2217,18 +2217,16 @@ export class Game {
 
     // ----- PLAY A GHOST (human playback challenge) -----
     //
-    // Ghost source (2026-04-23): the remote multi-game ghost pool at
+    // Ghost source: the remote multi-game ghost pool at
     //   https://api.tommyato.com/games/clockwork-climb/ghosts
     // On init we fetch up to 5 ghosts and pick one at random per session.
-    // `?capture=1` still emits a local JSON download on death so Tommy can
-    // curate a canon run, and also submits the recording to the server.
     //
     // The button stays hidden until `setupGhostChallenge` confirms a ghost
     // was successfully fetched — so a failed fetch won't strand a dead
     // button on the title screen.
     const GHOST_CHALLENGE_READY = true;
 
-    if (!AI_GHOST_READY && !GHOST_CHALLENGE_READY && !this.captureMode) {
+    if (!AI_GHOST_READY && !GHOST_CHALLENGE_READY) {
       btn.style.display = "none";
       return;
     }
@@ -2255,28 +2253,19 @@ export class Game {
       return;
     }
 
-    // Capture mode OR challenge mode: repurpose the button as PLAY A GHOST.
-    btn.textContent = this.captureMode ? "CAPTURE RUN" : "PLAY A GHOST";
+    // Challenge mode — button is revealed by setupGhostChallenge once a remote
+    // ghost is loaded. Hidden by default so a failed fetch leaves a clean title.
+    btn.textContent = "PLAY A GHOST";
     Object.assign(btn.style, {
       border: "1px solid rgba(155, 216, 255, 0.45)",
       background: "linear-gradient(180deg, rgba(14, 30, 46, 0.92), rgba(8, 16, 28, 0.82))",
       boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(173, 232, 255, 0.18)",
       color: "#d7f8ff",
     } as CSSStyleDeclaration);
-
-    // In challenge mode (not capture) we only light the button up once the
-    // JSON actually loaded — `setupGhostChallenge` does that asynchronously.
-    if (!this.captureMode) btn.style.display = "none";
+    btn.style.display = "none";
 
     const startChallenge = () => {
       if (this.state !== GameState.Title && this.state !== GameState.GameOver) return;
-      if (this.captureMode) {
-        // Capture flow: start a normal run on the challenge seed, and the
-        // recorder attaches automatically inside startGame().
-        this.isChallengeMode = true;
-        this.startGame();
-        return;
-      }
       if (!this.ghostChallengeRecord) return;
       this.isChallengeMode = true;
       this.startGame();
@@ -2300,8 +2289,6 @@ export class Game {
    * Called once at init.
    */
   private async setupGhostChallenge(): Promise<void> {
-    if (this.captureMode) return; // capture mode doesn't play back a ghost
-
     const remote = await fetchRemoteGhosts(5);
     const picked = pickRandomGhost(remote);
     if (picked) {
@@ -2318,6 +2305,52 @@ export class Game {
     this.ghostChallengeRecord = local;
     if (this.aiGhostButton) this.aiGhostButton.style.display = "inline-flex";
     console.log(`[game] Ghost challenge loaded (local) — ${local.name} · ${local.height}m · ${local.frames.length} frames`);
+  }
+
+  /**
+   * Wire up the username input fields on the title screen and game-over screen.
+   * Both inputs share the same localStorage key (cc-username) via coolname.ts.
+   */
+  private setupUsernameUi(): void {
+    const wireInput = (inputId: string) => {
+      const input = document.getElementById(inputId) as HTMLInputElement | null;
+      if (!input) return;
+      input.value = this.getLocalUsername();
+      const commit = () => {
+        setCoolLocalUsername(input.value);
+        input.value = this.getLocalUsername();
+      };
+      input.addEventListener("blur", commit);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          input.blur();
+        }
+        // Stop key events from reaching the game while the input is focused.
+        e.stopPropagation();
+      });
+      // Also suppress keyup/keypress so wasd / arrows don't move the player.
+      input.addEventListener("keyup", (e) => e.stopPropagation());
+      input.addEventListener("keypress", (e) => e.stopPropagation());
+      // Prevent the title-overlay click handler from triggering play.
+      input.addEventListener("click", (e) => e.stopPropagation());
+      input.addEventListener("pointerdown", (e) => e.stopPropagation());
+      input.addEventListener("touchend", (e) => e.stopPropagation());
+    };
+    wireInput("title-username-input");
+    wireInput("gameover-username-input");
+  }
+
+  /**
+   * Sync the game-over username input to the current persisted name, so a
+   * name change on the title screen is reflected before the next submission.
+   */
+  private refreshUsernameUi(): void {
+    const name = this.getLocalUsername();
+    for (const id of ["title-username-input", "gameover-username-input"]) {
+      const input = document.getElementById(id) as HTMLInputElement | null;
+      if (input && document.activeElement !== input) input.value = name;
+    }
   }
 
   private async handleAIGhostButtonClick(): Promise<void> {
@@ -2455,38 +2488,41 @@ export class Game {
   }
 
   /**
-   * Called from `finishGame`. If we're in capture mode, stop recording and
-   * trigger a JSON download. If we're in challenge playback mode, reset the
-   * mode flag so the next run goes back to a normal randomly-seeded tower.
+   * Called from `finishGame`. Stops the recorder and submits the ghost to
+   * the server if the run's score meets the leaderboard threshold. Submission
+   * is fire-and-forget — failures are logged but don't block the game-over UI.
    */
   private finishGhostSession(): void {
-    if (this.ghostRecorder.isRecording()) {
-      this.ghostRecorder.stop();
-      const frameCount = this.ghostRecorder.frameCount;
-      if (frameCount >= 2) {
-        const record = this.ghostRecorder.buildRecord({
-          id: `tommy-${utcDateKey()}`,
-          name: this.getLocalUsername() || "tommy",
-          seed: CHALLENGE_SEED,
-          score: this.score,
-          height: this.heightMaxReached,
-        });
-        // Local download — lets Tommy curate a canon ghost-challenge.json.
-        downloadGhostRecord(record);
-        // Remote submit — feeds the shared multi-game ghost pool. Fire-and-
-        // forget; failures are already logged inside submitRemoteGhost.
-        void submitRemoteGhost({
-          name: record.name,
-          score: record.score,
-          height: record.height,
-          frames: record.frames,
-        }).then((id) => {
-          if (id) console.log(`[remote-ghosts] Submitted ghost — id=${id}`);
-          else console.warn("[remote-ghosts] Ghost submission failed (network or 4xx).");
-        });
-      } else {
-        console.warn(`[ghost-recorder] Not saving — only captured ${frameCount} frame(s).`);
-      }
+    this.ghostRecorder.stop();
+    const frameCount = this.ghostRecorder.frameCount;
+    if (frameCount >= 2) {
+      const record = this.ghostRecorder.buildRecord({
+        id: `cc-${utcDateKey()}`,
+        name: this.getLocalUsername(),
+        seed: CHALLENGE_SEED,
+        score: this.score,
+        height: this.heightMaxReached,
+      });
+      const { score } = record;
+      // Gate server submission on the 10th-place leaderboard score. Returns 0
+      // while the pool has fewer than 10 entries, so every early run qualifies.
+      void fetchGhostUploadThreshold().then((threshold) => {
+        if (score >= threshold) {
+          void submitRemoteGhost({
+            name: record.name,
+            score: record.score,
+            height: record.height,
+            frames: record.frames,
+          }).then((id) => {
+            if (id) console.log(`[remote-ghosts] Submitted ghost — id=${id}, score=${score}, threshold=${threshold}`);
+            else console.warn("[remote-ghosts] Ghost submission failed (network or 4xx).");
+          });
+        } else {
+          console.log(`[ghost-recorder] Score ${score} below threshold ${threshold} — run recorded locally but not submitted.`);
+        }
+      });
+    } else {
+      console.warn(`[ghost-recorder] Not saving — only captured ${frameCount} frame(s).`);
     }
     if (this.ghostPlayback) {
       this.ghostPlayback.stop();
@@ -2834,8 +2870,9 @@ export class Game {
   }
 
   /**
-   * Start the human-ghost recorder (capture mode) and/or playback (challenge
-   * mode). Called from startGame after the sim has reset.
+   * Start the ghost recorder on every run and, when in challenge mode, also
+   * start playback of the fetched remote ghost. Called from startGame after
+   * the sim has reset.
    */
   private startGhostSession(): void {
     // Clean up any prior playback from the previous run.
@@ -2845,14 +2882,11 @@ export class Game {
     }
     this.ghostRecorder.stop();
 
-    if (!this.isChallengeMode) return;
+    // Always record — submission is gated on the score threshold in finishGhostSession.
+    this.ghostRecorder.start();
 
-    if (this.captureMode) {
-      this.ghostRecorder.start();
-      console.log(`[ghost-recorder] Recording started on seed 0x${CHALLENGE_SEED.toString(16)}`);
-    }
-
-    if (!this.captureMode && this.ghostChallengeRecord) {
+    // Challenge mode: also play back the fetched ghost so the player races it.
+    if (this.isChallengeMode && this.ghostChallengeRecord) {
       this.ghostPlayback = new GhostPlayback(this.scene, this.ghostChallengeRecord);
       this.ghostPlayback.start();
     }
@@ -3084,6 +3118,7 @@ export class Game {
     }
     this.titlePrompt.textContent = "RESTART";
     this.titleActions.classList.add("hidden");
+    this.refreshUsernameUi();
 
     const gameSeconds = Math.floor(state.gameTime);
     this.gameOverHeightEl.textContent = String(this.heightScore);
@@ -3164,10 +3199,14 @@ export class Game {
 
   private getLocalUsername(): string {
     try {
-      return getUsername();
-    } catch {
-      return "You";
-    }
+      const wavedashName = getUsername();
+      // Only use the wavedash name if it's a real user-set value — not the SDK
+      // default ("Player"). Fall through to our persisted coolname otherwise.
+      if (wavedashName && wavedashName !== "Player") {
+        return wavedashName;
+      }
+    } catch { /* SDK may not be available */ }
+    return getCoolLocalUsername();
   }
 
   private readDailyBest(dateKey: string): number | null {
@@ -4275,9 +4314,7 @@ export class Game {
 
     const aiGs = this.aiGhostEnabled ? this.aiGhost?.getGhostState() : null;
     const aiHeightStr = aiGs ? ` · AI ${Math.round(aiGs.height)}m` : "";
-    if (this.isChallengeMode && this.captureMode) {
-      this.hudStatus.textContent = `CAPTURE · seed 0x${CHALLENGE_SEED.toString(16)} · HEIGHT ${this.heightMaxReached}m · frames ${this.ghostRecorder.frameCount}`;
-    } else if (this.isChallengeMode && this.ghostPlayback) {
+    if (this.isChallengeMode && this.ghostPlayback) {
       this.hudStatus.textContent = `CHASING ${this.ghostPlayback.ghostName.toUpperCase()} (${this.ghostPlayback.ghostHeight}m) · YOU ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`;
     } else {
       this.hudStatus.textContent = this.isDailyChallenge
