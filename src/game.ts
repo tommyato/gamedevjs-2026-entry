@@ -561,8 +561,16 @@ export class Game {
   // Per-gear squash animation time (seconds since landing) for bouncy gears.
   private readonly bouncyGearSquashTimers = new Map<number, number>();
 
-  // Depth-gradient background (ShaderMaterial full-screen quad)
-  private gradientShaderMat: THREE.ShaderMaterial | null = null;
+  // Biome skydome — animated noise sphere following camera (world-anchored, not screen-locked)
+  private skydomeMesh: THREE.Mesh | null = null;
+  private skydomeShaderMat: THREE.ShaderMaterial | null = null;
+  private skydomeFromScrollSpeed = 1.0;
+  private skydomeToScrollSpeed = 1.0;
+  private skydomeCurrentScrollSpeed = 1.0;
+  private skydomeFromPulseFreq = 0.0;
+  private skydomeToPulseFreq = 0.0;
+  private skydomeCurrentPulseFreq = 0.0;
+  private skydomeLerpStart = -10;
 
   // Biome ambient bokeh particles — drift upward, color/speed per biome
   private biomeParticles: THREE.Points | null = null;
@@ -573,9 +581,9 @@ export class Game {
   private readonly biomeParticleFromColor = new THREE.Color(0xff5010);
   private readonly biomeParticleToColor = new THREE.Color(0xff5010);
   private biomeParticleLerpStart = -10;
-  private biomeParticleFromOpacity = 0.6;
-  private biomeParticleToOpacity = 0.6;
-  private biomeParticleCurrentOpacity = 0.6;
+  private biomeParticleFromOpacity = 0.30;
+  private biomeParticleToOpacity = 0.30;
+  private biomeParticleCurrentOpacity = 0.30;
   private biomeParticleFromSpeed = 1.3;
   private biomeParticleToSpeed = 1.3;
   private biomeParticleCurrentSpeed = 1.3;
@@ -694,45 +702,95 @@ export class Game {
     container.insertBefore(this.renderer.domElement, container.firstChild);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x000000); // Gradient plane carries biome color
+    this.scene.background = new THREE.Color(0x000000); // Skydome covers visible field; black fills any gaps
     this.scene.fog = new THREE.FogExp2(0x140d0a, 0.014);
     this.scene.add(this.titleBackdropGroup);
 
-    // Full-screen depth-gradient plane — black at screen edges, biome color at center.
-    // Vertex shader outputs NDC directly (bypasses MVP), so no camera parenting needed.
+    // Animated noise skydome — large BackSide sphere follows camera position (not rotation).
+    // Noise sampled in object-space direction (= world direction from camera), giving a
+    // world-anchored feel: rotating the camera reveals different parts of the sky,
+    // and climbing makes the noise field drift past via time-based scrolling.
     {
-      const gradGeo = new THREE.PlaneGeometry(2, 2);
-      const gradMat = new THREE.ShaderMaterial({
+      const skyGeo = new THREE.SphereGeometry(400, 32, 24);
+      const skyMat = new THREE.ShaderMaterial({
         uniforms: {
-          biomeColor: { value: new THREE.Color(0x1a0600) }, // Workshop warm dark
-          aspectRatio: { value: window.innerWidth / window.innerHeight },
+          uBiomeColor:  { value: new THREE.Color(0xff8020) },
+          uTime:        { value: 0 },
+          uScrollSpeed: { value: 1.0 },
+          uPulseFreq:   { value: 0.0 },
         },
-        vertexShader: [
-          "varying vec2 vUv;",
-          "void main() {",
-          "  vUv = uv;",
-          "  gl_Position = vec4(position, 1.0);",
-          "}",
-        ].join("\n"),
-        fragmentShader: [
-          "uniform vec3 biomeColor;",
-          "uniform float aspectRatio;",
-          "varying vec2 vUv;",
-          "void main() {",
-          "  vec2 c = (vUv - 0.5) * vec2(aspectRatio, 1.0);",
-          "  float dist = clamp(length(c) * 1.85, 0.0, 1.0);",
-          "  float weight = 1.0 - dist * dist;",
-          "  gl_FragColor = vec4(biomeColor * weight, 1.0);",
-          "}",
-        ].join("\n"),
-        depthTest: false,
+        vertexShader: `
+          varying vec3 vDir;
+          void main() {
+            vDir = position;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform vec3  uBiomeColor;
+          uniform float uTime;
+          uniform float uScrollSpeed;
+          uniform float uPulseFreq;
+          varying vec3 vDir;
+
+          float hash3(vec3 p) {
+            p = fract(p * vec3(127.1, 311.7, 74.7));
+            p += dot(p, p.zyx + 31.32);
+            return fract((p.x + p.y) * p.z);
+          }
+
+          float vnoise(vec3 p) {
+            vec3 i = floor(p);
+            vec3 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            return mix(
+              mix(mix(hash3(i),               hash3(i + vec3(1,0,0)), f.x),
+                  mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+              mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+                  mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y),
+              f.z
+            );
+          }
+
+          float fbm(vec3 p) {
+            float v = 0.0;
+            float a = 0.5;
+            for (int i = 0; i < 3; i++) {
+              v += a * vnoise(p);
+              p = p * 2.1 + vec3(1.7, 9.2, 3.5);
+              a *= 0.5;
+            }
+            return v;
+          }
+
+          void main() {
+            vec3 dir = normalize(vDir);
+            float t = uTime * uScrollSpeed;
+            // Two-axis drift so it reads as motion, not a flat pan
+            vec3 s = dir * 2.8 + vec3(t * 0.02, t * 0.008, 0.0);
+            float n = fbm(s);
+
+            // Highlight where noise exceeds threshold — dark base, aurora-like peaks
+            float bloom = smoothstep(0.50, 0.70, n);
+
+            // Optional luminance pulse (Cosmic Void: 0.5 Hz, Storm Deck: 6 Hz)
+            float pulse = 1.0;
+            if (uPulseFreq > 0.0) {
+              pulse = 0.6 + 0.4 * (0.5 + 0.5 * sin(uTime * uPulseFreq * 6.2832));
+            }
+
+            vec3 color = uBiomeColor * bloom * 0.45 * pulse;
+            gl_FragColor = vec4(color, 1.0);
+          }
+        `,
+        side: THREE.BackSide,
         depthWrite: false,
       });
-      const gradMesh = new THREE.Mesh(gradGeo, gradMat);
-      gradMesh.renderOrder = -1000;
-      gradMesh.frustumCulled = false;
-      this.scene.add(gradMesh);
-      this.gradientShaderMat = gradMat;
+      const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+      skyMesh.frustumCulled = false;
+      this.scene.add(skyMesh);
+      this.skydomeMesh = skyMesh;
+      this.skydomeShaderMat = skyMat;
     }
 
     this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -3710,6 +3768,7 @@ export class Game {
     this.updateSteam(dt);
     this.particles.update(dt, this.player.mesh.position, this.camera);
     this.updateBiomeParticles(dt);
+    this.updateSkydome(dt);
   }
 
   private updateCamera(dt: number, state: SimState) {
@@ -4667,11 +4726,11 @@ export class Game {
     this.zoneBgColor.setHex(from.bg);
     this.zoneNextBgColor.setHex(to.bg);
     this.currentFogColor.copy(this.zoneBgColor).lerp(this.zoneNextBgColor, t);
-    // Keep scene.background black — the gradient plane carries the biome color now.
-    // (sceneBackgroundColor kept for reference but not applied to background.)
+    // scene.background stays black — skydome covers the visible field.
     this.sceneBackgroundColor.copy(this.currentFogColor);
 
     if (this.scene.fog instanceof THREE.FogExp2) {
+      // Fog color tracks the dark base of the current biome (the "deep" tone of the noise sky).
       this.scene.fog.color.copy(this.currentFogColor);
       this.scene.fog.density = THREE.MathUtils.lerp(from.fogDensity, to.fogDensity, t);
     }
@@ -4684,13 +4743,12 @@ export class Game {
 
     this.bloomPass.strength = THREE.MathUtils.lerp(from.bloom, to.bloom, t) + this.challengeZoneBloomBoost;
 
-    // Gradient plane: drive biome color from ambient at reduced intensity (creates visible
-    // but not blinding atmospheric glow at screen center, fading to black at edges).
-    if (this.gradientShaderMat) {
-      this.gradientShaderMat.uniforms.biomeColor.value.copy(this.currentAmbientColor).multiplyScalar(0.22);
+    // Skydome: drive highlight color from ambient each frame (already smoothly lerped).
+    if (this.skydomeShaderMat) {
+      this.skydomeShaderMat.uniforms.uBiomeColor.value.copy(this.currentAmbientColor).multiplyScalar(0.35);
     }
 
-    // Biome particle cross-fade: detect zone change and start a 2-second lerp.
+    // Biome particle + skydome cross-fade: detect zone change and start a 2-second lerp.
     if (currentZoneIndex !== this.lastBiomeParticleIndex) {
       this.lastBiomeParticleIndex = currentZoneIndex;
       const cfg = BIOME_PARTICLE_CONFIGS[currentZoneIndex];
@@ -4702,6 +4760,14 @@ export class Game {
       this.biomeParticleToSpeed = cfg.speed;
       this.biomeFlickerFreq = cfg.flickerFreq;
       this.biomeParticleLerpStart = this.elapsedTime;
+
+      // Skydome motion parameters cross-fade alongside particles.
+      const sdCfg = BIOME_SKYDOME_CONFIGS[currentZoneIndex];
+      this.skydomeFromScrollSpeed = this.skydomeCurrentScrollSpeed;
+      this.skydomeToScrollSpeed = sdCfg.scrollSpeed;
+      this.skydomeFromPulseFreq = this.skydomeCurrentPulseFreq;
+      this.skydomeToPulseFreq = sdCfg.pulseFreq;
+      this.skydomeLerpStart = this.elapsedTime;
     }
   }
 
@@ -4809,9 +4875,6 @@ export class Game {
     this.renderer.setSize(width, height);
     this.composer.setSize(width, height);
     this.bloomPass.setSize(width, height);
-    if (this.gradientShaderMat) {
-      this.gradientShaderMat.uniforms.aspectRatio.value = width / height;
-    }
     this.applyHudRailState();
   }
 
@@ -4868,13 +4931,13 @@ export class Game {
       size: 0.38,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.30, // Workshop starting opacity (matches BIOME_PARTICLE_CONFIGS[0])
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
 
     const pts = new THREE.Points(geo, mat);
-    pts.renderOrder = -900; // behind scene, in front of gradient plane
+    pts.renderOrder = -900; // behind most scene objects
     pts.frustumCulled = false;
     this.scene.add(pts);
     this.biomeParticles = pts;
@@ -4927,6 +4990,30 @@ export class Game {
       }
     }
     this.biomeParticleGeo.attributes.position.needsUpdate = true;
+  }
+
+  private updateSkydome(dt: number): void {
+    if (!this.skydomeMesh || !this.skydomeShaderMat) {
+      return;
+    }
+
+    // Follow camera position so the dome is always centered on the viewer.
+    // Don't parent — copy position each frame so world-space noise directions
+    // remain stable as the camera translates (no parenting = no rotation coupling).
+    this.skydomeMesh.position.copy(this.camera.position);
+
+    const uniforms = this.skydomeShaderMat.uniforms;
+    uniforms.uTime.value = this.elapsedTime;
+
+    // Lerp scroll speed and pulse freq over 2 seconds when biome changes.
+    const LERP_DUR = 2.0;
+    const raw = Math.min((this.elapsedTime - this.skydomeLerpStart) / LERP_DUR, 1);
+    const st = raw * raw * (3 - 2 * raw); // smoothstep
+    this.skydomeCurrentScrollSpeed = THREE.MathUtils.lerp(this.skydomeFromScrollSpeed, this.skydomeToScrollSpeed, st);
+    this.skydomeCurrentPulseFreq   = THREE.MathUtils.lerp(this.skydomeFromPulseFreq,   this.skydomeToPulseFreq,   st);
+
+    uniforms.uScrollSpeed.value = this.skydomeCurrentScrollSpeed;
+    uniforms.uPulseFreq.value   = this.skydomeCurrentPulseFreq;
   }
 }
 
@@ -5027,17 +5114,32 @@ function getDifficultyBand(height: number): DifficultyBand {
 }
 
 // Ambient bokeh particle styles per biome zone (matches zone index in updateEnvironment).
+// Opacities halved from original values for softer, more atmospheric look.
 const BIOME_PARTICLE_CONFIGS = [
   // Workshop (0–25m): warm amber ember sparks
-  { color: 0xff5010, opacity: 0.60, speed: 1.3, flickerFreq: 0 },
+  { color: 0xff5010, opacity: 0.30, speed: 1.3, flickerFreq: 0 },
   // Storm Deck (25–50m): pale blue/white electric sparks — fast staccato flicker
-  { color: 0x88ddff, opacity: 0.70, speed: 2.0, flickerFreq: 12 },
+  { color: 0x88ddff, opacity: 0.35, speed: 2.0, flickerFreq: 12 },
   // Brass Cathedral (50–75m): rich gold motes, denser and slower
-  { color: 0xffcc20, opacity: 0.72, speed: 0.9, flickerFreq: 0 },
+  { color: 0xffcc20, opacity: 0.36, speed: 0.9, flickerFreq: 0 },
   // Chrome Spire (75–100m): icy cyan/white drifting snow or chrome flecks
-  { color: 0xd4f0ff, opacity: 0.55, speed: 0.65, flickerFreq: 0 },
+  { color: 0xd4f0ff, opacity: 0.28, speed: 0.65, flickerFreq: 0 },
   // Cosmic Void (100m+): magenta/violet points with slow glow pulse
-  { color: 0xcc44ff, opacity: 0.78, speed: 1.6, flickerFreq: 2.2 },
+  { color: 0xcc44ff, opacity: 0.39, speed: 1.6, flickerFreq: 2.2 },
+] as const;
+
+// Skydome motion parameters per biome zone (scroll speed multiplier, luminance pulse freq Hz).
+const BIOME_SKYDOME_CONFIGS = [
+  // Workshop (0–25m): calm slow drift
+  { scrollSpeed: 1.0, pulseFreq: 0.0 },
+  // Storm Deck (25–50m): faster scroll + electrical flicker modulation
+  { scrollSpeed: 1.5, pulseFreq: 6.0 },
+  // Brass Cathedral (50–75m): calm golden drift
+  { scrollSpeed: 1.0, pulseFreq: 0.0 },
+  // Chrome Spire (75–100m): calm icy drift
+  { scrollSpeed: 1.0, pulseFreq: 0.0 },
+  // Cosmic Void (100m+): slow 0.5 Hz luminance pulse (4-second gentle breathe)
+  { scrollSpeed: 1.0, pulseFreq: 0.5 },
 ] as const;
 
 function randomRange(min: number, max: number): number {
