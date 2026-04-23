@@ -24,6 +24,9 @@ export class ParticleSystem {
 
   private readonly particles: Particle[] = [];
   private readonly sharedGeometry = new THREE.IcosahedronGeometry(1, 0);
+  private readonly trailGeometry = new THREE.RingGeometry(0.6, 1.0, 24);
+  private readonly trailColorStart = new THREE.Color(0xcaa25a); // brass/gold
+  private readonly trailColorEnd = new THREE.Color(0xfff4d8);   // warm white
   private readonly color = new THREE.Color();
   private readonly scale = new THREE.Vector3();
   private readonly spawnCenter = new THREE.Vector3();
@@ -81,7 +84,7 @@ export class ParticleSystem {
     }
   }
 
-  update(dt: number, playerPosition: THREE.Vector3) {
+  update(dt: number, playerPosition: THREE.Vector3, camera: THREE.Camera) {
     for (const particle of this.particles) {
       if (!particle.active) {
         continue;
@@ -120,10 +123,15 @@ export class ParticleSystem {
         const t = particle.life / particle.maxLife;
         const fade = 1 - t;
         if (particle.kind === "trail") {
-          // Scale expands 1.0 → 1.5× over lifetime
-          const scaleFactor = 1 + t * 0.5;
-          particle.mesh.scale.copy(particle.initialScale).multiplyScalar(scaleFactor);
-          material.opacity = fade * 0.7;
+          // Rings contract inward: scale lerps from initial down to 0.02
+          const currentScale = THREE.MathUtils.lerp(particle.initialScale.x, 0.02, t);
+          particle.mesh.scale.setScalar(currentScale);
+          // Ease: most of life stays readable, quick final fade
+          material.opacity = (1 - t * t) * 0.85;
+          // Color lerp: brass/gold → warm white over lifetime
+          material.color.lerpColors(this.trailColorStart, this.trailColorEnd, t);
+          // Billboard ring to face camera
+          particle.mesh.lookAt(camera.position);
         } else if (particle.kind === "steam") {
           material.opacity = fade * 0.55;
         } else {
@@ -590,6 +598,7 @@ export class ParticleSystem {
     particle.drag = 0.05;
     particle.gravity = 0;
     particle.mesh.visible = true;
+    particle.mesh.geometry = this.trailGeometry;
     particle.mesh.position.set(position.x + jitterX, position.y, position.z + jitterZ);
 
     // Drift upward at ~0.4 u/s in world space — anchored, player moves past them
@@ -610,6 +619,8 @@ export class ParticleSystem {
     for (const particle of this.particles) {
       if (!particle.active) {
         particle.active = true;
+        // Reset geometry to shared default; trail spawner overrides below
+        particle.mesh.geometry = this.sharedGeometry;
         return particle;
       }
     }

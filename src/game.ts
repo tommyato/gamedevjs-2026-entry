@@ -2638,6 +2638,7 @@ export class Game {
     stopAmbientTick();
     stopMusic();
     this.deathAnimTimer = 0.4;
+    this.toastTimer = 0;
     this.closeCallFlashTimer = 0;
     this.shieldSaveFlashTimer = 0;
     this.shieldSaveOverlay.style.opacity = "0";
@@ -3370,7 +3371,7 @@ export class Game {
     }
 
     this.updateSteam(dt);
-    this.particles.update(dt, this.player.mesh.position);
+    this.particles.update(dt, this.player.mesh.position, this.camera);
   }
 
   private updateCamera(dt: number, state: SimState) {
@@ -4114,6 +4115,10 @@ export class Game {
   }
 
   private showToast(message: string) {
+    // Suppress HUD toasts during game-over so they never overlap the overlay
+    if (this.state === GameState.GameOver) {
+      return;
+    }
     this.hudToast.style.color = "#aef0ff";
     this.hudToast.style.borderColor = "rgba(122, 223, 255, 0.32)";
     this.hudToast.style.background = "rgba(10, 21, 28, 0.8)";
