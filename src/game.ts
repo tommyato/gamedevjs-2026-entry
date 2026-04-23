@@ -779,7 +779,7 @@ export class Game {
               pulse = 0.6 + 0.4 * (0.5 + 0.5 * sin(uTime * uPulseFreq * 6.2832));
             }
 
-            vec3 color = uBiomeColor * bloom * 0.45 * pulse;
+            vec3 color = uBiomeColor * bloom * 0.26 * pulse;
             gl_FragColor = vec4(color, 1.0);
           }
         `,
@@ -4931,7 +4931,7 @@ export class Game {
       size: 0.38,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.30, // Workshop starting opacity (matches BIOME_PARTICLE_CONFIGS[0])
+      opacity: 0.17, // Workshop starting opacity (matches BIOME_PARTICLE_CONFIGS[0])
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -5114,18 +5114,18 @@ function getDifficultyBand(height: number): DifficultyBand {
 }
 
 // Ambient bokeh particle styles per biome zone (matches zone index in updateEnvironment).
-// Opacities halved from original values for softer, more atmospheric look.
+// Opacities faded further (2026-04-23) for softer, more atmospheric look per Tommy feedback.
 const BIOME_PARTICLE_CONFIGS = [
   // Workshop (0–25m): warm amber ember sparks
-  { color: 0xff5010, opacity: 0.30, speed: 1.3, flickerFreq: 0 },
+  { color: 0xff5010, opacity: 0.17, speed: 1.3, flickerFreq: 0 },
   // Storm Deck (25–50m): pale blue/white electric sparks — fast staccato flicker
-  { color: 0x88ddff, opacity: 0.35, speed: 2.0, flickerFreq: 12 },
+  { color: 0x88ddff, opacity: 0.20, speed: 2.0, flickerFreq: 12 },
   // Brass Cathedral (50–75m): rich gold motes, denser and slower
-  { color: 0xffcc20, opacity: 0.36, speed: 0.9, flickerFreq: 0 },
+  { color: 0xffcc20, opacity: 0.20, speed: 0.9, flickerFreq: 0 },
   // Chrome Spire (75–100m): icy cyan/white drifting snow or chrome flecks
-  { color: 0xd4f0ff, opacity: 0.28, speed: 0.65, flickerFreq: 0 },
+  { color: 0xd4f0ff, opacity: 0.16, speed: 0.65, flickerFreq: 0 },
   // Cosmic Void (100m+): magenta/violet points with slow glow pulse
-  { color: 0xcc44ff, opacity: 0.39, speed: 1.6, flickerFreq: 2.2 },
+  { color: 0xcc44ff, opacity: 0.22, speed: 1.6, flickerFreq: 2.2 },
 ] as const;
 
 // Skydome motion parameters per biome zone (scroll speed multiplier, luminance pulse freq Hz).
