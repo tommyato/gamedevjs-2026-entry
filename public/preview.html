@@ -59,11 +59,18 @@
   <div class="container">
     <div id="frame-box">
       <iframe
+        id="game-frame"
         src="./index.html"
         allow="autoplay; fullscreen; gamepad; pointer-lock"
         title="Clockwork Climb"
       ></iframe>
     </div>
   </div>
+  <script>
+    const frame = document.getElementById("game-frame");
+    const query = window.location.search || "";
+    const hash = window.location.hash || "";
+    frame.src = `./index.html${query}${hash}`;
+  </script>
 </body>
 </html>
