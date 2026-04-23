@@ -2134,7 +2134,7 @@ export class Game {
   }
 
   private updateAIGhost(dt: number): void {
-    if (!this.aiGhostEnabled || this.isDailyChallenge || !this.aiGhost?.isReady()) return;
+    if (!this.aiGhostEnabled || !this.aiGhost?.isReady()) return;
     this.aiGhost.update(dt);
     const gs = this.aiGhost.getGhostState();
     if (!gs || !gs.alive) return;
