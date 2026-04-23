@@ -53,6 +53,14 @@ import {
 } from "./platform";
 import type { AchievementProgress } from "./platform";
 import { AIGhost, getAIGhostModelUrl, isAIGhostEnabled } from "./ai-ghost";
+import {
+  CHALLENGE_SEED,
+  GhostRecorder,
+  downloadGhostRecord,
+  isCaptureModeEnabled,
+  type GhostRecord,
+} from "./ghost-recorder";
+import { GhostPlayback, loadGhostChallenge } from "./ghost-playback";
 import { MultiplayerManager, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
 import { applyTopDownShadowToObject, TopDownShadowSystem } from "./shadow";
@@ -518,6 +526,13 @@ export class Game {
   private aiGhost: AIGhost | null = null;
   private aiGhostEnabled: boolean = isAIGhostEnabled();
   private aiGhostButton: HTMLButtonElement | null = null;
+  // PLAY A GHOST — human-recorded playback challenge. Replaces the scripted
+  // AI ghost with a translucent playback of a recorded run on a fixed seed.
+  private readonly ghostRecorder = new GhostRecorder();
+  private readonly captureMode = isCaptureModeEnabled();
+  private ghostChallengeRecord: GhostRecord | null = null;
+  private ghostPlayback: GhostPlayback | null = null;
+  private isChallengeMode = false;
   private hudAiBadge: HTMLElement | null = null;
   private multiplayerPanel: HTMLDivElement | null = null;
   private multiplayerButton: HTMLButtonElement | null = null;
@@ -991,6 +1006,7 @@ export class Game {
     this.setupMultiplayerUi(container);
     this.initAIGhost();
     this.setupAIGhostButton();
+    void this.setupGhostChallenge();
     this.setupDailyChallengeButton();
     this.setupContractsUi(container);
     this.rerollPreviewContracts();
@@ -1645,6 +1661,13 @@ export class Game {
     this.clearGhostMeshes();
     this.resetAIGhost();
 
+    this.isChallengeMode = false;
+    this.ghostRecorder.stop();
+    if (this.ghostPlayback) {
+      this.ghostPlayback.dispose();
+      this.ghostPlayback = null;
+    }
+
     // Hide the live HUD panel and show a fresh preview on the title screen.
     this.activeContracts = [];
     this.contractsHudPanel.classList.add("empty");
@@ -2043,40 +2066,112 @@ export class Game {
   }
 
   private setupAIGhostButton(): void {
-    // Hidden for now: scripted planner gets stuck when one gear blocks the
-    // direct jump path to another (live feedback 2026-04-23). Re-enable once
-    // we replace this with a recorded-human-ghost system ("Play a Ghost").
+    // The scripted AI ghost was pulled (2026-04-23) because it gets stuck on
+    // gear layouts where one gear occludes the direct jump path to another.
+    // The replacement is a human-recorded ghost (see "PLAY A GHOST" below).
+    //
+    // The scripted / ONNX / MLP code paths stay in the repo as dev-only
+    // fallbacks via the `?_ai=1|onnx|mlp` query params — they're useful for
+    // debugging, just not shipped in the title-screen UI.
     const AI_GHOST_READY = false;
 
     const btn = document.getElementById("title-btn-raceai") as HTMLButtonElement | null;
     if (!btn) return;
+    this.aiGhostButton = btn;
 
-    if (!AI_GHOST_READY) {
+    // ----- PLAY A GHOST (human playback challenge) -----
+    //
+    // HOW TO ENABLE AFTER RECORDING A RUN:
+    //   1. Open the dev build with `?capture=1` in the URL.
+    //   2. Play through — the game forces the challenge seed for you.
+    //   3. On death, a `ghost-challenge.json` download appears.
+    //   4. Move that file into `public/ghost-challenge.json`.
+    //   5. Flip `GHOST_CHALLENGE_READY` below to `true`.
+    //   6. Commit + ship. Players tapping the button race the recording.
+    //
+    // The button stays hidden until both the flag is true AND the JSON
+    // actually fetched successfully — so a missing file won't strand a
+    // dead button on the title screen.
+    const GHOST_CHALLENGE_READY = false;
+
+    if (!AI_GHOST_READY && !GHOST_CHALLENGE_READY && !this.captureMode) {
       btn.style.display = "none";
-      this.aiGhostButton = btn;
       return;
     }
 
-    btn.textContent = this.aiGhostEnabled ? "AI: ON" : "RACE AI";
+    if (AI_GHOST_READY) {
+      // Legacy scripted-AI path (unused in production). Left for reference.
+      btn.textContent = this.aiGhostEnabled ? "AI: ON" : "RACE AI";
+      Object.assign(btn.style, {
+        border: "1px solid rgba(255, 196, 120, 0.45)",
+        background: "linear-gradient(180deg, rgba(46, 32, 14, 0.92), rgba(24, 16, 8, 0.82))",
+        boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 226, 176, 0.18)",
+        color: "#ffe1a9",
+      } as CSSStyleDeclaration);
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.handleAIGhostButtonClick();
+      });
+      btn.addEventListener("touchend", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.handleAIGhostButtonClick();
+      }, { passive: false });
+      return;
+    }
+
+    // Capture mode OR challenge mode: repurpose the button as PLAY A GHOST.
+    btn.textContent = this.captureMode ? "CAPTURE RUN" : "PLAY A GHOST";
     Object.assign(btn.style, {
-      border: "1px solid rgba(255, 196, 120, 0.45)",
-      background: "linear-gradient(180deg, rgba(46, 32, 14, 0.92), rgba(24, 16, 8, 0.82))",
-      boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 226, 176, 0.18)",
-      color: "#ffe1a9",
+      border: "1px solid rgba(155, 216, 255, 0.45)",
+      background: "linear-gradient(180deg, rgba(14, 30, 46, 0.92), rgba(8, 16, 28, 0.82))",
+      boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(173, 232, 255, 0.18)",
+      color: "#d7f8ff",
     } as CSSStyleDeclaration);
 
+    // In challenge mode (not capture) we only light the button up once the
+    // JSON actually loaded — `setupGhostChallenge` does that asynchronously.
+    if (!this.captureMode) btn.style.display = "none";
+
+    const startChallenge = () => {
+      if (this.state !== GameState.Title && this.state !== GameState.GameOver) return;
+      if (this.captureMode) {
+        // Capture flow: start a normal run on the challenge seed, and the
+        // recorder attaches automatically inside startGame().
+        this.isChallengeMode = true;
+        this.startGame();
+        return;
+      }
+      if (!this.ghostChallengeRecord) return;
+      this.isChallengeMode = true;
+      this.startGame();
+    };
     btn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      void this.handleAIGhostButtonClick();
+      startChallenge();
     });
     btn.addEventListener("touchend", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      void this.handleAIGhostButtonClick();
+      startChallenge();
     }, { passive: false });
+  }
 
-    this.aiGhostButton = btn;
+  /**
+   * Fetch the ghost-challenge JSON (if present) and, on success, make the
+   * PLAY A GHOST title button visible. Called once at init.
+   */
+  private async setupGhostChallenge(): Promise<void> {
+    if (this.captureMode) return; // capture mode doesn't play back a ghost
+    const record = await loadGhostChallenge();
+    if (!record) return;
+    this.ghostChallengeRecord = record;
+    if (this.aiGhostButton) {
+      this.aiGhostButton.style.display = "inline-flex";
+    }
+    console.log(`[game] Ghost challenge loaded — ${record.name} · ${record.height}m · ${record.frames.length} frames`);
   }
 
   private async handleAIGhostButtonClick(): Promise<void> {
@@ -2197,6 +2292,50 @@ export class Game {
         v.label.style.display = "none";
       }
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // PLAY A GHOST — recorder + playback session lifecycle
+  // -----------------------------------------------------------------------
+
+  /** Per-frame tick for the human-ghost recorder / playback. */
+  private updateGhostSession(dt: number, state: SimState): void {
+    if (this.ghostRecorder.isRecording()) {
+      this.ghostRecorder.sample(state.player.x, state.player.y, state.player.z, state.player.onGround);
+    }
+    if (this.ghostPlayback) {
+      this.ghostPlayback.update(dt);
+    }
+  }
+
+  /**
+   * Called from `finishGame`. If we're in capture mode, stop recording and
+   * trigger a JSON download. If we're in challenge playback mode, reset the
+   * mode flag so the next run goes back to a normal randomly-seeded tower.
+   */
+  private finishGhostSession(): void {
+    if (this.ghostRecorder.isRecording()) {
+      this.ghostRecorder.stop();
+      const frameCount = this.ghostRecorder.frameCount;
+      if (frameCount >= 2) {
+        const record = this.ghostRecorder.buildRecord({
+          id: `tommy-${utcDateKey()}`,
+          name: this.getLocalUsername() || "tommy",
+          seed: CHALLENGE_SEED,
+          score: this.score,
+          height: this.heightMaxReached,
+        });
+        downloadGhostRecord(record);
+      } else {
+        console.warn(`[ghost-recorder] Not saving — only captured ${frameCount} frame(s).`);
+      }
+    }
+    if (this.ghostPlayback) {
+      this.ghostPlayback.stop();
+    }
+    // Challenge mode is a one-shot — the user comes back to the title screen
+    // and picks PLAY A GHOST again to re-run it, or PLAY for a fresh tower.
+    this.isChallengeMode = false;
   }
 
   private async readSaveData(): Promise<SaveData> {
@@ -2428,7 +2567,14 @@ export class Game {
 
   private startGame() {
     const wasGameOver = this.state === GameState.GameOver;
-    if (!this.isDailyChallenge) {
+    if (this.isChallengeMode) {
+      // Lock the tower layout to the challenge seed so the recorded ghost
+      // (whether we're playing it back or recording a new one) sees the
+      // same gears the player sees. Daily mode wins if both are set —
+      // startDailyChallenge runs first and would disable challenge mode.
+      this.isDailyChallenge = false;
+      this.sim.setSeed(CHALLENGE_SEED);
+    } else if (!this.isDailyChallenge) {
       this.dailyChallengeDate = utcDateKey();
       this.dailyPreviousBest = null;
       this.sim.setSeed(this.regularSeed);
@@ -2521,6 +2667,32 @@ export class Game {
     }
     this.clearGhostMeshes();
     this.resetAIGhost();
+    this.startGhostSession();
+  }
+
+  /**
+   * Start the human-ghost recorder (capture mode) and/or playback (challenge
+   * mode). Called from startGame after the sim has reset.
+   */
+  private startGhostSession(): void {
+    // Clean up any prior playback from the previous run.
+    if (this.ghostPlayback) {
+      this.ghostPlayback.dispose();
+      this.ghostPlayback = null;
+    }
+    this.ghostRecorder.stop();
+
+    if (!this.isChallengeMode) return;
+
+    if (this.captureMode) {
+      this.ghostRecorder.start();
+      console.log(`[ghost-recorder] Recording started on seed 0x${CHALLENGE_SEED.toString(16)}`);
+    }
+
+    if (!this.captureMode && this.ghostChallengeRecord) {
+      this.ghostPlayback = new GhostPlayback(this.scene, this.ghostChallengeRecord);
+      this.ghostPlayback.start();
+    }
   }
 
   private pauseGame() {
@@ -2570,6 +2742,7 @@ export class Game {
     this.updateHud(dt);
     this.tickMultiplayer(dt, state);
     this.updateAIGhost(dt);
+    this.updateGhostSession(dt, state);
 
     // Check personal best
     if (
@@ -2619,6 +2792,7 @@ export class Game {
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.hideLandingCueHard();
+    this.finishGhostSession();
     // Fresh queue for this run's unlocks — any pending from a prior run
     // should have been flushed already on dismiss, but guard just in case.
     this.achievementUnlockQueue.length = 0;
@@ -3895,9 +4069,15 @@ export class Game {
 
     const aiGs = this.aiGhostEnabled ? this.aiGhost?.getGhostState() : null;
     const aiHeightStr = aiGs ? ` · AI ${Math.round(aiGs.height)}m` : "";
-    this.hudStatus.textContent = this.isDailyChallenge
-      ? `DAILY · ${formatHumanDate(this.dailyChallengeDate)} · SAME TOWER FOR EVERYONE · HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`
-      : `HEIGHT ${this.heightMaxReached}m${aiHeightStr} · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
+    if (this.isChallengeMode && this.captureMode) {
+      this.hudStatus.textContent = `CAPTURE · seed 0x${CHALLENGE_SEED.toString(16)} · HEIGHT ${this.heightMaxReached}m · frames ${this.ghostRecorder.frameCount}`;
+    } else if (this.isChallengeMode && this.ghostPlayback) {
+      this.hudStatus.textContent = `CHASING ${this.ghostPlayback.ghostName.toUpperCase()} (${this.ghostPlayback.ghostHeight}m) · YOU ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`;
+    } else {
+      this.hudStatus.textContent = this.isDailyChallenge
+        ? `DAILY · ${formatHumanDate(this.dailyChallengeDate)} · SAME TOWER FOR EVERYONE · HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`
+        : `HEIGHT ${this.heightMaxReached}m${aiHeightStr} · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
+    }
 
     if (this.hudAiBadge) {
       if (this.aiGhostEnabled) {
