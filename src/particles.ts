@@ -24,7 +24,7 @@ export class ParticleSystem {
 
   private readonly particles: Particle[] = [];
   private readonly sharedGeometry = new THREE.IcosahedronGeometry(1, 0);
-  private readonly trailGeometry = new THREE.RingGeometry(0.6, 1.0, 24);
+  private readonly trailGeometry = new THREE.RingGeometry(0.42, 1.0, 32);
   private readonly trailColorStart = new THREE.Color(0xcaa25a); // brass/gold
   private readonly trailColorEnd = new THREE.Color(0xfff4d8);   // warm white
   private readonly color = new THREE.Color();
@@ -127,7 +127,7 @@ export class ParticleSystem {
           const currentScale = THREE.MathUtils.lerp(particle.initialScale.x, 0.02, t);
           particle.mesh.scale.setScalar(currentScale);
           // Ease: most of life stays readable, quick final fade
-          material.opacity = (1 - t * t) * 0.85;
+          material.opacity = (1 - t * t) * 0.95;
           // Color lerp: brass/gold → warm white over lifetime
           material.color.lerpColors(this.trailColorStart, this.trailColorEnd, t);
           // Billboard ring to face camera
@@ -604,15 +604,13 @@ export class ParticleSystem {
     // Drift upward at ~0.4 u/s in world space — anchored, player moves past them
     particle.velocity.set(0, 0.4, 0);
 
-    // ~60-70% of jumpSteam scale (0.2–0.3 → trail is 0.12–0.18)
-    const baseScale = 0.12 + Math.random() * 0.06;
+    // Large enough to read at gameplay camera distance; rings shrink inward over life.
+    const baseScale = 0.2 + Math.random() * 0.08;
     this.scale.setScalar(baseScale);
     particle.mesh.scale.copy(this.scale);
     particle.initialScale.copy(this.scale);
 
-    // Warm cream core (#f5e6c8) with faint brass edge tint (#caa25a), additive blend
-    const colorHex = Math.random() > 0.4 ? 0xf5e6c8 : 0xcaa25a;
-    this.setMaterial(particle, colorHex, 0.7, THREE.AdditiveBlending);
+    this.setMaterial(particle, 0xcaa25a, 0.9, THREE.AdditiveBlending, THREE.DoubleSide);
   }
 
   private acquire(): Particle | null {
@@ -632,7 +630,8 @@ export class ParticleSystem {
     particle: Particle,
     colorHex: number,
     opacity: number,
-    blending: THREE.Blending = THREE.NormalBlending
+    blending: THREE.Blending = THREE.NormalBlending,
+    side: THREE.Side = THREE.FrontSide
   ) {
     const material = particle.mesh.material;
     if (!(material instanceof THREE.MeshBasicMaterial)) {
@@ -644,6 +643,10 @@ export class ParticleSystem {
     material.opacity = opacity;
     if (material.blending !== blending) {
       material.blending = blending;
+      material.needsUpdate = true;
+    }
+    if (material.side !== side) {
+      material.side = side;
       material.needsUpdate = true;
     }
   }

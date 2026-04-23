@@ -2639,6 +2639,8 @@ export class Game {
     stopMusic();
     this.deathAnimTimer = 0.4;
     this.toastTimer = 0;
+    this.hudToast.style.opacity = "0";
+    this.hudToast.style.transform = "translate(-50%, 12px)";
     this.closeCallFlashTimer = 0;
     this.shieldSaveFlashTimer = 0;
     this.shieldSaveOverlay.style.opacity = "0";
