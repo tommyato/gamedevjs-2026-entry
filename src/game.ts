@@ -565,6 +565,7 @@ export class Game {
   private deathAnimTimer = 0;
   private toastTimer = 0;
   private zoneAnnouncementTimer = 0;
+  private lastAnnouncedZone = -1;
   private seenWindGear = false;
   private seenMagnetGear = false;
   private seenGearFreeze = false;
@@ -1638,6 +1639,7 @@ export class Game {
     this.deathAnimTimer = 0;
     this.toastTimer = 0;
     this.zoneAnnouncementTimer = 0;
+    this.lastAnnouncedZone = -1;
     this.cameraShakeTimer = 0;
     this.cameraShakeOffset.set(0, 0, 0);
     this.cameraDistancePulses.length = 0;
@@ -2590,6 +2592,7 @@ export class Game {
     this.runStartElapsedTime = this.elapsedTime;
     this.toastTimer = 0;
     this.zoneAnnouncementTimer = 0;
+    this.lastAnnouncedZone = -1;
     this.cameraKick = 0;
     this.cameraShakeTimer = 0;
     this.cameraShakeOffset.set(0, 0, 0);
@@ -4454,14 +4457,36 @@ export class Game {
       ambient: number;
       ambientIntensity: number;
       bloom: number;
+      name: string;
     };
+    // Five dramatically distinct biomes — hue family per band so transitions
+    // read as obvious zone shifts during a 60s climb video:
+    //   amber → teal → gold → icy-blue → magenta
     const zones: Zone[] = [
-      { height: 0, bg: 0x140d0a, fogDensity: 0.014, ambient: 0xc7aa7a, ambientIntensity: 1.0, bloom: 0.18 },
-      { height: 25, bg: 0x0f1318, fogDensity: 0.012, ambient: 0x8899bb, ambientIntensity: 1.1, bloom: 0.22 },
-      { height: 50, bg: 0x181b22, fogDensity: 0.010, ambient: 0xb8c4dd, ambientIntensity: 1.25, bloom: 0.26 },
-      { height: 75, bg: 0x1a1408, fogDensity: 0.008, ambient: 0xffd6a3, ambientIntensity: 1.5, bloom: 0.32 },
-      { height: 100, bg: 0x0a0a14, fogDensity: 0.006, ambient: 0xff88aa, ambientIntensity: 1.5, bloom: 0.30 },
+      // Band 0 (0–25m) — Workshop: smoky amber workshop, dense fog, hot glow
+      { height: 0,   bg: 0x2d1205, fogDensity: 0.024, ambient: 0xff8020, ambientIntensity: 0.85, bloom: 0.22, name: "Workshop" },
+      // Band 1 (25–50m) — Storm Deck: cool slate-teal, heavy overcast, exposed
+      { height: 25,  bg: 0x041520, fogDensity: 0.016, ambient: 0x30a8c8, ambientIntensity: 1.15, bloom: 0.28, name: "Storm Deck" },
+      // Band 2 (50–75m) — Brass Cathedral: olive-green, saturated gold light, tall reverb
+      { height: 50,  bg: 0x1c2e04, fogDensity: 0.010, ambient: 0xd4b800, ambientIntensity: 1.50, bloom: 0.38, name: "Brass Cathedral" },
+      // Band 3 (75–100m) — Chrome Spire: blue-grey steel, thin airy fog, icy bright
+      { height: 75,  bg: 0x182840, fogDensity: 0.005, ambient: 0xa8d4ff, ambientIntensity: 2.20, bloom: 0.50, name: "Chrome Spire" },
+      // Band 4 (100m+) — Cosmic Void: deep indigo, near-zero fog, vivid magenta rim
+      { height: 100, bg: 0x0e0620, fogDensity: 0.002, ambient: 0xd040f0, ambientIntensity: 1.80, bloom: 0.60, name: "Cosmic Void" },
     ];
+
+    // Fire zone-entry banner once per zone boundary crossing.
+    let currentZoneIndex = 0;
+    for (let i = zones.length - 1; i >= 0; i -= 1) {
+      if (height >= zones[i].height) {
+        currentZoneIndex = i;
+        break;
+      }
+    }
+    if (currentZoneIndex !== this.lastAnnouncedZone) {
+      this.lastAnnouncedZone = currentZoneIndex;
+      this.showZoneAnnouncement(zones[currentZoneIndex].name.toUpperCase());
+    }
 
     let from = zones[0];
     let to = zones[0];
