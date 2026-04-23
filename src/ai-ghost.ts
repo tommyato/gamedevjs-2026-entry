@@ -1,11 +1,11 @@
 /**
- * AI Ghost — pure-JS neural network inference + headless simulation.
+ * AI Ghost — neural network inference + headless simulation.
  *
- * Runs a pre-trained PPO policy (22→64→64→8 MLP with Tanh) alongside
- * the player's game. The AI's position is exposed as a ghost for the
- * renderer to display. No external ML libraries — just matrix math.
+ * Runs a pre-trained PPO policy alongside the player's game. The AI's
+ * position is exposed as a ghost for the renderer to display.
  *
- * Activate with ?_ai=1 URL parameter.
+ * Activate with ?_ai=1 for the bundled JSON TinyMLP fallback, or
+ * ?_ai=onnx for the exported ONNX model.
  */
 
 import { ClockworkClimbSimulation } from "./simulation";
@@ -20,6 +20,31 @@ type LayerWeights = {
   outFeatures: number;
   inFeatures: number;
 };
+
+type OrtTensor = {
+  data: ArrayLike<number>;
+};
+
+type OrtSession = {
+  run(feeds: Record<string, OrtTensor>): Promise<Record<string, OrtTensor>>;
+};
+
+type OrtModule = {
+  env: {
+    wasm: {
+      wasmPaths: string;
+      numThreads: number;
+    };
+  };
+  Tensor: new (type: "float32", data: Float32Array, dims: number[]) => OrtTensor;
+  InferenceSession: {
+    create(modelPath: string): Promise<OrtSession>;
+  };
+};
+
+const OBSERVATION_SIZE = 22;
+const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/ort.min.mjs";
+const ORT_WASM_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/";
 
 function gemm(
   input: Float32Array,
@@ -79,6 +104,91 @@ class TinyMLP {
   }
 }
 
+class OnnxPolicy {
+  private session: OrtSession | null = null;
+  private loadPromise: Promise<boolean> | null = null;
+  private runtimePromise: Promise<OrtModule> | null = null;
+  private inflight = false;
+  private failed = false;
+  private lastAction = 0;
+  private generation = 0;
+
+  constructor(private readonly modelUrl: string) {}
+
+  async load(): Promise<boolean> {
+    if (this.session) return true;
+    if (this.failed) return false;
+    if (!this.loadPromise) {
+      this.loadPromise = (async () => {
+        try {
+          const ort = await this.getRuntime();
+          ort.env.wasm.wasmPaths = ORT_WASM_URL;
+          ort.env.wasm.numThreads = 1;
+          this.session = await ort.InferenceSession.create(this.modelUrl);
+          console.log("[ai-ghost] ONNX model loaded successfully");
+          return true;
+        } catch (err) {
+          this.failed = true;
+          console.warn("[ai-ghost] Error loading ONNX model:", err);
+          return false;
+        } finally {
+          this.loadPromise = null;
+        }
+      })();
+    }
+    return this.loadPromise;
+  }
+
+  reset(): void {
+    this.generation++;
+    this.inflight = false;
+    this.lastAction = 0;
+  }
+
+  forwardAsync(input: Float32Array): number {
+    if (!this.session || this.inflight || this.failed) {
+      return this.lastAction;
+    }
+
+    const session = this.session;
+    const generation = this.generation;
+    const observation = new Float32Array(input);
+    this.inflight = true;
+
+    void (async () => {
+      try {
+        const ort = await this.getRuntime();
+        const tensor = new ort.Tensor("float32", observation, [1, OBSERVATION_SIZE]);
+        const outputs = await session.run({ obs: tensor });
+        if (generation !== this.generation) return;
+
+        const logits = outputs.logits ?? Object.values(outputs)[0];
+        if (!logits) {
+          this.failed = true;
+          return;
+        }
+        this.lastAction = argmax(logits.data as Float32Array);
+      } catch (err) {
+        this.failed = true;
+        console.warn("[ai-ghost] ONNX inference failed:", err);
+      } finally {
+        if (generation === this.generation) {
+          this.inflight = false;
+        }
+      }
+    })();
+
+    return this.lastAction;
+  }
+
+  private async getRuntime(): Promise<OrtModule> {
+    if (!this.runtimePromise) {
+      this.runtimePromise = import(/* @vite-ignore */ ORT_URL).then((mod) => mod as unknown as OrtModule);
+    }
+    return this.runtimePromise;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Weight loading from base64-encoded JSON
 // ---------------------------------------------------------------------------
@@ -132,6 +242,7 @@ export type AIGhostState = {
 export class AIGhost {
   private sim: ClockworkClimbSimulation | null = null;
   private mlp: TinyMLP | null = null;
+  private onnx: OnnxPolicy | null = null;
   private weightsUrl: string;
   private loaded = false;
   private loading = false;
@@ -150,6 +261,12 @@ export class AIGhost {
     this.loading = true;
 
     try {
+      if (this.weightsUrl.endsWith(".onnx")) {
+        this.onnx = new OnnxPolicy(this.weightsUrl);
+        this.loaded = await this.onnx.load();
+        return this.loaded;
+      }
+
       const response = await fetch(this.weightsUrl);
       if (!response.ok) {
         console.warn("[ai-ghost] Failed to load weights:", response.status);
@@ -177,7 +294,7 @@ export class AIGhost {
   }
 
   isReady(): boolean {
-    return this.loaded && this.mlp !== null;
+    return this.loaded && (this.mlp !== null || this.onnx !== null);
   }
 
   /** Reset the AI simulation for a new game. */
@@ -189,11 +306,12 @@ export class AIGhost {
     this.stepAccumulator = 0;
     this.frameCount = 0;
     this.lastAction = 0;
+    this.onnx?.reset();
   }
 
   /** Step the AI simulation forward one frame. Call every frame during gameplay. */
   update(dt: number): void {
-    if (!this.sim || !this.mlp) return;
+    if (!this.sim || (!this.mlp && !this.onnx)) return;
 
     const state = this.sim.getState();
     if (state.gameState === "gameover") return;
@@ -207,7 +325,9 @@ export class AIGhost {
       for (let i = 0; i < obs.length; i++) {
         obsF32[i] = obs[i];
       }
-      this.lastAction = this.mlp.forward(obsF32);
+      this.lastAction = this.onnx
+        ? this.onnx.forwardAsync(obsF32)
+        : this.mlp?.forward(obsF32) ?? this.lastAction;
     }
 
     // Step simulation with last chosen action
@@ -244,4 +364,17 @@ export function isAIGhostEnabled(): boolean {
   } catch {
     return false;
   }
+}
+
+export function isAIGhostOnnxEnabled(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("_ai") === "onnx";
+  } catch {
+    return false;
+  }
+}
+
+export function getAIGhostModelUrl(): string {
+  return isAIGhostOnnxEnabled() ? "model.onnx" : "model-weights.json";
 }

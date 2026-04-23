@@ -52,7 +52,7 @@ import {
   writeSaveData,
 } from "./platform";
 import type { AchievementProgress } from "./platform";
-import { AIGhost, isAIGhostEnabled } from "./ai-ghost";
+import { AIGhost, getAIGhostModelUrl, isAIGhostEnabled } from "./ai-ghost";
 import { MultiplayerManager, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
 import { applyTopDownShadowToObject, TopDownShadowSystem } from "./shadow";
@@ -2036,7 +2036,7 @@ export class Game {
 
   private initAIGhost(): void {
     if (!this.aiGhostEnabled || this.isDailyChallenge) return;
-    this.aiGhost = new AIGhost("model-weights.json");
+    this.aiGhost = new AIGhost(getAIGhostModelUrl());
     void this.aiGhost.load().then((ok) => {
       if (ok) console.log("[game] AI ghost ready");
     });
@@ -2094,7 +2094,7 @@ export class Game {
     this.aiGhostEnabled = true;
 
     if (!this.aiGhost) {
-      this.aiGhost = new AIGhost("model-weights.json");
+      this.aiGhost = new AIGhost(getAIGhostModelUrl());
     }
 
     if (!this.aiGhost.isReady()) {
