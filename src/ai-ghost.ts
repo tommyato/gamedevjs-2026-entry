@@ -1,14 +1,17 @@
 /**
- * AI Ghost — neural network inference + headless simulation.
+ * AI Ghost — headless simulation + policy inference.
  *
- * Runs a pre-trained PPO policy alongside the player's game. The AI's
- * position is exposed as a ghost for the renderer to display.
+ * Policy selection by URL parameter:
+ *   ?_ai=1    → ScriptedPolicy (default, no model fetch)
+ *   ?_ai=onnx → OnnxPolicy (ONNX Runtime, fetches model.onnx)
+ *   ?_ai=mlp  → TinyMLP (bundled JSON weights, fetches model-weights.json)
  *
- * Activate with ?_ai=1 for the bundled JSON TinyMLP fallback, or
- * ?_ai=onnx for the exported ONNX model.
+ * The AIGhost class's public interface is stable — game.ts and preview.html
+ * require no edits when switching policy modes.
  */
 
 import { ClockworkClimbSimulation } from "./simulation";
+import { ScriptedPolicy } from "./ai-ghost-scripted";
 
 // ---------------------------------------------------------------------------
 // Tiny MLP inference (22 → 64 tanh → 64 tanh → 8 logits)
@@ -243,16 +246,33 @@ export class AIGhost {
   private sim: ClockworkClimbSimulation | null = null;
   private mlp: TinyMLP | null = null;
   private onnx: OnnxPolicy | null = null;
+  private scripted: ScriptedPolicy | null = null;
   private weightsUrl: string;
   private loaded = false;
   private loading = false;
   private stepAccumulator = 0;
-  private readonly stepsPerInference = 6; // ~10Hz inference at 60fps
+  private readonly stepsPerInference = 6; // ~10Hz inference at 60fps (MLP/ONNX only)
   private frameCount = 0;
   private lastAction = 0;
 
   constructor(weightsUrl: string) {
     this.weightsUrl = weightsUrl;
+  }
+
+  /**
+   * True when the weights URL resolves to the scripted policy (not ONNX or MLP).
+   * Scripted mode requires no network fetch and is the default for ?_ai=1.
+   * Safe to call from Node.js (no window.location available there).
+   */
+  private isScriptedMode(): boolean {
+    if (this.weightsUrl.endsWith(".onnx")) return false;
+    try {
+      const ai = new URLSearchParams(window.location.search).get("_ai");
+      return ai !== "mlp";
+    } catch {
+      // Non-browser environment (e.g. Node.js verification) → default to scripted.
+      return true;
+    }
   }
 
   async load(): Promise<boolean> {
@@ -261,6 +281,14 @@ export class AIGhost {
     this.loading = true;
 
     try {
+      // Scripted policy: immediate no-op — no model to fetch.
+      if (this.isScriptedMode()) {
+        this.scripted = new ScriptedPolicy();
+        this.loaded = true;
+        console.log("[ai-ghost] Scripted policy ready");
+        return true;
+      }
+
       if (this.weightsUrl.endsWith(".onnx")) {
         this.onnx = new OnnxPolicy(this.weightsUrl);
         this.loaded = await this.onnx.load();
@@ -276,7 +304,7 @@ export class AIGhost {
       const layers = loadWeights(raw);
       this.mlp = new TinyMLP(layers);
       this.loaded = true;
-      console.log("[ai-ghost] Model loaded successfully");
+      console.log("[ai-ghost] MLP model loaded successfully");
       return true;
     } catch (err) {
       console.warn("[ai-ghost] Error loading model:", err);
@@ -294,7 +322,7 @@ export class AIGhost {
   }
 
   isReady(): boolean {
-    return this.loaded && (this.mlp !== null || this.onnx !== null);
+    return this.loaded && (this.mlp !== null || this.onnx !== null || this.scripted !== null);
   }
 
   /** Reset the AI simulation for a new game using the given seed.
@@ -306,24 +334,31 @@ export class AIGhost {
   reset(seed: number): void {
     this.sim = new ClockworkClimbSimulation({ seed });
     this.sim.reset();
-    // Transition from title to playing
+    // One initial step to get the ghost off the starting platform.
     this.sim.step({ moveX: 0, moveY: 0, jump: true });
     this.stepAccumulator = 0;
     this.frameCount = 0;
     this.lastAction = 0;
     this.onnx?.reset();
+    this.scripted?.reset();
   }
 
   /** Step the AI simulation forward one frame. Call every frame during gameplay. */
   update(dt: number): void {
-    if (!this.sim || (!this.mlp && !this.onnx)) return;
+    if (!this.sim || (!this.mlp && !this.onnx && !this.scripted)) return;
 
     const state = this.sim.getState();
     if (state.gameState === "gameover") return;
 
-    this.frameCount++;
+    if (this.scripted) {
+      // Scripted policy: run the planner every frame (cheap — no inference cost).
+      const action = this.scripted.decide(state, dt);
+      this.sim.step(action);
+      return;
+    }
 
-    // Run inference every N frames (~10Hz)
+    // MLP / ONNX: compute action every N frames (~10Hz) to amortize inference cost.
+    this.frameCount++;
     if (this.frameCount % this.stepsPerInference === 0) {
       const obs = this.sim.getObservation();
       const obsF32 = new Float32Array(obs.length);
@@ -335,7 +370,7 @@ export class AIGhost {
         : this.mlp?.forward(obsF32) ?? this.lastAction;
     }
 
-    // Step simulation with last chosen action
+    // Step simulation with last chosen action.
     this.sim.step(this.lastAction);
   }
 
@@ -365,7 +400,8 @@ export class AIGhost {
 export function isAIGhostEnabled(): boolean {
   try {
     const params = new URLSearchParams(window.location.search);
-    return params.get("_ai") === "1" || params.get("_ai") === "onnx";
+    const ai = params.get("_ai");
+    return ai === "1" || ai === "onnx" || ai === "mlp";
   } catch {
     return false;
   }

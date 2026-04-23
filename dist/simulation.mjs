@@ -1044,7 +1044,7 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
       player.vy = JUMP_VELOCITY * (isBouncy ? 1.4 : 1);
       player.onGround = false;
       if (isBouncy) {
-        this.events.push({ type: "bounce_jump", x: player.x, y: player.y, z: player.z });
+        this.events.push({ type: "bounce_jump", x: player.x, y: player.y, z: player.z, gearId: activeGear.id });
       } else {
         this.events.push({ type: "jump", x: player.x, y: player.y, z: player.z });
       }
