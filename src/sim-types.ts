@@ -31,6 +31,8 @@ export type SimGear = {
   windAngle: number;
   windStrength: number;
   challenge: boolean;
+  /** Sim elapsed time when this gear was created. -Infinity for boot gears (no fade). */
+  spawnTime: number;
 };
 
 export type SimBolt = {

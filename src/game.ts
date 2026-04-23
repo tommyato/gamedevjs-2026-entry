@@ -2933,7 +2933,7 @@ export class Game {
           gear.setFreezeEmissive(true);
         }
       }
-      this.applySimGearToVisual(gear, simGear);
+      this.applySimGearToVisual(gear, simGear, state.elapsedTime);
     }
     this.gears = state.gears.map((gear) => this.visualGearMap.get(gear.id)).filter((gear): gear is Gear => gear !== undefined);
 
@@ -3008,7 +3008,7 @@ export class Game {
     return gear;
   }
 
-  private applySimGearToVisual(gear: Gear, simGear: SimGear) {
+  private applySimGearToVisual(gear: Gear, simGear: SimGear, simElapsed: number) {
     gear.rotationDir = simGear.rotationDir;
     setPrivate(gear, "active", simGear.active);
     setPrivate(gear, "crumbleArmed", simGear.crumbleArmed);
@@ -3022,6 +3022,14 @@ export class Game {
     gear.mesh.position.set(simGear.x, getRenderedGearY(simGear), simGear.z);
     gear.mesh.rotation.y = simGear.currentRotation;
     gear.syncCrumbleVisuals(simGear.crumbleArmed, simGear.crumbleTimer, simGear.crumbleFallDistance);
+
+    // Spawn fade: gears born during play fade in over 0.45s (smoothstep).
+    // Boot gears have spawnTime = -Infinity → age = Infinity → fade = 1 (no effect).
+    const SPAWN_FADE_DURATION = 0.45;
+    const age = simElapsed - simGear.spawnTime;
+    const t = THREE.MathUtils.clamp(age / SPAWN_FADE_DURATION, 0, 1);
+    const spawnOpacity = t * t * (3 - 2 * t); // smoothstep
+    gear.applySpawnFade(spawnOpacity);
   }
 
   private applySimBoltToVisual(bolt: BoltCollectible, simBolt: SimBolt) {

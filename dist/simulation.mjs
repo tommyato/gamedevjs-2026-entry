@@ -324,7 +324,10 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
       pistonTime: this.randomRange(0, Math.PI * 2),
       windAngle: this.randomRange(0, Math.PI * 2),
       windStrength: this.randomRange(1.5, 2.5),
-      challenge: false
+      challenge: false,
+      // Boot gears (elapsedTime === 0) get -Infinity so they never fade in.
+      // Gears spawned during active play get their actual birth time.
+      spawnTime: this.state.elapsedTime > 0 ? this.state.elapsedTime : -Infinity
     };
   }
   createBolt(gear) {
@@ -1378,18 +1381,20 @@ var ClockworkClimbSimulation = class _ClockworkClimbSimulation {
     }
     if (hasReachableAbove) return false;
     if (!isCrumbling) {
-      if (this.timeSinceLastLanding < 2) return false;
+      if (this.timeSinceLastLanding < 1.2) return false;
     }
     this.spawnRescueGear(player);
     return false;
   }
   spawnRescueGear(player) {
-    const angle = Math.atan2(player.z, player.x) + this.randomRange(0.8, 1.4);
-    const distance = this.randomRange(1.5, 2.5);
+    const playerAngle = Math.atan2(player.z, player.x);
+    const lateralOffset = this.randomRange(2, 3) * (this.rng() > 0.5 ? 1 : -1);
+    const perpX = -Math.sin(playerAngle);
+    const perpZ = Math.cos(playerAngle);
     const gear = this.createGear({
-      x: Math.cos(angle) * distance,
-      y: player.y + this.randomRange(2, 3),
-      z: Math.sin(angle) * distance,
+      x: player.x + perpX * lateralOffset,
+      y: player.y + this.randomRange(2.5, 3.2),
+      z: player.z + perpZ * lateralOffset,
       radius: 1.8,
       height: 0.3,
       rotationSpeed: 0.3,

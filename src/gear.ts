@@ -474,6 +474,34 @@ export class Gear {
     }
   }
 
+  /**
+   * Apply spawn-fade opacity to the gear's core materials. Call AFTER syncCrumbleVisuals
+   * so the spawn fade min-combines with any existing crumble fade.
+   *
+   * opacity = 1  → fully visible; restores landingRing to its base state.
+   * opacity < 1  → lerps materials toward transparent; composes with crumble fade via min().
+   */
+  applySpawnFade(opacity: number) {
+    // landingRingMaterial is not managed by resetMaterialVisuals/applyCrumbleMaterialState,
+    // so we reset it to base here before conditionally overriding it.
+    if (this.landingRingMaterial) {
+      this.landingRingMaterial.opacity = 1;
+      this.landingRingMaterial.transparent = false;
+    }
+
+    if (opacity >= 1) return; // Fully visible — nothing to override.
+
+    const materials = [this.bodyMaterial, this.topSurfaceMaterial, this.detailMaterial, this.accentMaterial, this.toothMaterial];
+    for (const mat of materials) {
+      mat.opacity = Math.min(mat.opacity, opacity);
+      mat.transparent = true;
+    }
+    if (this.landingRingMaterial) {
+      this.landingRingMaterial.opacity = opacity;
+      this.landingRingMaterial.transparent = true;
+    }
+  }
+
   getAngularVelocity(): number {
     if (!this.active) {
       return 0;

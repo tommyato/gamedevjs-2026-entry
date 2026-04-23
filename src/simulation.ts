@@ -395,6 +395,9 @@ export class ClockworkClimbSimulation {
       windAngle: this.randomRange(0, Math.PI * 2),
       windStrength: this.randomRange(1.5, 2.5),
       challenge: false,
+      // Boot gears (elapsedTime === 0) get -Infinity so they never fade in.
+      // Gears spawned during active play get their actual birth time.
+      spawnTime: this.state.elapsedTime > 0 ? this.state.elapsedTime : -Infinity,
     };
   }
 
@@ -1616,8 +1619,9 @@ export class ClockworkClimbSimulation {
     // For non-crumbling gears, only trigger after a grace period to avoid
     // false positives during normal upward generation lag
     if (!isCrumbling) {
-      // Player must have been on this gear for > 2 seconds with no path
-      if (this.timeSinceLastLanding < 2) return false;
+      // 1.2s is enough to absorb generation lag while still feeling responsive.
+      // (Previous value was 2s, which felt like being stuck for a long time.)
+      if (this.timeSinceLastLanding < 1.2) return false;
     }
 
     // Stranded — spawn a rescue gear above and to the side
@@ -1626,12 +1630,17 @@ export class ClockworkClimbSimulation {
   }
 
   private spawnRescueGear(player: SimPlayer) {
-    const angle = Math.atan2(player.z, player.x) + this.randomRange(0.8, 1.4);
-    const distance = this.randomRange(1.5, 2.5);
+    // Offset perpendicularly to the player-origin axis so the rescue gear lands
+    // at a known lateral distance from the player (not from world origin).
+    // lateralOffset is within isPlayerStranded's lateralReach=5, and dy is within jumpReach=4.
+    const playerAngle = Math.atan2(player.z, player.x);
+    const lateralOffset = this.randomRange(2.0, 3.0) * (this.rng() > 0.5 ? 1 : -1);
+    const perpX = -Math.sin(playerAngle);
+    const perpZ = Math.cos(playerAngle);
     const gear = this.createGear({
-      x: Math.cos(angle) * distance,
-      y: player.y + this.randomRange(2.0, 3.0),
-      z: Math.sin(angle) * distance,
+      x: player.x + perpX * lateralOffset,
+      y: player.y + this.randomRange(2.5, 3.2),
+      z: player.z + perpZ * lateralOffset,
       radius: 1.8,
       height: 0.3,
       rotationSpeed: 0.3,
