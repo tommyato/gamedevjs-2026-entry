@@ -126,7 +126,7 @@ export class ParticleSystem {
           // Rings contract inward: scale lerps from initial down to 0.02
           const currentScale = THREE.MathUtils.lerp(particle.initialScale.x, 0.02, t);
           particle.mesh.scale.setScalar(currentScale);
-          // Fade in from 0.3 to peak 0.85 at t=0.2, then fade out to 0 by end
+          // Fade in to peak 0.85 at t=0.2, then fade out to 0 by end
           const fadeIn = Math.min(t / 0.2, 1.0);
           const fadeOut = 1.0 - Math.pow(Math.max((t - 0.2) / 0.8, 0), 1.5);
           material.opacity = fadeIn * fadeOut * 0.85;
