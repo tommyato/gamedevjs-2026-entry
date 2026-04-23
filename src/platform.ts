@@ -251,26 +251,38 @@ export async function submitScores(
   username?: string,
 ) {
   const wavedash = getWavedashSdkSync();
+  // Only trust wavedash when it has a real user-set name; fall back to the
+  // caller-supplied coolname otherwise. Local cache is written first so the
+  // next synchronous statement in the caller sees the updated entry — remote
+  // upload is fire-and-forget from the local-cache perspective.
+  const wavedashName = wavedash ? getUsername() : null;
+  const effectiveUsername =
+    wavedashName && wavedashName !== DEFAULT_USERNAME
+      ? wavedashName
+      : (username ?? DEFAULT_USERNAME);
+  writeLocalLeaderboardEntry("high-score", { username: effectiveUsername, score: input.score });
+  writeLocalLeaderboardEntry("highest-climb", { username: effectiveUsername, score: input.height });
+  writeLocalLeaderboardEntry("best-combo", { username: effectiveUsername, score: input.combo });
+
   await Promise.allSettled([
     uploadLeaderboardValue(wavedash, "high-score", input.score),
     uploadLeaderboardValue(wavedash, "highest-climb", input.height),
     uploadLeaderboardValue(wavedash, "best-combo", input.combo),
   ]);
-
-  // When wavedash is active, it is the authoritative identity; otherwise fall
-  // back to the caller-supplied coolname (or DEFAULT_USERNAME as last resort).
-  const effectiveUsername = wavedash ? getUsername() : (username ?? DEFAULT_USERNAME);
-  writeLocalLeaderboardEntry("high-score", { username: effectiveUsername, score: input.score });
-  writeLocalLeaderboardEntry("highest-climb", { username: effectiveUsername, score: input.height });
-  writeLocalLeaderboardEntry("best-combo", { username: effectiveUsername, score: input.combo });
 }
 
 export async function submitDailyScore(score: number, username?: string) {
   const wavedash = getWavedashSdkSync();
-  await uploadLeaderboardValue(wavedash, "daily-score", score);
-
-  const effectiveUsername = wavedash ? getUsername() : (username ?? DEFAULT_USERNAME);
+  // Same pattern as submitScores: prefer real wavedash name, write local cache
+  // before the remote await so the leaderboard panel sees it immediately.
+  const wavedashName = wavedash ? getUsername() : null;
+  const effectiveUsername =
+    wavedashName && wavedashName !== DEFAULT_USERNAME
+      ? wavedashName
+      : (username ?? DEFAULT_USERNAME);
   writeLocalLeaderboardEntry("daily-score", { username: effectiveUsername, score });
+
+  await uploadLeaderboardValue(wavedash, "daily-score", score);
 }
 
 export async function fetchLeaderboardScores(slug: LeaderboardSlug = "high-score"): Promise<WavedashLeaderboardEntry[]> {

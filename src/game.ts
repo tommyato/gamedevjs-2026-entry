@@ -2308,49 +2308,41 @@ export class Game {
   }
 
   /**
-   * Wire up the username input fields on the title screen and game-over screen.
-   * Both inputs share the same localStorage key (cc-username) via coolname.ts.
+   * Wire up the username input field on the title screen.
+   * Storage key is cc-username via coolname.ts.
    */
   private setupUsernameUi(): void {
-    const wireInput = (inputId: string) => {
-      const input = document.getElementById(inputId) as HTMLInputElement | null;
-      if (!input) return;
+    const input = document.getElementById("title-username-input") as HTMLInputElement | null;
+    if (!input) return;
+    input.value = this.getLocalUsername();
+    const commit = () => {
+      setCoolLocalUsername(input.value);
       input.value = this.getLocalUsername();
-      const commit = () => {
-        setCoolLocalUsername(input.value);
-        input.value = this.getLocalUsername();
-      };
-      input.addEventListener("blur", commit);
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          input.blur();
-        }
-        // Stop key events from reaching the game while the input is focused.
-        e.stopPropagation();
-      });
-      // Also suppress keyup/keypress so wasd / arrows don't move the player.
-      input.addEventListener("keyup", (e) => e.stopPropagation());
-      input.addEventListener("keypress", (e) => e.stopPropagation());
-      // Prevent the title-overlay click handler from triggering play.
-      input.addEventListener("click", (e) => e.stopPropagation());
-      input.addEventListener("pointerdown", (e) => e.stopPropagation());
-      input.addEventListener("touchend", (e) => e.stopPropagation());
     };
-    wireInput("title-username-input");
-    wireInput("gameover-username-input");
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        input.blur();
+      }
+      // Stop key events from reaching the game while the input is focused.
+      e.stopPropagation();
+    });
+    // Also suppress keyup/keypress so wasd / arrows don't move the player.
+    input.addEventListener("keyup", (e) => e.stopPropagation());
+    input.addEventListener("keypress", (e) => e.stopPropagation());
+    // Prevent the title-overlay click handler from triggering play.
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("pointerdown", (e) => e.stopPropagation());
+    input.addEventListener("touchend", (e) => e.stopPropagation());
   }
 
   /**
-   * Sync the game-over username input to the current persisted name, so a
-   * name change on the title screen is reflected before the next submission.
+   * Sync the title-screen username input to the current persisted name.
    */
   private refreshUsernameUi(): void {
-    const name = this.getLocalUsername();
-    for (const id of ["title-username-input", "gameover-username-input"]) {
-      const input = document.getElementById(id) as HTMLInputElement | null;
-      if (input && document.activeElement !== input) input.value = name;
-    }
+    const input = document.getElementById("title-username-input") as HTMLInputElement | null;
+    if (input && document.activeElement !== input) input.value = this.getLocalUsername();
   }
 
   private async handleAIGhostButtonClick(): Promise<void> {
