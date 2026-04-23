@@ -80,6 +80,18 @@ if hasattr(signal, "SIGPIPE"):
 # reward is computed in Python.
 # ---------------------------------------------------------------------------
 
+def _reset_reward_tracking() -> None:
+    """Clear episode-local reward state.
+
+    Reward shaping uses step-to-step context (previous max height + landed
+    gear ids), so resets/truncations must clear that state before the next
+    episode starts.
+    """
+    compute_reward._prev_height = {"last": 0.0}
+    compute_reward._landed_gears = set()
+
+
+
 def compute_reward(events: list[dict], state: dict, obs: np.ndarray | None = None) -> float:
     """Clockwork Climb reward shaping — progress-based, anti-exploit.
 
@@ -124,11 +136,8 @@ def compute_reward(events: list[dict], state: dict, obs: np.ndarray | None = Non
     # state["heightMaxReached"] comes from the sim; track delta step-to-step
     if obs is not None and state:
         current_height = state.get("heightMaxReached", 0.0)
-        # Store previous height in a closure-like dict attached to this function
         if not hasattr(compute_reward, "_prev_height"):
-            compute_reward._prev_height = {}
-        # Use id(state) as episode key (fragile but works for single-env training)
-        # Better: track via env step counter, but we don't have that here
+            compute_reward._prev_height = {"last": 0.0}
         prev_height = compute_reward._prev_height.get("last", 0.0)
         height_gain = max(0.0, current_height - prev_height)
         compute_reward._prev_height["last"] = current_height
@@ -144,12 +153,15 @@ def compute_reward(events: list[dict], state: dict, obs: np.ndarray | None = Non
     # Track landed gears to penalize repeat-land exploit
     if not hasattr(compute_reward, "_landed_gears"):
         compute_reward._landed_gears = set()
-    
+
     # Track jump count to add small cost
     jump_cost = 0.0
 
     for ev in events:
         t = ev.get("type")
+        if t in ("jump", "bounce_jump", "double_jump"):
+            jump_cost += 0.01  # small cost per jump to discourage spam
+
         if t == "gear_land":
             # Small fixed reward for successful landing (skill signal)
             reward += 0.05
@@ -179,14 +191,7 @@ def compute_reward(events: list[dict], state: dict, obs: np.ndarray | None = Non
             reward += 0.1    # power-ups
         elif t == "death" or t == "death_start":
             reward -= 5.0    # death heavily penalized (was -1.0)
-            # Reset episode-local tracking on death
-            compute_reward._landed_gears.clear()
-            if hasattr(compute_reward, "_prev_height"):
-                compute_reward._prev_height["last"] = 0.0
-        
-        # Track jumps for cost
-        elif t in ("jump", "bounce_jump", "double_jump"):
-            jump_cost += 0.01  # small cost per jump to discourage spam
+            _reset_reward_tracking()
 
     reward -= jump_cost
     return reward
@@ -318,6 +323,7 @@ class GameEnv(gym.Env):
     def reset(self, seed: int | None = None, options: dict | None = None):
         resp = self._send({"op": "reset"})
         self._steps = 0
+        _reset_reward_tracking()
         obs = _parse_obs(resp["obs"])
         return obs, {}
 

@@ -140,7 +140,7 @@ hopping on the same low gear:
 1. **Gear landing reward reduced**: +0.05 (was +0.3) — just a "skill signal", not primary
 2. **Unique gear bonus**: +0.1 for first landing on a new `gearId`
 3. **Repeat-land penalty**: **-0.2** for re-landing same gear (kills bunny-hop loop)
-4. **Jump cost**: -0.01 per jump (small pressure against spam)
+4. **Jump cost**: -0.01 per jump (`jump`, `bounce_jump`, `double_jump`) — small pressure against spam
 
 ### Death penalty
 - **-5.0** (was -1.0) — must be much larger than local farming rewards
@@ -154,8 +154,10 @@ hopping on the same low gear:
 
 ### Tracking state
 `compute_reward` now maintains step-to-step context via function attributes
-(`_prev_height`, `_landed_gears`). This is single-env safe; vectorized training
-would need per-env state dicts.
+(`_prev_height`, `_landed_gears`), and `GameEnv.reset()` clears that episode-
+local state so truncation/reset boundaries do not leak reward history into the
+next run. This is single-env safe; vectorized training would need per-env state
+dicts.
 
 ### Why this works
 1. Agent must gain height to get positive reward (no reward for staying at 1m)
