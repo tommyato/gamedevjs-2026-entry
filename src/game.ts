@@ -65,6 +65,11 @@ import {
   type GhostRecord,
 } from "./ghost-recorder";
 import { GhostPlayback, loadGhostChallenge } from "./ghost-playback";
+import {
+  fetchGhosts as fetchRemoteGhosts,
+  submitGhost as submitRemoteGhost,
+  pickRandom as pickRandomGhost,
+} from "./remote-ghosts";
 import { MultiplayerManager, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
 import { applyTopDownShadowToObject, TopDownShadowSystem } from "./shadow";
@@ -2154,18 +2159,16 @@ export class Game {
 
     // ----- PLAY A GHOST (human playback challenge) -----
     //
-    // HOW TO ENABLE AFTER RECORDING A RUN:
-    //   1. Open the dev build with `?capture=1` in the URL.
-    //   2. Play through — the game forces the challenge seed for you.
-    //   3. On death, a `ghost-challenge.json` download appears.
-    //   4. Move that file into `public/ghost-challenge.json`.
-    //   5. Flip `GHOST_CHALLENGE_READY` below to `true`.
-    //   6. Commit + ship. Players tapping the button race the recording.
+    // Ghost source (2026-04-23): the remote multi-game ghost pool at
+    //   https://api.tommyato.com/games/clockwork-climb/ghosts
+    // On init we fetch up to 5 ghosts and pick one at random per session.
+    // `?capture=1` still emits a local JSON download on death so Tommy can
+    // curate a canon run, and also submits the recording to the server.
     //
-    // The button stays hidden until both the flag is true AND the JSON
-    // actually fetched successfully — so a missing file won't strand a
-    // dead button on the title screen.
-    const GHOST_CHALLENGE_READY = false;
+    // The button stays hidden until `setupGhostChallenge` confirms a ghost
+    // was successfully fetched — so a failed fetch won't strand a dead
+    // button on the title screen.
+    const GHOST_CHALLENGE_READY = true;
 
     if (!AI_GHOST_READY && !GHOST_CHALLENGE_READY && !this.captureMode) {
       btn.style.display = "none";
@@ -2233,18 +2236,30 @@ export class Game {
   }
 
   /**
-   * Fetch the ghost-challenge JSON (if present) and, on success, make the
-   * PLAY A GHOST title button visible. Called once at init.
+   * Try the remote ghost pool first (up to 5 ghosts, pick one at random), fall
+   * back to the on-disk `public/ghost-challenge.json` if the server returned
+   * nothing. If both sources fail the PLAY A GHOST button stays hidden.
+   * Called once at init.
    */
   private async setupGhostChallenge(): Promise<void> {
     if (this.captureMode) return; // capture mode doesn't play back a ghost
-    const record = await loadGhostChallenge();
-    if (!record) return;
-    this.ghostChallengeRecord = record;
-    if (this.aiGhostButton) {
-      this.aiGhostButton.style.display = "inline-flex";
+
+    const remote = await fetchRemoteGhosts(5);
+    const picked = pickRandomGhost(remote);
+    if (picked) {
+      this.ghostChallengeRecord = picked;
+      if (this.aiGhostButton) this.aiGhostButton.style.display = "inline-flex";
+      console.log(
+        `[game] Ghost challenge loaded (remote) — ${picked.name} · ${picked.height}m · ${picked.frames.length} frames (pool size ${remote.length})`,
+      );
+      return;
     }
-    console.log(`[game] Ghost challenge loaded — ${record.name} · ${record.height}m · ${record.frames.length} frames`);
+
+    const local = await loadGhostChallenge();
+    if (!local) return;
+    this.ghostChallengeRecord = local;
+    if (this.aiGhostButton) this.aiGhostButton.style.display = "inline-flex";
+    console.log(`[game] Ghost challenge loaded (local) — ${local.name} · ${local.height}m · ${local.frames.length} frames`);
   }
 
   private async handleAIGhostButtonClick(): Promise<void> {
@@ -2398,7 +2413,19 @@ export class Game {
           score: this.score,
           height: this.heightMaxReached,
         });
+        // Local download — lets Tommy curate a canon ghost-challenge.json.
         downloadGhostRecord(record);
+        // Remote submit — feeds the shared multi-game ghost pool. Fire-and-
+        // forget; failures are already logged inside submitRemoteGhost.
+        void submitRemoteGhost({
+          name: record.name,
+          score: record.score,
+          height: record.height,
+          frames: record.frames,
+        }).then((id) => {
+          if (id) console.log(`[remote-ghosts] Submitted ghost — id=${id}`);
+          else console.warn("[remote-ghosts] Ghost submission failed (network or 4xx).");
+        });
       } else {
         console.warn(`[ghost-recorder] Not saving — only captured ${frameCount} frame(s).`);
       }
