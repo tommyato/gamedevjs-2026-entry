@@ -569,6 +569,11 @@ export class Game {
   private multiplayerLabelLayer: HTMLDivElement | null = null;
   private multiplayerLobbyVisible = false;
   private multiplayerInviteUrl: string | null = null;
+  private multiplayerPlayerList: HTMLDivElement | null = null;
+  private multiplayerNameInput: HTMLInputElement | null = null;
+  private multiplayerInviteLinkField: HTMLInputElement | null = null;
+  private multiplayerNameDebounceHandle: number | null = null;
+  private multiplayerPollHandle: number | null = null;
   private readonly ghostTmpVec = new THREE.Vector3();
   private readonly backgroundGroup = new THREE.Group();
   private readonly titleBackdropGroup = new THREE.Group();
@@ -1871,16 +1876,17 @@ export class Game {
     const panel = document.createElement("div");
     Object.assign(panel.style, {
       marginTop: "12px",
-      padding: "16px 18px",
+      padding: "20px 20px 16px",
       borderRadius: "18px",
       border: "1px solid rgba(127, 214, 255, 0.32)",
-      background: "linear-gradient(180deg, rgba(14, 28, 40, 0.9), rgba(6, 14, 22, 0.78))",
-      boxShadow: "0 16px 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(173, 232, 255, 0.12)",
-      backdropFilter: "blur(10px)",
+      background: "linear-gradient(180deg, rgba(14, 28, 40, 0.96), rgba(6, 14, 22, 0.88))",
+      boxShadow: "0 16px 40px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(173, 232, 255, 0.12)",
+      backdropFilter: "blur(14px)",
       fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
       color: "#d7f8ff",
       width: "min(400px, calc(100vw - 40px))",
-      textAlign: "center",
+      boxSizing: "border-box",
+      textAlign: "left",
       pointerEvents: "auto",
       display: "none",
     } as CSSStyleDeclaration);
@@ -1890,24 +1896,152 @@ export class Game {
       event.stopPropagation();
     }, { passive: false });
 
-    const status = document.createElement("div");
-    Object.assign(status.style, {
-      fontSize: "12px",
+    // ── 1. Title ──────────────────────────────────────────────────────────────
+    const titleEl = document.createElement("div");
+    Object.assign(titleEl.style, {
+      fontSize: "14px",
+      fontWeight: "700",
+      letterSpacing: "2px",
+      color: "#ffc878",
+      marginBottom: "14px",
+      textAlign: "center",
+    } as CSSStyleDeclaration);
+    titleEl.textContent = "VERSUS — Race to 100 m";
+    panel.appendChild(titleEl);
+
+    // ── 2. Rules card ─────────────────────────────────────────────────────────
+    const rulesCard = document.createElement("div");
+    Object.assign(rulesCard.style, {
+      padding: "10px 12px",
+      borderRadius: "10px",
+      border: "1px solid rgba(127, 214, 255, 0.15)",
+      background: "rgba(12, 24, 36, 0.55)",
+      fontSize: "11px",
+      lineHeight: "1.5",
+      color: "#a8d8f0",
+      marginBottom: "14px",
+      letterSpacing: "0.5px",
+    } as CSSStyleDeclaration);
+    rulesCard.textContent =
+      "First climber to 100 m wins. Ties go to highest score. If nobody reaches 100 m in 120 s, highest score wins. Crumbling gears mean no camping — keep moving.";
+    panel.appendChild(rulesCard);
+
+    // ── 3. Players list ───────────────────────────────────────────────────────
+    const playersLabel = document.createElement("div");
+    Object.assign(playersLabel.style, {
+      fontSize: "10px",
       letterSpacing: "2px",
       color: "#7fd6ff",
-      marginBottom: "10px",
+      marginBottom: "6px",
     } as CSSStyleDeclaration);
-    status.textContent = "WAITING FOR PLAYERS…";
-    panel.appendChild(status);
-    this.multiplayerStatus = status;
+    playersLabel.textContent = "PLAYERS";
+    panel.appendChild(playersLabel);
 
-    const buttonRow = document.createElement("div");
-    Object.assign(buttonRow.style, {
+    const playerList = document.createElement("div");
+    Object.assign(playerList.style, {
+      minHeight: "120px",
+      marginBottom: "14px",
       display: "flex",
-      gap: "8px",
-      justifyContent: "center",
-      flexWrap: "wrap",
+      flexDirection: "column",
+      gap: "2px",
     } as CSSStyleDeclaration);
+    panel.appendChild(playerList);
+    this.multiplayerPlayerList = playerList;
+
+    // ── 4. Name input ─────────────────────────────────────────────────────────
+    const nameLabel = document.createElement("div");
+    Object.assign(nameLabel.style, {
+      fontSize: "10px",
+      letterSpacing: "2px",
+      color: "#7fd6ff",
+      marginBottom: "5px",
+    } as CSSStyleDeclaration);
+    nameLabel.textContent = "YOUR NAME";
+    panel.appendChild(nameLabel);
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.maxLength = 20;
+    nameInput.value = this.getLobbyDisplayName();
+    Object.assign(nameInput.style, {
+      width: "100%",
+      boxSizing: "border-box",
+      padding: "7px 10px",
+      borderRadius: "8px",
+      border: "1px solid rgba(127, 214, 255, 0.3)",
+      background: "rgba(10, 22, 34, 0.65)",
+      color: "#d7f8ff",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      fontSize: "12px",
+      outline: "none",
+      marginBottom: "14px",
+    } as CSSStyleDeclaration);
+    nameInput.addEventListener("keydown", (e) => e.stopPropagation());
+    nameInput.addEventListener("keyup", (e) => e.stopPropagation());
+    nameInput.addEventListener("keypress", (e) => e.stopPropagation());
+    nameInput.addEventListener("input", () => {
+      // Strip control chars, enforce max length
+      const raw = nameInput.value.replace(/[\x00-\x1F\x7F]/g, "").slice(0, 20);
+      if (nameInput.value !== raw) nameInput.value = raw;
+      if (this.multiplayerNameDebounceHandle !== null) {
+        clearTimeout(this.multiplayerNameDebounceHandle);
+      }
+      this.multiplayerNameDebounceHandle = window.setTimeout(() => {
+        this.multiplayerNameDebounceHandle = null;
+        const trimmed = nameInput.value.trim();
+        if (trimmed.length === 0) {
+          // Empty → revert display to current persisted name (no network call)
+          nameInput.value = this.getLobbyDisplayName();
+        } else {
+          this.setLobbyDisplayName(trimmed);
+          this.multiplayer.sendNameUpdate(trimmed);
+          this.renderPlayerList();
+        }
+      }, 300);
+    });
+    panel.appendChild(nameInput);
+    this.multiplayerNameInput = nameInput;
+
+    // ── 5. Invite link ────────────────────────────────────────────────────────
+    const inviteLabel = document.createElement("div");
+    Object.assign(inviteLabel.style, {
+      fontSize: "10px",
+      letterSpacing: "2px",
+      color: "#7fd6ff",
+      marginBottom: "5px",
+    } as CSSStyleDeclaration);
+    inviteLabel.textContent = "INVITE LINK";
+    panel.appendChild(inviteLabel);
+
+    const inviteRow = document.createElement("div");
+    Object.assign(inviteRow.style, {
+      display: "flex",
+      gap: "6px",
+      marginBottom: "14px",
+      alignItems: "center",
+    } as CSSStyleDeclaration);
+
+    const inviteLinkField = document.createElement("input");
+    inviteLinkField.type = "text";
+    inviteLinkField.readOnly = true;
+    inviteLinkField.value = this.multiplayerInviteUrl ?? "generating…";
+    Object.assign(inviteLinkField.style, {
+      flex: "1",
+      minWidth: "0",
+      padding: "7px 10px",
+      borderRadius: "8px",
+      border: "1px solid rgba(127, 214, 255, 0.2)",
+      background: "rgba(10, 22, 34, 0.45)",
+      color: "#7fd6ff",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      fontSize: "10px",
+      outline: "none",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    } as CSSStyleDeclaration);
+    inviteRow.appendChild(inviteLinkField);
+    this.multiplayerInviteLinkField = inviteLinkField;
 
     const makePanelButton = (label: string, accent: string) => {
       const b = document.createElement("button");
@@ -1928,20 +2062,35 @@ export class Game {
       return b;
     };
 
-    const inviteBtn = makePanelButton("COPY INVITE LINK", "rgba(127, 214, 255, 0.42)");
+    const inviteBtn = makePanelButton("COPY", "rgba(127, 214, 255, 0.42)");
+    inviteBtn.style.padding = "7px 12px";
+    inviteBtn.style.flexShrink = "0";
     inviteBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       void this.copyInviteLink();
     });
     this.multiplayerInviteBtn = inviteBtn;
-    buttonRow.appendChild(inviteBtn);
+    inviteRow.appendChild(inviteBtn);
+    panel.appendChild(inviteRow);
 
-    const startBtn = makePanelButton("START", "rgba(255, 196, 120, 0.5)");
+    // ── 6. Action buttons ─────────────────────────────────────────────────────
+    const buttonRow = document.createElement("div");
+    Object.assign(buttonRow.style, {
+      display: "flex",
+      gap: "8px",
+      justifyContent: "center",
+      flexWrap: "wrap",
+      marginBottom: "10px",
+    } as CSSStyleDeclaration);
+
+    const startBtn = makePanelButton("START MATCH", "rgba(255, 196, 120, 0.5)");
+    startBtn.style.display = "none"; // shown only for host
     startBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.startGame();
+      this.multiplayer.startMatch();
+      this.setMultiplayerStatus("Match starting…");
     });
     this.multiplayerStartBtn = startBtn;
     buttonRow.appendChild(startBtn);
@@ -1956,6 +2105,19 @@ export class Game {
     buttonRow.appendChild(leaveBtn);
 
     panel.appendChild(buttonRow);
+
+    // ── 7. Status text ────────────────────────────────────────────────────────
+    const status = document.createElement("div");
+    Object.assign(status.style, {
+      fontSize: "11px",
+      letterSpacing: "1px",
+      color: "#7fd6ff",
+      textAlign: "center",
+      minHeight: "16px",
+    } as CSSStyleDeclaration);
+    status.textContent = "";
+    panel.appendChild(status);
+    this.multiplayerStatus = status;
     this.multiplayerPanel = panel;
     button.insertAdjacentElement("afterend", panel);
 
@@ -2069,13 +2231,23 @@ export class Game {
 
   private showMultiplayerPanel() {
     if (!this.multiplayerPanel) return;
+    // Restore name input to current persisted display name
+    if (this.multiplayerNameInput) {
+      this.multiplayerNameInput.value = this.getLobbyDisplayName();
+    }
     this.multiplayerPanel.style.display = "block";
     this.multiplayerLobbyVisible = true;
     this.refreshMultiplayerPanel();
+    this.startLobbyPolling();
   }
 
   private hideMultiplayerPanel() {
     if (!this.multiplayerPanel) return;
+    this.stopLobbyPolling();
+    if (this.multiplayerNameDebounceHandle !== null) {
+      clearTimeout(this.multiplayerNameDebounceHandle);
+      this.multiplayerNameDebounceHandle = null;
+    }
     this.multiplayerPanel.style.display = "none";
     this.multiplayerLobbyVisible = false;
   }
@@ -2089,17 +2261,165 @@ export class Game {
   private refreshMultiplayerPanel() {
     if (!this.multiplayerPanel || !this.multiplayerLobbyVisible) return;
     if (!this.multiplayer.isActive()) {
-      this.setMultiplayerStatus("WAITING FOR PLAYERS…");
+      this.setMultiplayerStatus("Creating lobby…");
       return;
     }
-    const memberCount = this.multiplayer.getLobbyMemberCount();
-    const peerCount = this.multiplayer.getPeerCount();
-    const total = Math.max(memberCount, peerCount + 1);
-    this.setMultiplayerStatus(
-      total > 1
-        ? `PLAYERS IN LOBBY: ${total}/4 · READY TO CLIMB`
-        : `LOBBY OPEN · SHARE INVITE LINK · ${total}/4`
-    );
+    this.renderPlayerList();
+    this.updateStartButtonState();
+    this.updateInviteLinkField();
+    this.updateLobbyStatusText();
+  }
+
+  // ── Lobby display helpers ─────────────────────────────────────────────────
+
+  /** Returns the lobby-specific display name (cc.displayName), falling back to the coolname. */
+  private getLobbyDisplayName(): string {
+    try {
+      const stored = localStorage.getItem("cc.displayName");
+      if (stored && stored.trim().length > 0) return stored.trim();
+    } catch { /* localStorage unavailable */ }
+    return this.getLocalUsername();
+  }
+
+  /** Persists the lobby display name to localStorage. */
+  private setLobbyDisplayName(name: string): void {
+    try {
+      localStorage.setItem("cc.displayName", name);
+    } catch { /* ignore */ }
+  }
+
+  /** Re-renders the player list rows (self first, then peers). */
+  private renderPlayerList(): void {
+    const list = this.multiplayerPlayerList;
+    if (!list) return;
+
+    list.innerHTML = "";
+
+    const selfIsHost = this.multiplayer.isHost();
+    const hostUserId = this.multiplayer.getHostUserId();
+    const peers = this.multiplayer.getPeers();
+
+    // Self row (always first)
+    list.appendChild(this.makePlayerRow(this.getLobbyDisplayName(), true, selfIsHost));
+
+    // Peer rows (up to 3 so total stays ≤ 4)
+    for (const peer of peers.slice(0, 3)) {
+      const peerIsHost = !selfIsHost && peer.userId === hostUserId;
+      list.appendChild(this.makePlayerRow(peer.username, false, peerIsHost));
+    }
+  }
+
+  /** Builds a single player-list row element. */
+  private makePlayerRow(name: string, isSelf: boolean, isHost: boolean): HTMLElement {
+    const row = document.createElement("div");
+    Object.assign(row.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      padding: "5px 8px",
+      borderRadius: "8px",
+      background: isSelf ? "rgba(127, 214, 255, 0.08)" : "rgba(0, 0, 0, 0.15)",
+      fontSize: "12px",
+      minHeight: "28px",
+      boxSizing: "border-box",
+    } as CSSStyleDeclaration);
+
+    if (isHost) {
+      const crown = document.createElement("span");
+      crown.textContent = "👑";
+      Object.assign(crown.style, { fontSize: "12px", lineHeight: "1", flexShrink: "0" } as CSSStyleDeclaration);
+      row.appendChild(crown);
+    }
+
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = name;
+    Object.assign(nameSpan.style, {
+      flex: "1",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      color: isSelf ? "#d7f8ff" : "#a8d8f0",
+    } as CSSStyleDeclaration);
+    row.appendChild(nameSpan);
+
+    if (isSelf) {
+      const youTag = document.createElement("span");
+      youTag.textContent = "(you)";
+      Object.assign(youTag.style, {
+        color: "#7fd6ff",
+        fontSize: "10px",
+        letterSpacing: "1px",
+        opacity: "0.7",
+        flexShrink: "0",
+      } as CSSStyleDeclaration);
+      row.appendChild(youTag);
+    }
+
+    return row;
+  }
+
+  /** Enables/disables (and shows/hides) the START MATCH button based on host status and peer count. */
+  private updateStartButtonState(): void {
+    const btn = this.multiplayerStartBtn;
+    if (!btn) return;
+    const isHost = this.multiplayer.isHost();
+    btn.style.display = isHost ? "" : "none";
+    if (!isHost) return;
+    const canStart = this.multiplayer.getPeerCount() >= 1;
+    (btn as HTMLButtonElement).disabled = !canStart;
+    btn.title = canStart ? "" : "Waiting for at least 1 other player";
+    btn.style.opacity = canStart ? "1" : "0.45";
+    btn.style.cursor = canStart ? "pointer" : "not-allowed";
+  }
+
+  /** Updates status text based on current match state. */
+  private updateLobbyStatusText(): void {
+    const state = this.multiplayer.getMatchState();
+    if (state === "countdown") {
+      this.setMultiplayerStatus("Match starting…");
+      return;
+    }
+    if (state === "in_match") {
+      this.setMultiplayerStatus("Match in progress — you'll join the next round");
+      return;
+    }
+    // "lobby" or "ended"
+    if (this.multiplayer.isHost()) {
+      this.setMultiplayerStatus(
+        this.multiplayer.getPeerCount() >= 1
+          ? "Ready — press START MATCH when everyone is here"
+          : "Share the invite link to bring in players"
+      );
+    } else {
+      this.setMultiplayerStatus("Waiting for host…");
+    }
+  }
+
+  /** Populates the invite link readonly field once the URL is available. */
+  private updateInviteLinkField(): void {
+    if (this.multiplayerInviteLinkField && this.multiplayerInviteUrl) {
+      this.multiplayerInviteLinkField.value = this.multiplayerInviteUrl;
+    }
+  }
+
+  /** Starts the 300 ms lobby-poll that refreshes the player list and button state. */
+  private startLobbyPolling(): void {
+    this.stopLobbyPolling();
+    this.multiplayerPollHandle = window.setInterval(() => {
+      if (!this.multiplayerLobbyVisible) return;
+      this.renderPlayerList();
+      this.updateStartButtonState();
+      this.updateInviteLinkField();
+      if (this.multiplayer.isActive()) this.updateLobbyStatusText();
+    }, 300);
+  }
+
+  /** Stops the lobby poll. */
+  private stopLobbyPolling(): void {
+    if (this.multiplayerPollHandle !== null) {
+      clearInterval(this.multiplayerPollHandle);
+      this.multiplayerPollHandle = null;
+    }
   }
 
   private ensureGhostVisual(peer: PeerGhost, index: number): GhostVisual {

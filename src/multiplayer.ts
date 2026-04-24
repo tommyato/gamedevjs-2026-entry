@@ -452,6 +452,11 @@ export class MultiplayerManager {
     return this.peers.size;
   }
 
+  /** Returns the userId of the lobby host, or null if we are the host / unknown. */
+  getHostUserId(): string | null {
+    return this.hostUserId;
+  }
+
   /**
    * Returns a deterministic 32-bit unsigned integer seed derived from the
    * current lobby id. Every peer in the same lobby hashes the same lobby id
