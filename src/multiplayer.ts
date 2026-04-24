@@ -1,19 +1,4 @@
-import {
-  addMultiplayerListener,
-  broadcastMessage,
-  checkLaunchLobby,
-  createMultiplayerLobby,
-  getLobbyHostId,
-  getInviteLink,
-  getLobbyUserCount,
-  getLobbyUsers,
-  getMultiplayerEvents,
-  getMyUserId,
-  isMultiplayerAvailable,
-  joinMultiplayerLobby,
-  leaveMultiplayerLobby,
-  readPeerMessages,
-} from "./platform";
+import type { IMultiplayerTransport } from "./platform-services";
 
 import {
   type MatchResult,
@@ -138,6 +123,18 @@ export class MultiplayerManager {
 
   private callbacks: MultiplayerCallbacks = {};
 
+  /**
+   * Multiplayer transport handed in by the platform layer. This is the *only*
+   * door to the network — MultiplayerManager itself never touches Wavedash
+   * (or, later, Colyseus) APIs directly. See `IMultiplayerTransport` in
+   * `platform-services.ts` for the contract.
+   */
+  private readonly transport: IMultiplayerTransport;
+
+  constructor(transport: IMultiplayerTransport) {
+    this.transport = transport;
+  }
+
   // ── Callback registration ──────────────────────────────────────────────────
 
   setCallbacks(cbs: MultiplayerCallbacks): void {
@@ -197,7 +194,7 @@ export class MultiplayerManager {
     // within a ~50-day window, which is sufficient for multiplayer sessions.
     const matchId = now >>> 0;
     this.lastMatchId = matchId;
-    broadcastMessage(true, encodeMatchStart(DEFAULT_COUNTDOWN_MS, matchId));
+    this.transport.broadcast(true, encodeMatchStart(DEFAULT_COUNTDOWN_MS, matchId));
     this.enterCountdown(now + DEFAULT_COUNTDOWN_MS, matchId);
   }
 
@@ -231,7 +228,7 @@ export class MultiplayerManager {
   notifyDied(score: number, height: number): void {
     if (!this.isActive()) return;
     this.localDead = true;
-    broadcastMessage(true, encodeDied(this.currentMatchId, score, height));
+    this.transport.broadcast(true, encodeDied(this.currentMatchId, score, height));
   }
 
   /**
@@ -246,13 +243,13 @@ export class MultiplayerManager {
     if (this.firstFinisherGraceStart === null) {
       this.firstFinisherGraceStart = Date.now();
     }
-    broadcastMessage(true, encodeFinished(this.currentMatchId, finishMs, score, height));
+    this.transport.broadcast(true, encodeFinished(this.currentMatchId, finishMs, score, height));
   }
 
   /** Broadcasts NAME_UPDATE (reliable) when the local display name changes. */
   sendNameUpdate(name: string): void {
     if (!this.isActive()) return;
-    broadcastMessage(true, encodeNameUpdate(name));
+    this.transport.broadcast(true, encodeNameUpdate(name));
   }
 
   // ── Per-tick update ────────────────────────────────────────────────────────
@@ -277,7 +274,7 @@ export class MultiplayerManager {
     this.broadcastTimer += dt;
     if (this.broadcastTimer >= BROADCAST_INTERVAL) {
       this.broadcastTimer = 0;
-      broadcastMessage(false, encodeState(playerX, playerY, playerZ, height, score, combo, onGround));
+      this.transport.broadcast(false, encodeState(playerX, playerY, playerZ, height, score, combo, onGround));
     }
 
     this.drainInbound();
@@ -305,7 +302,7 @@ export class MultiplayerManager {
   // ── Inbound message handling ───────────────────────────────────────────────
 
   private drainInbound(): void {
-    for (const message of readPeerMessages()) {
+    for (const message of this.transport.readPeerMessages()) {
       const msg = decodeMessage(message.payload);
       if (!msg) continue;
       const uid = message.fromUserId;
@@ -478,7 +475,7 @@ export class MultiplayerManager {
     // mid-match host departure is handled by the drainInbound stale-peer path.
     if (this.hostSelf || this.matchState !== "lobby" || !this.lobbyId || !this.hostUserId) return;
 
-    const users = getLobbyUsers(this.lobbyId);
+    const users = this.transport.getLobbyUsers(this.lobbyId);
     const hostPresent =
       users.some((u) => u.userId === this.hostUserId) ||
       this.peers.has(this.hostUserId!);
@@ -676,9 +673,9 @@ export class MultiplayerManager {
   // ── Lobby lifecycle ────────────────────────────────────────────────────────
 
   async createLobby(): Promise<string | null> {
-    if (!isMultiplayerAvailable()) return null;
+    if (!this.transport.isAvailable()) return null;
     this.ensureListeners();
-    const id = await createMultiplayerLobby();
+    const id = await this.transport.createLobby();
     if (id) {
       this.lobbyId = id;
       this.hostSelf = true;
@@ -693,13 +690,13 @@ export class MultiplayerManager {
   }
 
   async joinLobby(lobbyId: string): Promise<boolean> {
-    if (!isMultiplayerAvailable()) return false;
+    if (!this.transport.isAvailable()) return false;
     this.ensureListeners();
-    const ok = await joinMultiplayerLobby(lobbyId);
+    const ok = await this.transport.joinLobby(lobbyId);
     if (ok) {
       this.lobbyId = lobbyId;
       this.hostSelf = false;
-      this.hostUserId = getLobbyHostId(lobbyId);
+      this.hostUserId = this.transport.getLobbyHostId(lobbyId);
       this.peers.clear();
       this.pendingProgress.clear();
       this.pendingNames.clear();
@@ -724,7 +721,7 @@ export class MultiplayerManager {
     this.lastMatchId = 0;
     this.hostAbsentTimer = 0;
     this._protocolVersionMismatch = false;
-    await leaveMultiplayerLobby(id);
+    await this.transport.leaveLobby(id);
   }
 
   // ── Accessors ──────────────────────────────────────────────────────────────
@@ -739,12 +736,12 @@ export class MultiplayerManager {
 
   async getInviteLink(): Promise<string | null> {
     if (!this.lobbyId) return null;
-    return getInviteLink();
+    return this.transport.getInviteLink();
   }
 
   checkLaunchLobby(): string | null {
-    if (!isMultiplayerAvailable()) return null;
-    return checkLaunchLobby();
+    if (!this.transport.isAvailable()) return null;
+    return this.transport.checkLaunchLobby();
   }
 
   getLobbyId(): string | null {
@@ -753,7 +750,7 @@ export class MultiplayerManager {
 
   getLobbyMemberCount(): number {
     if (!this.lobbyId) return 0;
-    const count = getLobbyUserCount(this.lobbyId);
+    const count = this.transport.getLobbyUserCount(this.lobbyId);
     return count > 0 ? count : 1;
   }
 
@@ -768,8 +765,8 @@ export class MultiplayerManager {
    */
   getLobbyRoster(): Array<{ userId: string; username: string }> {
     if (!this.lobbyId) return [];
-    const roster = getLobbyUsers(this.lobbyId);
-    const myId = getMyUserId();
+    const roster = this.transport.getLobbyUsers(this.lobbyId);
+    const myId = this.transport.getMyUserId();
     const out: Array<{ userId: string; username: string }> = [];
     for (const user of roster) {
       if (myId && user.userId === myId) continue;
@@ -790,7 +787,7 @@ export class MultiplayerManager {
   }
 
   isAvailable(): boolean {
-    return isMultiplayerAvailable();
+    return this.transport.isAvailable();
   }
 
   getPeerCount(): number {
@@ -816,7 +813,7 @@ export class MultiplayerManager {
   isLobbyHostPresent(): boolean {
     if (this.hostSelf) return true;
     if (!this.hostUserId || !this.lobbyId) return true;
-    const users = getLobbyUsers(this.lobbyId);
+    const users = this.transport.getLobbyUsers(this.lobbyId);
     return users.some((u) => u.userId === this.hostUserId);
   }
 
@@ -842,16 +839,16 @@ export class MultiplayerManager {
 
   private resolveUsername(userId: string): string {
     if (!this.lobbyId) return userId;
-    const users = getLobbyUsers(this.lobbyId);
+    const users = this.transport.getLobbyUsers(this.lobbyId);
     const match = users.find((user) => user.userId === userId);
     return match?.username ?? userId;
   }
 
   private ensureListeners(): void {
     if (this.connectedListenerBound) return;
-    const events = getMultiplayerEvents();
+    const events = this.transport.getEvents();
     const connectedEvent = events.P2P_CONNECTION_ESTABLISHED ?? "p2p_connection_established";
-    addMultiplayerListener(connectedEvent, (_event: unknown) => {
+    this.transport.addEventListener(connectedEvent, (_event: unknown) => {
       // When a new peer connects, immediately push our broadcast so they see us
       // without waiting for the next 100 ms tick.
       this.broadcastTimer = BROADCAST_INTERVAL;

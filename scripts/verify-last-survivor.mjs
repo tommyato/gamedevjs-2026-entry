@@ -18,7 +18,6 @@ import { tmpdir } from "node:os";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ENTRY = resolve(__dirname, "test-stubs/name-sync-entry.ts");
-const STUB_PATH = resolve(__dirname, "test-stubs/platform-stub.ts");
 
 const tmpDir = await fs.mkdtemp(join(tmpdir(), "cc-last-survivor-"));
 const bundlePath = join(tmpDir, "last-survivor-bundle.mjs");
@@ -30,20 +29,10 @@ await build({
   format: "esm",
   outfile: bundlePath,
   logLevel: "error",
-  plugins: [
-    {
-      name: "platform-stub-rewrite",
-      setup(b) {
-        b.onResolve({ filter: /(^\.{1,2}\/)(.*\/)?platform$/ }, () => ({
-          path: STUB_PATH,
-        }));
-      },
-    },
-  ],
 });
 
 const mod = await import(bundlePath);
-const { MultiplayerManager: MP } = mod;
+const { MultiplayerManager: MP, stubTransport } = mod;
 
 let passed = 0;
 let failed = 0;
@@ -90,7 +79,7 @@ function setupManager({
   peers = [],
   dnfPeers = [],
 } = {}) {
-  const mgr = new MP();
+  const mgr = new MP(stubTransport);
   const state = /** @type {any} */ (mgr);
 
   state.matchState = "in_match";

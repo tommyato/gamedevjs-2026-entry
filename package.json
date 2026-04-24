@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
     "build": "tsc && vite build",
+    "build:wavedash": "tsc && VITE_PLATFORM=wavedash vite build --outDir dist-wavedash",
+    "build:tommyato": "tsc && VITE_PLATFORM=tommyato vite build --outDir dist-tommyato",
     "build:sim": "esbuild src/simulation.ts --bundle --format=esm --outfile=dist/simulation.mjs --platform=node",
     "build:scripted": "esbuild src/ai-ghost-scripted.ts --bundle --format=esm --outfile=dist/ai-ghost-scripted.mjs --platform=node",
     "verify:layout": "npm run build:sim && node scripts/verify-layout.mjs",

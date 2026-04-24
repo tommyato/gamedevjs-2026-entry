@@ -38,28 +38,8 @@ import { Gear } from "./gear";
 import { GearPool } from "./gear-pool";
 import { Input } from "./input";
 import { ParticleSystem } from "./particles";
-import {
-  fetchLeaderboardScores,
-  getStat,
-  getUsername,
-  isAudioEnabled,
-  listAchievementProgress,
-  loadSaveData,
-  onAudioChange,
-  platformInit,
-  requestStats,
-  registerPauseHandlers,
-  signalFirstFrame,
-  signalGameReady,
-  signalLoadComplete,
-  storeStats,
-  submitDailyScore,
-  submitScores,
-  unlockAchievement,
-  updateStat,
-  writeSaveData,
-} from "./platform";
-import type { AchievementProgress } from "./platform";
+import type { AchievementProgress, IPlatformServices } from "./platform-services";
+import { createPlatformServices } from "./platform-services";
 import { AIGhost, getAIGhostModelUrl, isAIGhostEnabled } from "./ai-ghost";
 import {
   CHALLENGE_SEED,
@@ -573,7 +553,15 @@ export class Game {
   private readonly steamSpawnPosition = new THREE.Vector3();
   private readonly particles = new ParticleSystem(200);
 
-  private readonly multiplayer = new MultiplayerManager();
+  /**
+   * Platform services (saves, leaderboards, achievements, MP transport). Set
+   * once in `init()` before any platform-dependent code runs. The definite-
+   * assignment assertion is safe because `init()` awaits `createPlatformServices()`
+   * before kicking off any code that touches `this.platform`.
+   */
+  private platform!: IPlatformServices;
+  /** Same lifecycle as `platform` — created once `platform.multiplayer` is known. */
+  private multiplayer!: MultiplayerManager;
   private readonly ghostMeshes: Map<string, GhostVisual> = new Map();
   private readonly ghostGroup = new THREE.Group();
   private aiGhost: AIGhost | null = null;
@@ -750,16 +738,25 @@ export class Game {
   async start() {
     await this.init();
     this.resumeAnimationLoop();
-    signalGameReady();
+    this.platform.signalGameReady();
   }
 
   private async init() {
-    await platformInit();
-    await requestStats();
+    this.platform = await createPlatformServices();
+    await this.platform.init();
+    await this.platform.requestStats();
+    // MultiplayerManager needs the platform's transport. Wavedash always
+    // exposes a transport object (it just no-ops when the SDK isn't loaded);
+    // a future TommyatoPlatform that genuinely lacks MP could be `null` here,
+    // and we'd need a no-op transport stub to keep `this.multiplayer` non-null.
+    if (!this.platform.multiplayer) {
+      throw new Error("Active platform has no multiplayer transport — Phase 1 supports only platforms with MP.");
+    }
+    this.multiplayer = new MultiplayerManager(this.platform.multiplayer);
     this.saveData = await this.readSaveData();
     this.highScore = this.saveData.bestScore;
     this.personalBestHeight = parseInt(localStorage.getItem("clockwork-personal-best-height") ?? "0") || 0;
-    if (!isAudioEnabled()) {
+    if (!this.platform.isAudioEnabled()) {
       setAudioEnabled(false);
     } else {
       setAudioEnabled(this.saveData.audioEnabled);
@@ -1245,12 +1242,12 @@ export class Game {
 
     window.addEventListener("resize", () => this.onResize());
 
-    registerPauseHandlers(
+    this.platform.registerPauseHandlers(
       () => this.pauseAnimationLoop(),
       () => this.resumeAnimationLoop()
     );
-    setAudioEnabled(isAudioEnabled() && this.saveData.audioEnabled);
-    onAudioChange((enabled) => setAudioEnabled(enabled));
+    setAudioEnabled(this.platform.isAudioEnabled() && this.saveData.audioEnabled);
+    this.platform.onAudioChange((enabled) => setAudioEnabled(enabled));
 
     // Debug hooks — only installed when ?debug is present in the URL.
     // window.__clockworkClimb is intentionally undefined when ?debug is absent.
@@ -1270,7 +1267,7 @@ export class Game {
       };
     }
 
-    await signalLoadComplete();
+    await this.platform.signalLoadComplete();
   }
 
   private createLeaderboardPanels() {
@@ -1315,7 +1312,7 @@ export class Game {
   }
 
   private async refreshLeaderboardPanels(slug: "high-score" | "daily-score" = "high-score") {
-    const entries = await fetchLeaderboardScores(slug);
+    const entries = await this.platform.fetchLeaderboardScores(slug);
     const normalizedEntries = entries.map((entry, index) => ({
       username: entry.username,
       score: entry.score,
@@ -1561,7 +1558,7 @@ export class Game {
 
   private async loadAchievementCatalog() {
     try {
-      const progress = listAchievementProgress();
+      const progress = this.platform.listAchievementProgress();
       this.achievementCatalog = progress.map((entry) => ({
         id: entry.id,
         title: entry.displayName,
@@ -1784,7 +1781,7 @@ export class Game {
     // Always pull fresh state (SDK may have updated since we loaded)
     const progress: AchievementProgress[] = (() => {
       try {
-        return listAchievementProgress();
+        return this.platform.listAchievementProgress();
       } catch {
         // Fall back to the cached catalog marked as locked.
         return this.achievementCatalog.map((entry) => ({
@@ -3569,7 +3566,7 @@ export class Game {
       const { score } = record;
       // Gate server submission on the 10th-place leaderboard score. Returns 0
       // while the pool has fewer than 10 entries, so every early run qualifies.
-      void fetchGhostUploadThreshold().then((threshold) => {
+      void fetchGhostUploadThreshold(this.platform).then((threshold) => {
         if (score >= threshold) {
           void submitRemoteGhost({
             name: record.name,
@@ -3597,15 +3594,15 @@ export class Game {
   }
 
   private async readSaveData(): Promise<SaveData> {
-    const rawSave = await loadSaveData();
+    const rawSave = await this.platform.loadSaveData();
     const parsedSave = parseSaveData(rawSave);
     const statBackedSave: SaveData = {
       bestScore: parsedSave.bestScore,
-      bestHeight: Math.max(parsedSave.bestHeight, getStat("highest_climb")),
-      bestCombo: Math.max(parsedSave.bestCombo, getStat("best_combo")),
-      totalRuns: Math.max(parsedSave.totalRuns, getStat("total_runs")),
-      totalBolts: Math.max(parsedSave.totalBolts, getStat("total_bolts")),
-      totalPlaytime: Math.max(parsedSave.totalPlaytime, getStat("total_playtime")),
+      bestHeight: Math.max(parsedSave.bestHeight, this.platform.getStat("highest_climb")),
+      bestCombo: Math.max(parsedSave.bestCombo, this.platform.getStat("best_combo")),
+      totalRuns: Math.max(parsedSave.totalRuns, this.platform.getStat("total_runs")),
+      totalBolts: Math.max(parsedSave.totalBolts, this.platform.getStat("total_bolts")),
+      totalPlaytime: Math.max(parsedSave.totalPlaytime, this.platform.getStat("total_playtime")),
       audioEnabled: parsedSave.audioEnabled,
     };
     return statBackedSave;
@@ -3797,7 +3794,7 @@ export class Game {
     this.composer.render();
     if (!this.hasRenderedFirstFrame) {
       this.hasRenderedFirstFrame = true;
-      signalFirstFrame();
+      this.platform.signalFirstFrame();
     }
     this.input.endFrame();
   }
@@ -4194,18 +4191,18 @@ export class Game {
     this.saveData = nextSaveData;
     this.highScore = nextSaveData.bestScore;
 
-    updateStat("total_score", getStat("total_score") + this.score);
-    updateStat("total_bolts", getStat("total_bolts") + this.boltCount);
-    updateStat("total_runs", getStat("total_runs") + 1);
-    updateStat("best_combo", Math.max(getStat("best_combo"), this.bestCombo));
-    updateStat("highest_climb", Math.max(getStat("highest_climb"), this.heightMaxReached));
-    updateStat("total_playtime", getStat("total_playtime") + runPlaytime);
-    storeStats();
+    this.platform.updateStat("total_score", this.platform.getStat("total_score") + this.score);
+    this.platform.updateStat("total_bolts", this.platform.getStat("total_bolts") + this.boltCount);
+    this.platform.updateStat("total_runs", this.platform.getStat("total_runs") + 1);
+    this.platform.updateStat("best_combo", Math.max(this.platform.getStat("best_combo"), this.bestCombo));
+    this.platform.updateStat("highest_climb", Math.max(this.platform.getStat("highest_climb"), this.heightMaxReached));
+    this.platform.updateStat("total_playtime", this.platform.getStat("total_playtime") + runPlaytime);
+    this.platform.storeStats();
 
-    void writeSaveData(JSON.stringify(nextSaveData)).catch((error: unknown) => {
+    void this.platform.writeSaveData(JSON.stringify(nextSaveData)).catch((error: unknown) => {
       console.error("Failed to save run data", error);
     });
-    void submitScores(
+    void this.platform.submitScores(
       {
         score: this.score,
         height: this.heightMaxReached,
@@ -4217,7 +4214,7 @@ export class Game {
     });
     if (this.isDailyChallenge) {
       this.writeDailyBest(this.dailyChallengeDate, this.score);
-      void submitDailyScore(this.score, this.getLocalUsername()).catch((error: unknown) => {
+      void this.platform.submitDailyScore(this.score, this.getLocalUsername()).catch((error: unknown) => {
         console.error("Failed to submit daily score", error);
       });
     }
@@ -4227,11 +4224,11 @@ export class Game {
 
     // Unlock and toast *newly earned* achievements this run
     const newAchievements: string[] = [];
-    if (this.score > 0 && unlockAchievement("FIRST_CLIMB")) newAchievements.push("FIRST_CLIMB");
-    if (this.score >= 500 && unlockAchievement("RISING_STAR")) newAchievements.push("RISING_STAR");
-    if (this.score >= 2000 && unlockAchievement("GEAR_MASTER")) newAchievements.push("GEAR_MASTER");
-    if (this.saveData.totalRuns === 1 && this.score >= 500 && unlockAchievement("PERFECT_START")) newAchievements.push("PERFECT_START");
-    if (state.bestAirBoltChain >= 3 && unlockAchievement("BOLT_CHAIN")) newAchievements.push("BOLT_CHAIN");
+    if (this.score > 0 && this.platform.unlockAchievement("FIRST_CLIMB")) newAchievements.push("FIRST_CLIMB");
+    if (this.score >= 500 && this.platform.unlockAchievement("RISING_STAR")) newAchievements.push("RISING_STAR");
+    if (this.score >= 2000 && this.platform.unlockAchievement("GEAR_MASTER")) newAchievements.push("GEAR_MASTER");
+    if (this.saveData.totalRuns === 1 && this.score >= 500 && this.platform.unlockAchievement("PERFECT_START")) newAchievements.push("PERFECT_START");
+    if (state.bestAirBoltChain >= 3 && this.platform.unlockAchievement("BOLT_CHAIN")) newAchievements.push("BOLT_CHAIN");
     newAchievements.forEach((id, index) => {
       setTimeout(() => {
         if (this.state === GameState.GameOver) {
@@ -4369,7 +4366,7 @@ export class Game {
       }
     } catch { /* localStorage may be unavailable */ }
     try {
-      const wavedashName = getUsername();
+      const wavedashName = this.platform.getUsername();
       // Only use the wavedash name if it's a real user-set value — not the SDK
       // default ("Player"). Fall through to our persisted coolname otherwise.
       if (wavedashName && wavedashName !== "Player") {
@@ -4742,7 +4739,7 @@ export class Game {
           break;
         case "achievement":
           this.showAchievementToast(formatAchievementId(event.id));
-          unlockAchievement(event.id);
+          this.platform.unlockAchievement(event.id);
           break;
         case "bounce_jump":
           this.landingEffectPosition.set(event.x, event.y, event.z);

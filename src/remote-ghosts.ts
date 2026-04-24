@@ -16,7 +16,7 @@
 
 import type { GhostFrame, GhostRecord } from "./ghost-recorder";
 import { CHALLENGE_SEED } from "./ghost-recorder";
-import { fetchLeaderboardScores } from "./platform";
+import type { IPlatformServices } from "./platform-services";
 
 const API_URL = "https://api.tommyato.com";
 const GAME_ID = "clockwork-climb";
@@ -117,9 +117,9 @@ export async function submitGhost(entry: {
  * high-score leaderboard, or 0 if CC hasn't filled the top 10 yet (in
  * which case upload everything so the pool can bootstrap).
  */
-export async function fetchGhostUploadThreshold(): Promise<number> {
+export async function fetchGhostUploadThreshold(platform: IPlatformServices): Promise<number> {
   try {
-    const scores = await fetchLeaderboardScores("high-score");
+    const scores = await platform.fetchLeaderboardScores("high-score");
     if (!Array.isArray(scores) || scores.length < 10) return 0;
     const sorted = scores.slice().sort((a, b) => b.score - a.score);
     return sorted[9]?.score || 0;

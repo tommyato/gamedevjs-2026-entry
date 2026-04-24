@@ -1,11 +1,15 @@
 /**
- * Test-time stub for src/platform.ts. Exports the same surface multiplayer.ts
- * imports, but routes everything through a small in-memory harness so a unit
- * test can drive two MultiplayerManager instances without a browser or the
- * Wavedash SDK.
+ * Test-time multiplayer transport stub for `MultiplayerManager`.
  *
- * Mounted via an esbuild resolve plugin in scripts/verify-name-sync.mjs; the
- * real src/platform.ts is never loaded in test runs.
+ * Implements the `IMultiplayerTransport` shape from `src/platform-services.ts`,
+ * routing every call through a small in-memory harness so two managers can
+ * exchange messages without a browser, the Wavedash SDK, or a Colyseus server.
+ *
+ * Mounted by the verify scripts (`verify-name-sync.mjs`,
+ * `verify-last-survivor.mjs`); the real WavedashPlatform is never loaded in
+ * test runs. Driver code uses `__asUser("uid", () => mgr.foo())` to flip the
+ * harness's current-user pointer so the stub knows whose mailbox a broadcast
+ * came out of.
  */
 
 export type LobbyUser = { userId: string; username: string };
@@ -72,84 +76,82 @@ export function __asUser<T>(userId: string, fn: () => T): T {
   }
 }
 
-// ── Platform surface (mirrors src/platform.ts exports used by multiplayer.ts) ──
+// ── IMultiplayerTransport implementation ────────────────────────────────────
 
-export function isMultiplayerAvailable(): boolean {
-  return true;
-}
+export const stubTransport = {
+  isAvailable(): boolean {
+    return true;
+  },
 
-export async function createMultiplayerLobby(): Promise<string | null> {
-  return "test-lobby";
-}
+  async createLobby(): Promise<string | null> {
+    return "test-lobby";
+  },
 
-export async function joinMultiplayerLobby(_lobbyId: string): Promise<boolean> {
-  return true;
-}
+  async joinLobby(_lobbyId: string): Promise<boolean> {
+    return true;
+  },
 
-export async function leaveMultiplayerLobby(_lobbyId: string): Promise<void> {}
+  async leaveLobby(_lobbyId: string): Promise<void> {},
 
-export function broadcastMessage(_reliable: boolean, data: Uint8Array): void {
-  const sender = harness.currentUserId;
-  if (!sender) return;
-  for (const [uid, queue] of harness.inbox) {
-    if (uid === sender) continue;
-    // Copy the payload so receivers can't accidentally share a buffer with
-    // the sender's encoder reuse.
-    queue.push({ fromUserId: sender, payload: new Uint8Array(data) });
-  }
-}
+  broadcast(_reliable: boolean, data: Uint8Array): void {
+    const sender = harness.currentUserId;
+    if (!sender) return;
+    for (const [uid, queue] of harness.inbox) {
+      if (uid === sender) continue;
+      // Copy the payload so receivers can't accidentally share a buffer with
+      // the sender's encoder reuse.
+      queue.push({ fromUserId: sender, payload: new Uint8Array(data) });
+    }
+  },
 
-export function broadcastPlayerState(data: Uint8Array): void {
-  broadcastMessage(false, data);
-}
+  readPeerMessages(): PeerMessage[] {
+    const uid = harness.currentUserId;
+    if (!uid) return [];
+    const queue = harness.inbox.get(uid);
+    if (!queue || queue.length === 0) return [];
+    const out = queue.slice();
+    queue.length = 0;
+    return out;
+  },
 
-export function readPeerMessages(): PeerMessage[] {
-  const uid = harness.currentUserId;
-  if (!uid) return [];
-  const queue = harness.inbox.get(uid);
-  if (!queue || queue.length === 0) return [];
-  const out = queue.slice();
-  queue.length = 0;
-  return out;
-}
+  async getInviteLink(): Promise<string | null> {
+    return null;
+  },
 
-export async function getInviteLink(): Promise<string | null> {
-  return null;
-}
+  checkLaunchLobby(): string | null {
+    return null;
+  },
 
-export function checkLaunchLobby(): string | null {
-  return null;
-}
+  getMyUserId(): string | null {
+    return harness.currentUserId;
+  },
 
-export function getMyUserId(): string | null {
-  return harness.currentUserId;
-}
+  getLobbyUsers(_lobbyId: string): LobbyUser[] {
+    const out: LobbyUser[] = [];
+    for (const uid of harness.lobbyUserIds) {
+      out.push({ userId: uid, username: harness.sdkNames.get(uid) ?? uid });
+    }
+    return out;
+  },
 
-export function getLobbyUsers(_lobbyId: string): LobbyUser[] {
-  const out: LobbyUser[] = [];
-  for (const uid of harness.lobbyUserIds) {
-    out.push({ userId: uid, username: harness.sdkNames.get(uid) ?? uid });
-  }
-  return out;
-}
+  getLobbyHostId(lobbyId: string): string | null {
+    return this.getLobbyUsers(lobbyId)[0]?.userId ?? null;
+  },
 
-export function getLobbyHostId(lobbyId: string): string | null {
-  return getLobbyUsers(lobbyId)[0]?.userId ?? null;
-}
+  getLobbyUserCount(_lobbyId: string): number {
+    return harness.lobbyUserIds.size;
+  },
 
-export function getLobbyUserCount(_lobbyId: string): number {
-  return harness.lobbyUserIds.size;
-}
+  addEventListener(event: string, callback: (e: unknown) => void): void {
+    const uid = harness.currentUserId;
+    if (!uid) return;
+    const key = `${uid}|${event}`;
+    const arr = harness.listeners.get(key) ?? [];
+    arr.push(callback);
+    harness.listeners.set(key, arr);
+  },
 
-export function addMultiplayerListener(event: string, callback: (e: unknown) => void): void {
-  const uid = harness.currentUserId;
-  if (!uid) return;
-  const key = `${uid}|${event}`;
-  const arr = harness.listeners.get(key) ?? [];
-  arr.push(callback);
-  harness.listeners.set(key, arr);
-}
-
-export function getMultiplayerEvents(): Record<string, string> {
-  return { P2P_CONNECTION_ESTABLISHED: "p2p_connection_established" };
-}
+  getEvents(): Record<string, string> {
+    return { P2P_CONNECTION_ESTABLISHED: "p2p_connection_established" };
+  },
+};

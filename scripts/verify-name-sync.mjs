@@ -24,15 +24,12 @@ import { tmpdir } from "node:os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const REPO_ROOT = resolve(__dirname, "..");
 const ENTRY = resolve(__dirname, "test-stubs/name-sync-entry.ts");
-const STUB_PATH = resolve(__dirname, "test-stubs/platform-stub.ts");
 
-// Build the test entry into an ESM bundle. The entry re-exports both
-// MultiplayerManager and the stub's harness controls, so the test driver and
-// the manager share one instance of the stub's in-memory state. An esbuild
-// resolve plugin redirects every `./platform` import inside the multiplayer
-// graph to the stub module that the entry already exports.
+// Build the test entry into an ESM bundle. Since Phase 1's IPlatformServices
+// refactor, MultiplayerManager takes its transport via constructor — no more
+// esbuild resolve hijack of `./platform`. The stub exports a transport object
+// that implements IMultiplayerTransport directly.
 const tmpDir = await fs.mkdtemp(join(tmpdir(), "cc-name-sync-"));
 const bundlePath = join(tmpDir, "name-sync-bundle.mjs");
 
@@ -43,17 +40,6 @@ await build({
   format: "esm",
   outfile: bundlePath,
   logLevel: "error",
-  plugins: [
-    {
-      name: "platform-stub-rewrite",
-      setup(b) {
-        // Match relative imports that end in "/platform" or bare "./platform".
-        b.onResolve({ filter: /(^\.{1,2}\/)(.*\/)?platform$/ }, () => ({
-          path: STUB_PATH,
-        }));
-      },
-    },
-  ],
 });
 
 const mod = await import(bundlePath);
@@ -63,6 +49,7 @@ const {
   __setCurrentUser,
   __fireP2PConnected,
   __asUser,
+  stubTransport,
 } = mod;
 
 let passed = 0;
@@ -88,11 +75,11 @@ __setCurrentUser("userB", "coolname-B");
 // Construct both managers. createLobby / joinLobby need the current-user tag
 // so ensureListeners binds the host's P2P_CONNECTION_ESTABLISHED callback
 // under "userA" in the stub.
-const hostMgr = new MP();
+const hostMgr = new MP(stubTransport);
 hostMgr.setCallbacks({ getLocalName: () => "supertommy" });
 hostMgr.setLocalName("supertommy");
 
-const peerMgr = new MP();
+const peerMgr = new MP(stubTransport);
 
 await __asUser("userA", () => hostMgr.createLobby());
 await __asUser("userB", () => peerMgr.joinLobby("test-lobby"));

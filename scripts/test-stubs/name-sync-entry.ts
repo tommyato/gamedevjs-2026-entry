@@ -1,8 +1,9 @@
 /**
- * Test entry bundled by scripts/verify-name-sync.mjs. Re-exports both the
- * real MultiplayerManager and the platform stub's harness controls through
- * the same module graph so the test driver and the manager share one
- * instance of the stub's in-memory state.
+ * Test entry bundled by `verify-name-sync.mjs` / `verify-last-survivor.mjs`.
+ * Re-exports both the real MultiplayerManager and the stub's harness controls
+ * (plus the IMultiplayerTransport instance) through the same module graph so
+ * the test driver and the manager share one instance of the stub's in-memory
+ * state.
  */
 export { MultiplayerManager } from "../../src/multiplayer";
 export {
@@ -10,4 +11,5 @@ export {
   __setCurrentUser,
   __fireP2PConnected,
   __asUser,
+  stubTransport,
 } from "./platform-stub";
