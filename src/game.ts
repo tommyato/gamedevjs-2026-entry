@@ -71,7 +71,7 @@ import {
   pickRandom as pickRandomGhost,
 } from "./remote-ghosts";
 import { getLocalUsername as getCoolLocalUsername, setLocalUsername as setCoolLocalUsername } from "./coolname";
-import { MultiplayerManager, type PeerGhost } from "./multiplayer";
+import { MultiplayerManager, type MatchResult, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
 import { applyTopDownShadowToObject, TopDownShadowSystem } from "./shadow";
 import { ClockworkClimbSimulation } from "./simulation";
@@ -582,6 +582,18 @@ export class Game {
   private countdownLastRenderedSec = -1;
   /** setTimeout handle for hiding the overlay ~400 ms after "GO!" appears. */
   private countdownGoTimer: number | null = null;
+  /** True after local player crosses 100 m in a multiplayer match (reset each match). */
+  private localFinished = false;
+  // ── Match timer HUD ────────────────────────────────────────────────────────
+  private matchTimerOverlay: HTMLDivElement | null = null;
+  /** Last integer second rendered; prevents per-frame DOM writes. */
+  private matchTimerLastRenderedSec = -1;
+  /** Whether the warning-entry tick has fired for this match. */
+  private matchTimerWarningPlayed = false;
+  /** Last critical second for which a rising-pitch tick played. */
+  private matchTimerCriticalLastSec = -1;
+  // ── End screen ────────────────────────────────────────────────────────────
+  private endScreenOverlay: HTMLDivElement | null = null;
   private readonly ghostTmpVec = new THREE.Vector3();
   private readonly backgroundGroup = new THREE.Group();
   private readonly titleBackdropGroup = new THREE.Group();
@@ -2159,6 +2171,13 @@ export class Game {
           this.setMultiplayerStatus("MATCH IN PROGRESS — WAIT FOR NEXT ROUND");
           return;
         }
+        // Reset per-match state before starting.
+        this.localFinished = false;
+        this.matchTimerLastRenderedSec = -1;
+        this.matchTimerWarningPlayed = false;
+        this.matchTimerCriticalLastSec = -1;
+        this.multiplayer.setLocalName(this.getLobbyDisplayName());
+        this.hideEndScreen();
         this.hideMultiplayerPanel();
         this.startGame();
         this.countdownActive = true;
@@ -2168,22 +2187,44 @@ export class Game {
         // Countdown elapsed — inputs become live. The GO! overlay hides itself
         // via the 400 ms timer scheduled in updateCountdownOverlay().
         this.countdownActive = false;
+        this.showMatchTimer();
       },
-      onPeerDied: (userId) => {
-        // Session 5: update peer ghost display, check end condition.
-        console.log(`[mp] peer died: ${userId}`);
+      onPeerDied: (_userId) => {
+        // End-condition logic is handled inside multiplayer.ts; no UI needed here.
       },
-      onPeerFinished: (userId) => {
-        // Session 5: update peer ghost display, check end condition.
-        console.log(`[mp] peer finished: ${userId}`);
+      onPeerFinished: (_userId) => {
+        // End-condition logic is handled inside multiplayer.ts; no UI needed here.
       },
-      onMatchEnded: (_results) => {
-        // Session 5: show end screen with rankings.
-        console.log("[mp] match ended");
+      onMatchEnded: (results) => {
+        // Hide timer immediately — do NOT show frozen "00:00" on results screen.
+        this.hideMatchTimer();
+        this.hideCountdown();
+        // If still playing (player finished but didn't die), stop the game cleanly.
+        if (this.state === GameState.Playing) {
+          this.state = GameState.GameOver;
+          stopMusic();
+          stopAmbientTick();
+          this.input.setTouchControlsVisible(false);
+          this.hideTutorialOverlay(true);
+          this.hideLandingCueHard();
+          this.updateHud(dtZero());
+          this.comboGlowOverlay.style.opacity = "0";
+          this.clearScorePops();
+          this.cameraDistancePulses.length = 0;
+          this.comboFovPulseTimer = 0;
+        }
+        // Patch in local player's current display name.
+        const localName = this.getLobbyDisplayName();
+        const resolvedResults = results.map((r) =>
+          r.isLocal ? { ...r, name: localName } : r
+        );
+        this.showEndScreen(resolvedResults);
       },
       onLobbyCancelled: () => {
-        // Session 3/6: show "host left" toast, return to title.
-        console.log("[mp] lobby cancelled — host disconnected");
+        // Host disconnected in lobby — return to title with a toast.
+        this.hideMultiplayerPanel();
+        void this.multiplayer.leaveLobby();
+        this.showToast("HOST DISCONNECTED — LOBBY CLOSED");
       },
     });
   }
@@ -2377,6 +2418,410 @@ export class Game {
   private setMultiplayerStatus(text: string) {
     if (this.multiplayerStatus) {
       this.multiplayerStatus.textContent = text;
+    }
+  }
+
+  // ── Match timer HUD ────────────────────────────────────────────────────────
+
+  /**
+   * Injects CSS keyframe animations for the match timer once and returns the
+   * outer container div. Called lazily on first show.
+   */
+  private createMatchTimerOverlay(): HTMLDivElement {
+    if (!document.getElementById("cc-timer-styles")) {
+      const style = document.createElement("style");
+      style.id = "cc-timer-styles";
+      style.textContent = `
+        @keyframes cc-timer-warn-pulse {
+          0%, 100% { transform: scale(1.0); }
+          50%       { transform: scale(1.08); }
+        }
+        @keyframes cc-timer-crit-flash {
+          0%, 100% { transform: scale(1.0); opacity: 0.4; }
+          50%       { transform: scale(1.15); opacity: 1.0; }
+        }
+        .cc-timer-warning { animation: cc-timer-warn-pulse 1s ease-in-out infinite; }
+        .cc-timer-critical { animation: cc-timer-crit-flash 0.5s ease-in-out infinite; }
+      `;
+      document.head.appendChild(style);
+    }
+
+    const container = document.createElement("div");
+    Object.assign(container.style, {
+      position: "fixed",
+      top: "24px",
+      left: "50%",
+      transform: "translateX(-50%)",
+      zIndex: "800",
+      pointerEvents: "none",
+      display: "none",
+      textAlign: "center",
+    } as CSSStyleDeclaration);
+
+    const text = document.createElement("div");
+    Object.assign(text.style, {
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      fontSize: "clamp(36px, 5vw, 64px)",
+      fontWeight: "900",
+      color: "#cfeaff",
+      textShadow: "0 0 20px rgba(120, 210, 255, 0.5), 0 2px 12px rgba(0,0,0,0.7)",
+      letterSpacing: "0.05em",
+      lineHeight: "1",
+      display: "inline-block",
+    } as CSSStyleDeclaration);
+    text.dataset.role = "timer-text";
+    container.appendChild(text);
+
+    document.body.appendChild(container);
+    return container;
+  }
+
+  private showMatchTimer(): void {
+    if (!this.matchTimerOverlay) {
+      this.matchTimerOverlay = this.createMatchTimerOverlay();
+    }
+    this.matchTimerLastRenderedSec = -1;
+    this.matchTimerWarningPlayed = false;
+    this.matchTimerCriticalLastSec = -1;
+    this.matchTimerOverlay.style.display = "block";
+  }
+
+  private hideMatchTimer(): void {
+    if (this.matchTimerOverlay) {
+      this.matchTimerOverlay.style.display = "none";
+    }
+  }
+
+  /**
+   * Updates the match timer DOM each frame. Only writes to DOM on integer-second
+   * boundaries; uses CSS keyframe classes for animation (no rAF loop needed).
+   */
+  private updateMatchTimerOverlay(): void {
+    if (!this.matchTimerOverlay || this.matchTimerOverlay.style.display === "none") return;
+
+    const localStartAt = this.multiplayer.getLocalStartAt();
+    if (localStartAt === 0) return;
+
+    const elapsed = Date.now() - localStartAt;
+    const secondsLeft = Math.max(0, 120 - Math.floor(elapsed / 1000));
+
+    // Only update DOM on integer-second boundary.
+    if (secondsLeft === this.matchTimerLastRenderedSec) return;
+    this.matchTimerLastRenderedSec = secondsLeft;
+
+    const textEl = this.matchTimerOverlay.querySelector("[data-role='timer-text']") as HTMLElement | null;
+    if (!textEl) return;
+
+    const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
+    const ss = String(secondsLeft % 60).padStart(2, "0");
+    textEl.textContent = `${mm}:${ss}`;
+
+    if (secondsLeft >= 31) {
+      // Calm state
+      textEl.style.color = "#cfeaff";
+      textEl.classList.remove("cc-timer-warning", "cc-timer-critical");
+    } else if (secondsLeft >= 11) {
+      // Warning state: amber + 1 Hz pulse
+      textEl.style.color = "#ffb84a";
+      textEl.classList.remove("cc-timer-critical");
+      textEl.classList.add("cc-timer-warning");
+      // Play entry tick once (when first entering warning zone)
+      if (!this.matchTimerWarningPlayed) {
+        this.matchTimerWarningPlayed = true;
+        if (getAudioEnabled()) playTone(330, 0.08, "sine", 0.14);
+      }
+    } else if (secondsLeft >= 1) {
+      // Critical state: red + 2 Hz flash
+      textEl.style.color = "#ff5555";
+      textEl.classList.remove("cc-timer-warning");
+      textEl.classList.add("cc-timer-critical");
+      // Rising-pitch tick on each new critical second
+      if (secondsLeft !== this.matchTimerCriticalLastSec) {
+        this.matchTimerCriticalLastSec = secondsLeft;
+        if (getAudioEnabled()) {
+          const freq = 440 + (10 - secondsLeft) * 30;
+          playTone(freq, 0.1, "sine", 0.16);
+        }
+      }
+    } else {
+      // Zero — final flash, freeze display
+      textEl.style.color = "#ff5555";
+      textEl.style.opacity = "1";
+      textEl.classList.remove("cc-timer-warning", "cc-timer-critical");
+    }
+  }
+
+  // ── End-screen DOM ─────────────────────────────────────────────────────────
+
+  private createEndScreen(): HTMLDivElement {
+    const backdrop = document.createElement("div");
+    Object.assign(backdrop.style, {
+      position: "fixed",
+      inset: "0",
+      background: "rgba(0, 0, 0, 0.6)",
+      backdropFilter: "blur(8px)",
+      zIndex: "950",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+    } as CSSStyleDeclaration);
+    backdrop.dataset.role = "end-screen";
+
+    const card = document.createElement("div");
+    Object.assign(card.style, {
+      background: "linear-gradient(180deg, rgba(14, 28, 40, 0.97), rgba(6, 14, 22, 0.92))",
+      border: "1px solid rgba(127, 214, 255, 0.28)",
+      borderRadius: "18px",
+      padding: "28px 24px 22px",
+      width: "min(480px, calc(100vw - 32px))",
+      boxSizing: "border-box",
+      boxShadow: "0 20px 60px rgba(0,0,0,0.55), inset 0 1px 0 rgba(173,232,255,0.12)",
+      color: "#d7f8ff",
+      overflowY: "auto",
+      maxHeight: "calc(100vh - 32px)",
+    } as CSSStyleDeclaration);
+    card.addEventListener("click", (e) => e.stopPropagation());
+
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    return backdrop;
+  }
+
+  /** Populates and shows the end screen with the given match results. */
+  private showEndScreen(results: MatchResult[]): void {
+    if (!this.endScreenOverlay) {
+      this.endScreenOverlay = this.createEndScreen();
+    }
+    const backdrop = this.endScreenOverlay;
+    const card = backdrop.firstElementChild as HTMLDivElement;
+    card.innerHTML = "";
+
+    const anyFinished = results.some((r) => r.finished);
+
+    // ── Header ───────────────────────────────────────────────────────────────
+    const header = document.createElement("div");
+    Object.assign(header.style, {
+      fontSize: "14px",
+      fontWeight: "700",
+      letterSpacing: "2px",
+      color: "#ffc878",
+      textAlign: "center",
+      marginBottom: "6px",
+    } as CSSStyleDeclaration);
+    header.textContent = "RESULTS — Race to 100 m";
+    card.appendChild(header);
+
+    if (!anyFinished) {
+      const sub = document.createElement("div");
+      Object.assign(sub.style, {
+        fontSize: "11px",
+        letterSpacing: "1.5px",
+        color: "#7fd6ff",
+        textAlign: "center",
+        fontStyle: "italic",
+        marginBottom: "16px",
+        opacity: "0.8",
+      } as CSSStyleDeclaration);
+      sub.textContent = "NO ONE MADE IT";
+      card.appendChild(sub);
+    } else {
+      header.style.marginBottom = "16px";
+    }
+
+    // ── Results table ────────────────────────────────────────────────────────
+    const table = document.createElement("div");
+    Object.assign(table.style, {
+      width: "100%",
+      marginBottom: "20px",
+      borderRadius: "10px",
+      overflow: "hidden",
+      border: "1px solid rgba(127, 214, 255, 0.12)",
+    } as CSSStyleDeclaration);
+
+    // Column header row
+    const colHeader = document.createElement("div");
+    Object.assign(colHeader.style, {
+      display: "grid",
+      gridTemplateColumns: "36px 1fr 72px 60px 80px",
+      gap: "0",
+      padding: "6px 10px",
+      background: "rgba(127, 214, 255, 0.07)",
+      fontSize: "9px",
+      letterSpacing: "1.5px",
+      color: "#7fd6ff",
+      fontWeight: "700",
+    } as CSSStyleDeclaration);
+    ["#", "PLAYER", "SCORE", "HEIGHT", "TIME"].forEach((col) => {
+      const cell = document.createElement("div");
+      cell.textContent = col;
+      colHeader.appendChild(cell);
+    });
+    table.appendChild(colHeader);
+
+    // Data rows
+    for (const r of results) {
+      const row = document.createElement("div");
+      Object.assign(row.style, {
+        display: "grid",
+        gridTemplateColumns: "36px 1fr 72px 60px 80px",
+        gap: "0",
+        padding: "8px 10px",
+        background: r.isLocal ? "rgba(127, 214, 255, 0.06)" : "transparent",
+        borderTop: "1px solid rgba(127, 214, 255, 0.08)",
+        fontSize: "12px",
+        alignItems: "center",
+        boxSizing: "border-box",
+      } as CSSStyleDeclaration);
+      if (r.isLocal) {
+        row.style.outline = "2px solid #ffd966";
+        row.style.outlineOffset = "-2px";
+        row.style.borderRadius = "6px";
+      }
+
+      // Rank column
+      const rankCell = document.createElement("div");
+      rankCell.textContent = r.rank === 1 ? "👑" : String(r.rank);
+      Object.assign(rankCell.style, { color: r.rank === 1 ? "#ffd966" : "#7fd6ff", fontWeight: "700" } as CSSStyleDeclaration);
+      row.appendChild(rankCell);
+
+      // Player name
+      const nameCell = document.createElement("div");
+      nameCell.textContent = r.name;
+      Object.assign(nameCell.style, {
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        color: r.isLocal ? "#d7f8ff" : "#a8d8f0",
+        paddingRight: "8px",
+      } as CSSStyleDeclaration);
+      row.appendChild(nameCell);
+
+      // Score
+      const scoreCell = document.createElement("div");
+      scoreCell.textContent = String(r.score);
+      Object.assign(scoreCell.style, { color: "#cfeaff" } as CSSStyleDeclaration);
+      row.appendChild(scoreCell);
+
+      // Height
+      const heightCell = document.createElement("div");
+      heightCell.textContent = `${Math.floor(r.height)}m`;
+      Object.assign(heightCell.style, { color: "#a8d8f0" } as CSSStyleDeclaration);
+      row.appendChild(heightCell);
+
+      // Time
+      const timeCell = document.createElement("div");
+      if (r.isDnf) {
+        timeCell.textContent = "DNF";
+        timeCell.style.color = "#ff7070";
+      } else if (r.finished && r.finishMs !== undefined) {
+        const totalMs = r.finishMs;
+        const mins = Math.floor(totalMs / 60_000);
+        const secs = Math.floor((totalMs % 60_000) / 1000);
+        const ms = totalMs % 1000;
+        timeCell.textContent = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
+        timeCell.style.color = "#7ff0a0";
+      } else {
+        timeCell.textContent = "—";
+        timeCell.style.color = "#7fd6ff";
+      }
+      row.appendChild(timeCell);
+
+      table.appendChild(row);
+    }
+    card.appendChild(table);
+
+    // ── Buttons ──────────────────────────────────────────────────────────────
+    const makeBtn = (label: string, accent: string): HTMLButtonElement => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      Object.assign(b.style, {
+        padding: "10px 20px",
+        borderRadius: "999px",
+        border: `1px solid ${accent}`,
+        background: "linear-gradient(180deg, rgba(18,32,46,0.92), rgba(8,16,24,0.82))",
+        color: "#d7f8ff",
+        cursor: "pointer",
+        fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+        fontSize: "12px",
+        fontWeight: "700",
+        letterSpacing: "2px",
+      } as CSSStyleDeclaration);
+      return b;
+    };
+
+    const btnRow = document.createElement("div");
+    Object.assign(btnRow.style, {
+      display: "flex",
+      gap: "10px",
+      justifyContent: "center",
+      flexWrap: "wrap",
+    } as CSSStyleDeclaration);
+
+    const isHost = this.multiplayer.isHost();
+
+    if (isHost) {
+      const startBtn = makeBtn("Cooldown…", "rgba(255,196,120,0.4)");
+      startBtn.disabled = true;
+      startBtn.style.opacity = "0.5";
+      startBtn.style.cursor = "not-allowed";
+      // Enable after 3 s cooldown
+      window.setTimeout(() => {
+        if (startBtn.isConnected) {
+          startBtn.textContent = "START NEXT MATCH";
+          startBtn.disabled = false;
+          startBtn.style.opacity = "1";
+          startBtn.style.cursor = "pointer";
+        }
+      }, 3000);
+      startBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Reset for next match and start — onMatchStart will hide the end screen.
+        this.multiplayer.resetForNextMatch();
+        this.multiplayer.startMatch();
+      });
+      btnRow.appendChild(startBtn);
+    } else {
+      const waitText = document.createElement("div");
+      Object.assign(waitText.style, {
+        fontSize: "11px",
+        letterSpacing: "1px",
+        color: "#7fd6ff",
+        alignSelf: "center",
+        opacity: "0.8",
+      } as CSSStyleDeclaration);
+      waitText.textContent = "Waiting for host to start next match…";
+      btnRow.appendChild(waitText);
+    }
+
+    const leaveBtn = makeBtn("LEAVE LOBBY", "rgba(255,120,120,0.4)");
+    leaveBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.hideEndScreen();
+      this.hideMatchTimer();
+      // If still in Playing state (player finished but didn't die), stop.
+      if (this.state === GameState.Playing) {
+        this.state = GameState.GameOver;
+        stopMusic();
+        stopAmbientTick();
+      }
+      void this.leaveMultiplayer().then(() => {
+        this.returnToTitle();
+      });
+    });
+    btnRow.appendChild(leaveBtn);
+
+    card.appendChild(btnRow);
+
+    backdrop.style.display = "flex";
+  }
+
+  private hideEndScreen(): void {
+    if (this.endScreenOverlay) {
+      this.endScreenOverlay.style.display = "none";
     }
   }
 
@@ -3355,6 +3800,7 @@ export class Game {
     }
 
     this.hideMultiplayerPanel();
+    this.hideEndScreen();
     if (this.multiplayerButton) {
       this.multiplayerButton.style.display = "none";
     }
@@ -3428,6 +3874,24 @@ export class Game {
     const { state, events } = this.sim.step(action, dt);
     this.consumeState(state);
     this.handleEvents(events, state);
+
+    // ── Multiplayer finish detection (100 m crossing) ──────────────────────────
+    if (
+      this.multiplayer.isActive() &&
+      this.multiplayer.getMatchState() === "in_match" &&
+      !this.localFinished &&
+      this.heightMaxReached >= 100
+    ) {
+      this.localFinished = true;
+      const elapsedMs = Date.now() - this.multiplayer.getLocalStartAt();
+      this.multiplayer.notifyFinished(elapsedMs, this.score, this.heightMaxReached);
+    }
+
+    // ── Match timer HUD update ─────────────────────────────────────────────────
+    if (this.multiplayer.isActive() && this.multiplayer.getMatchState() === "in_match") {
+      this.updateMatchTimerOverlay();
+    }
+
     this.updateContracts(dt);
     this.updatePlayerVisuals(dt, state.player, state.orbitAngle);
     this.syncVisuals(state);
@@ -3602,6 +4066,17 @@ export class Game {
     this.clearScorePops();
     this.cameraDistancePulses.length = 0;
     this.comboFovPulseTimer = 0;
+
+    if (this.multiplayer.isActive()) {
+      // In multiplayer: suppress solo game-over UI. The end screen will appear
+      // via onMatchEnded when the match resolver fires.
+      // NOTE: Do NOT hide matchTimerOverlay here — other players are still racing.
+      // The timer continues to show from updateGameOver() until onMatchEnded fires.
+      this.hideCountdown();
+      return;
+    }
+
+    // ── Solo game-over UI (unchanged) ─────────────────────────────────────────
     this.titleOverlay.classList.remove("hidden");
     this.titleOverlay.classList.add("game-over");
     this.titleOverlay.style.overflowY = "auto";
@@ -3673,13 +4148,7 @@ export class Game {
     this.gameOverView.classList.remove("hidden");
     this.gameOverLeaderboardPanel.classList.remove("hidden");
 
-    if (this.multiplayer.isActive()) {
-      this.renderMultiplayerGameOverBoard();
-      if (this.multiplayerButton) {
-        this.multiplayerButton.style.display = "inline-flex";
-      }
-      this.showMultiplayerPanel();
-    } else if (this.multiplayer.isAvailable()) {
+    if (this.multiplayer.isAvailable()) {
       if (this.multiplayerButton) {
         this.multiplayerButton.style.display = "inline-flex";
       }
@@ -3764,9 +4233,13 @@ export class Game {
     }
 
     if (this.multiplayer.isActive()) {
-      // Keep peers fresh on the post-run lobby screen — no broadcast
+      // Keep peers fresh on the post-run lobby screen — no broadcast.
       this.multiplayer.pollPeers(dt);
       this.refreshMultiplayerPanel();
+      // Match timer keeps ticking even after local player dies — others are still racing.
+      if (this.multiplayer.getMatchState() === "in_match") {
+        this.updateMatchTimerOverlay();
+      }
     }
 
     // Keyboard-only restart. Mouse clicks on the game-over overlay are routed

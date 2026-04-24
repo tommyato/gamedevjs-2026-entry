@@ -33,10 +33,13 @@ export type MatchState = "lobby" | "countdown" | "in_match" | "ended";
 export type MatchResult = {
   userId: string;
   name: string;
+  rank: number;
+  finished: boolean;
   finishMs?: number;
   score: number;
   height: number;
-  dnf: boolean;
+  isLocal: boolean;
+  isDnf: boolean;
 };
 
 export type TypedMessage =

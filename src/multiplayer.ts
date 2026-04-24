@@ -91,6 +91,20 @@ export class MultiplayerManager {
   /** Absolute wall-clock ms at which the match starts. Set in enterCountdown(). */
   private localStartAt = 0;
 
+  // End-of-match state — reset by enterCountdown() and resetForNextMatch()
+  private localDead = false;
+  private localFinishedFlag = false;
+  private localFinishMs = 0;
+  private localScore = 0;
+  private localHeight = 0;
+  private localName = "Player";
+  /** Absolute ms when the first FINISHED (local or peer) arrived. Drives grace timer. */
+  private firstFinisherGraceStart: number | null = null;
+  /** Guards fireMatchEnd() from firing more than once per match. */
+  private matchEndFired = false;
+  /** Peers that disconnected mid-match, in disconnection order. */
+  private readonly dnfPeers: Array<{ userId: string; username: string; score: number; height: number }> = [];
+
   // Host tracking
   private hostSelf = false;
   private hostUserId: string | null = null;
@@ -111,6 +125,16 @@ export class MultiplayerManager {
 
   getMatchState(): MatchState {
     return this.matchState;
+  }
+
+  /** Returns the absolute wall-clock ms at which the current match started. */
+  getLocalStartAt(): number {
+    return this.localStartAt;
+  }
+
+  /** Sets the display name used for the local player in match results. */
+  setLocalName(name: string): void {
+    this.localName = name;
   }
 
   getCurrentMatchId(): number {
@@ -165,6 +189,13 @@ export class MultiplayerManager {
     this.currentMatchId = matchId;
     this.localStartAt = startAtMs;
     this.matchState = "countdown";
+    // Reset end-of-match state for the new match
+    this.localDead = false;
+    this.localFinishedFlag = false;
+    this.localFinishMs = 0;
+    this.firstFinisherGraceStart = null;
+    this.matchEndFired = false;
+    this.dnfPeers.length = 0;
     this.callbacks.onMatchStart?.(startAtMs, matchId);
   }
 
@@ -176,6 +207,7 @@ export class MultiplayerManager {
    */
   notifyDied(score: number, height: number): void {
     if (!this.isActive()) return;
+    this.localDead = true;
     broadcastMessage(true, encodeDied(this.currentMatchId, score, height));
   }
 
@@ -185,6 +217,12 @@ export class MultiplayerManager {
    */
   notifyFinished(finishMs: number, score: number, height: number): void {
     if (!this.isActive()) return;
+    this.localFinishedFlag = true;
+    this.localFinishMs = finishMs;
+    // Local player is the first finisher — start grace timer if not already running.
+    if (this.firstFinisherGraceStart === null) {
+      this.firstFinisherGraceStart = Date.now();
+    }
     broadcastMessage(true, encodeFinished(this.currentMatchId, finishMs, score, height));
   }
 
@@ -209,6 +247,10 @@ export class MultiplayerManager {
     if (!this.isActive()) return;
     this.clock += dt;
 
+    // Keep local snapshot current for end-of-match result building.
+    this.localScore = score;
+    this.localHeight = height;
+
     this.broadcastTimer += dt;
     if (this.broadcastTimer >= BROADCAST_INTERVAL) {
       this.broadcastTimer = 0;
@@ -218,18 +260,23 @@ export class MultiplayerManager {
     this.drainInbound();
     this.tickHostDisconnect(dt);
     this.tickCountdown();
+    this.tickMatchEnd();
   }
 
   /**
    * Drains inbound messages and ticks host-disconnect detection without
    * broadcasting state. Use on title/game-over screens so peer counts stay
    * fresh without emitting a bogus (0,0,0) position.
+   * Also ticks the match-end resolver so that even if the local player has
+   * died (and is in GameOver state), the match can still end via timer or
+   * all-dead paths.
    */
   pollPeers(dt: number): void {
     if (!this.isActive()) return;
     this.clock += dt;
     this.drainInbound();
     this.tickHostDisconnect(dt);
+    this.tickMatchEnd();
   }
 
   // ── Inbound message handling ───────────────────────────────────────────────
@@ -257,6 +304,15 @@ export class MultiplayerManager {
     // Remove stale peers (no STATE received within timeout window)
     for (const [userId, peer] of this.peers) {
       if (this.clock - peer.lastUpdate > PEER_TIMEOUT_SECONDS) {
+        // During an active match, record as DNF if they hadn't finished/died cleanly.
+        if (this.matchState === "in_match" && !peer.matchProgress.dead && !peer.matchProgress.finished) {
+          this.dnfPeers.push({
+            userId,
+            username: peer.username,
+            score: peer.score,
+            height: peer.height,
+          });
+        }
         this.peers.delete(userId);
       }
     }
@@ -339,6 +395,10 @@ export class MultiplayerManager {
     msg: TypedMessage & { type: "finished" }
   ): void {
     if (msg.matchId !== this.currentMatchId) return;
+    // First peer FINISHED starts the 5 s grace timer for latecomers.
+    if (this.firstFinisherGraceStart === null && this.matchState === "in_match") {
+      this.firstFinisherGraceStart = Date.now();
+    }
     const peer = this.peers.get(uid);
     if (peer) {
       if (!peer.matchProgress.finished) {
@@ -396,6 +456,151 @@ export class MultiplayerManager {
       this.matchState = "in_match";
       this.callbacks.onCountdownComplete?.();
     }
+  }
+
+  // ── Match-end resolver ────────────────────────────────────────────────────
+
+  /**
+   * Called every update() tick while in 'in_match'. Checks three end paths:
+   * 1. All known players (local + active peers; DNFs count as done) are dead/finished.
+   * 2. 120 s hard timeout since localStartAt.
+   * 3. First-finisher 5 s grace period has expired.
+   */
+  private tickMatchEnd(): void {
+    if (this.matchState !== "in_match" || this.matchEndFired) return;
+
+    const now = Date.now();
+    const elapsed = now - this.localStartAt;
+
+    // Path 2: 120 s hard cap
+    if (elapsed >= 120_000) {
+      this.fireMatchEnd();
+      return;
+    }
+
+    // Path 3: first-finisher grace expired
+    if (this.firstFinisherGraceStart !== null && (now - this.firstFinisherGraceStart) >= 5_000) {
+      this.fireMatchEnd();
+      return;
+    }
+
+    // Path 1: all known players done (local must be dead or finished first)
+    const localDone = this.localDead || this.localFinishedFlag;
+    if (localDone) {
+      const allActivePeersDone = [...this.peers.values()].every(
+        (p) => p.matchProgress.dead !== undefined || p.matchProgress.finished !== undefined
+      );
+      if (allActivePeersDone) {
+        this.fireMatchEnd();
+      }
+    }
+  }
+
+  /** Transitions to 'ended', builds rankings, fires onMatchEnded exactly once. */
+  private fireMatchEnd(): void {
+    if (this.matchEndFired) return;
+    this.matchEndFired = true;
+    this.matchState = "ended";
+    const results = this.buildResults();
+    this.callbacks.onMatchEnded?.(results);
+  }
+
+  /**
+   * Builds the final sorted MatchResult array.
+   * Sort order: finishers (finishMs ASC) → non-finishers (score DESC, height DESC) → DNFs.
+   */
+  private buildResults(): MatchResult[] {
+    type SortEntry = MatchResult & { _group: 0 | 1 | 2 };
+    const entries: SortEntry[] = [];
+
+    // Local player
+    entries.push({
+      userId: "local",
+      name: this.localName,
+      rank: 0,
+      finished: this.localFinishedFlag,
+      finishMs: this.localFinishedFlag ? this.localFinishMs : undefined,
+      score: this.localScore,
+      height: this.localHeight,
+      isLocal: true,
+      isDnf: false,
+      _group: this.localFinishedFlag ? 0 : 1,
+    });
+
+    // Active peers
+    for (const peer of this.peers.values()) {
+      const prog = peer.matchProgress;
+      const finished = prog.finished !== undefined;
+      const score = prog.finished?.score ?? prog.dead?.score ?? peer.score;
+      const height = prog.finished?.height ?? prog.dead?.height ?? peer.height;
+      entries.push({
+        userId: peer.userId,
+        name: peer.username,
+        rank: 0,
+        finished,
+        finishMs: prog.finished?.ms,
+        score,
+        height,
+        isLocal: false,
+        isDnf: false,
+        _group: finished ? 0 : 1,
+      });
+    }
+
+    // DNF peers (insertion order = disconnect order)
+    for (const dnf of this.dnfPeers) {
+      entries.push({
+        userId: dnf.userId,
+        name: dnf.username,
+        rank: 0,
+        finished: false,
+        score: dnf.score,
+        height: dnf.height,
+        isLocal: false,
+        isDnf: true,
+        _group: 2,
+      });
+    }
+
+    entries.sort((a, b) => {
+      if (a._group !== b._group) return a._group - b._group;
+      if (a._group === 0) return (a.finishMs ?? 0) - (b.finishMs ?? 0);
+      if (a._group === 1) {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.height - a.height;
+      }
+      return 0; // DNFs: preserve insertion (disconnect) order
+    });
+
+    return entries.map((e, i) => ({
+      userId: e.userId,
+      name: e.name,
+      rank: i + 1,
+      finished: e.finished,
+      finishMs: e.finishMs,
+      score: e.score,
+      height: e.height,
+      isLocal: e.isLocal,
+      isDnf: e.isDnf,
+    }));
+  }
+
+  /**
+   * Resets match-progress state for a fresh match while keeping peers connected.
+   * Call before startMatch() when the host starts the next round from the end screen.
+   */
+  resetForNextMatch(): void {
+    for (const peer of this.peers.values()) {
+      peer.matchProgress = {};
+    }
+    this.pendingProgress.clear();
+    this.localDead = false;
+    this.localFinishedFlag = false;
+    this.localFinishMs = 0;
+    this.firstFinisherGraceStart = null;
+    this.matchEndFired = false;
+    this.dnfPeers.length = 0;
+    this.matchState = "lobby";
   }
 
   // ── Lobby lifecycle ────────────────────────────────────────────────────────
