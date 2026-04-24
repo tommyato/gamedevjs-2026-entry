@@ -8,6 +8,7 @@ import {
   getLobbyUserCount,
   getLobbyUsers,
   getMultiplayerEvents,
+  getMyUserId,
   isMultiplayerAvailable,
   joinMultiplayerLobby,
   leaveMultiplayerLobby,
@@ -706,6 +707,31 @@ export class MultiplayerManager {
     if (!this.lobbyId) return 0;
     const count = getLobbyUserCount(this.lobbyId);
     return count > 0 ? count : 1;
+  }
+
+  /**
+   * Returns the Wavedash lobby roster (userId + username) for every member
+   * OTHER than the local user. Source of truth for the lobby player list —
+   * peer identity is known to the SDK the moment joinLobby resolves, so we
+   * don't need to wait for a P2P STATE broadcast round-trip to display peers.
+   *
+   * Prefers the custom display name from our peers map (set via NAME_UPDATE)
+   * when available, falls back to the SDK-provided username.
+   */
+  getLobbyRoster(): Array<{ userId: string; username: string }> {
+    if (!this.lobbyId) return [];
+    const roster = getLobbyUsers(this.lobbyId);
+    const myId = getMyUserId();
+    const out: Array<{ userId: string; username: string }> = [];
+    for (const user of roster) {
+      if (myId && user.userId === myId) continue;
+      const peer = this.peers.get(user.userId);
+      out.push({
+        userId: user.userId,
+        username: peer?.username ?? user.username,
+      });
+    }
+    return out;
   }
 
   isActive(): boolean {

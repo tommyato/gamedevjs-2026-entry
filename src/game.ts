@@ -1906,21 +1906,23 @@ export class Game {
 
     const panel = document.createElement("div");
     Object.assign(panel.style, {
-      padding: "20px 20px 16px",
-      borderRadius: "18px",
+      padding: "14px 18px 12px",
+      borderRadius: "16px",
       border: "1px solid rgba(127, 214, 255, 0.32)",
       background: "linear-gradient(180deg, rgba(14, 28, 40, 0.96), rgba(6, 14, 22, 0.88))",
       boxShadow: "0 16px 40px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(173, 232, 255, 0.12)",
       backdropFilter: "blur(14px)",
       fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
       color: "#d7f8ff",
-      width: "min(420px, calc(100vw - 40px))",
+      width: "min(400px, calc(100vw - 40px))",
       boxSizing: "border-box",
       textAlign: "left",
       pointerEvents: "auto",
       position: "relative",
-      maxHeight: "80vh",
-      overflowY: "auto",
+      // NO maxHeight / overflowY — we compose the content to always fit the
+      // Wavedash iframe (~720 px tall). Using 80vh here was a trap: vh uses the
+      // browser viewport, not the iframe, so the panel could grow past the
+      // iframe bottom and clip the action buttons.
     } as CSSStyleDeclaration);
     panel.addEventListener("click", (event) => event.stopPropagation());
     panel.addEventListener("touchend", (event) => {
@@ -1934,9 +1936,9 @@ export class Game {
     closeBtn.textContent = "← BACK";
     Object.assign(closeBtn.style, {
       position: "absolute",
-      top: "14px",
-      right: "16px",
-      padding: "4px 12px",
+      top: "10px",
+      right: "14px",
+      padding: "3px 10px",
       borderRadius: "999px",
       border: "1px solid rgba(127, 214, 255, 0.3)",
       background: "transparent",
@@ -1962,11 +1964,11 @@ export class Game {
     // ── 1. Title ──────────────────────────────────────────────────────────────
     const titleEl = document.createElement("div");
     Object.assign(titleEl.style, {
-      fontSize: "14px",
+      fontSize: "13px",
       fontWeight: "700",
       letterSpacing: "2px",
       color: "#ffc878",
-      marginBottom: "14px",
+      marginBottom: "10px",
       textAlign: "center",
     } as CSSStyleDeclaration);
     titleEl.textContent = "VERSUS — Race to 100 m";
@@ -1975,18 +1977,18 @@ export class Game {
     // ── 2. Rules card ─────────────────────────────────────────────────────────
     const rulesCard = document.createElement("div");
     Object.assign(rulesCard.style, {
-      padding: "10px 12px",
-      borderRadius: "10px",
+      padding: "7px 10px",
+      borderRadius: "8px",
       border: "1px solid rgba(127, 214, 255, 0.15)",
       background: "rgba(12, 24, 36, 0.55)",
-      fontSize: "11px",
-      lineHeight: "1.5",
+      fontSize: "10px",
+      lineHeight: "1.4",
       color: "#a8d8f0",
-      marginBottom: "14px",
+      marginBottom: "10px",
       letterSpacing: "0.5px",
     } as CSSStyleDeclaration);
     rulesCard.textContent =
-      "First climber to 100 m wins. Ties go to highest score. If nobody reaches 100 m in 120 s, highest score wins. Crumbling gears mean no camping — keep moving.";
+      "First climber to 100 m wins. Ties go to highest score. If nobody reaches 100 m in 120 s, highest score wins. Crumbling gears — keep moving.";
     panel.appendChild(rulesCard);
 
     // ── 3. Players list ───────────────────────────────────────────────────────
@@ -2002,8 +2004,8 @@ export class Game {
 
     const playerList = document.createElement("div");
     Object.assign(playerList.style, {
-      minHeight: "120px",
-      marginBottom: "14px",
+      minHeight: "60px",
+      marginBottom: "10px",
       display: "flex",
       flexDirection: "column",
       gap: "2px",
@@ -2029,7 +2031,7 @@ export class Game {
     Object.assign(nameInput.style, {
       width: "100%",
       boxSizing: "border-box",
-      padding: "7px 10px",
+      padding: "5px 10px",
       borderRadius: "8px",
       border: "1px solid rgba(127, 214, 255, 0.3)",
       background: "rgba(10, 22, 34, 0.65)",
@@ -2037,7 +2039,7 @@ export class Game {
       fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
       fontSize: "12px",
       outline: "none",
-      marginBottom: "14px",
+      marginBottom: "10px",
     } as CSSStyleDeclaration);
     nameInput.addEventListener("keydown", (e) => e.stopPropagation());
     nameInput.addEventListener("keyup", (e) => e.stopPropagation());
@@ -2081,7 +2083,7 @@ export class Game {
     Object.assign(inviteRow.style, {
       display: "flex",
       gap: "6px",
-      marginBottom: "14px",
+      marginBottom: "10px",
       alignItems: "center",
     } as CSSStyleDeclaration);
 
@@ -2092,7 +2094,7 @@ export class Game {
     Object.assign(inviteLinkField.style, {
       flex: "1",
       minWidth: "0",
-      padding: "7px 10px",
+      padding: "5px 10px",
       borderRadius: "8px",
       border: "1px solid rgba(127, 214, 255, 0.2)",
       background: "rgba(10, 22, 34, 0.45)",
@@ -2145,7 +2147,7 @@ export class Game {
       gap: "8px",
       justifyContent: "center",
       flexWrap: "wrap",
-      marginBottom: "10px",
+      marginBottom: "6px",
     } as CSSStyleDeclaration);
 
     const startBtn = makePanelButton("START MATCH", "rgba(255, 196, 120, 0.5)");
@@ -2196,8 +2198,7 @@ export class Game {
       zIndex: "25",
       background: "rgba(0, 0, 0, 0.65)",
       backdropFilter: "blur(8px)",
-      overflowY: "auto",
-      padding: "20px",
+      padding: "12px",
       boxSizing: "border-box",
     } as CSSStyleDeclaration);
     panelWrapper.addEventListener("click", (event) => event.stopPropagation());
@@ -2962,7 +2963,14 @@ export class Game {
     } catch { /* ignore */ }
   }
 
-  /** Re-renders the player list rows (self first, then peers). */
+  /** Re-renders the player list rows (self first, then peers).
+   *
+   *  Peer rows come from the Wavedash lobby roster (getLobbyRoster), not from
+   *  the P2P peers map — because peer entries in `peers` are only populated by
+   *  incoming STATE broadcasts, which never fire while both sides sit on the
+   *  title-screen lobby (broadcasting is gated to gameplay). Roster is the
+   *  SDK's source of truth for "who is in this lobby right now".
+   */
   private renderPlayerList(): void {
     const list = this.multiplayerPlayerList;
     if (!list) return;
@@ -2971,15 +2979,15 @@ export class Game {
 
     const selfIsHost = this.multiplayer.isHost();
     const hostUserId = this.multiplayer.getHostUserId();
-    const peers = this.multiplayer.getPeers();
+    const roster = this.multiplayer.getLobbyRoster();
 
     // Self row (always first)
     list.appendChild(this.makePlayerRow(this.getLobbyDisplayName(), true, selfIsHost));
 
     // Peer rows (up to 3 so total stays ≤ 4)
-    for (const peer of peers.slice(0, 3)) {
-      const peerIsHost = !selfIsHost && peer.userId === hostUserId;
-      list.appendChild(this.makePlayerRow(peer.username, false, peerIsHost));
+    for (const member of roster.slice(0, 3)) {
+      const peerIsHost = !selfIsHost && member.userId === hostUserId;
+      list.appendChild(this.makePlayerRow(member.username, false, peerIsHost));
     }
   }
 
@@ -3032,14 +3040,16 @@ export class Game {
     return row;
   }
 
-  /** Enables/disables (and shows/hides) the START MATCH button based on host status and peer count. */
+  /** Enables/disables (and shows/hides) the START MATCH button based on host status and peer count.
+   *  Uses the SDK lobby roster (not the P2P peers map) — peers map is empty in
+   *  lobby state because STATE broadcasts don't fire until gameplay starts. */
   private updateStartButtonState(): void {
     const btn = this.multiplayerStartBtn;
     if (!btn) return;
     const isHost = this.multiplayer.isHost();
     btn.style.display = isHost ? "" : "none";
     if (!isHost) return;
-    const canStart = this.multiplayer.getPeerCount() >= 1;
+    const canStart = this.multiplayer.getLobbyRoster().length >= 1;
     (btn as HTMLButtonElement).disabled = !canStart;
     btn.title = canStart ? "" : "Waiting for at least 1 other player";
     btn.style.opacity = canStart ? "1" : "0.45";
@@ -3060,7 +3070,7 @@ export class Game {
     // "lobby" or "ended"
     if (this.multiplayer.isHost()) {
       this.setMultiplayerStatus(
-        this.multiplayer.getPeerCount() >= 1
+        this.multiplayer.getLobbyRoster().length >= 1
           ? "Ready — press START MATCH when everyone is here"
           : "Share the invite link to bring in players"
       );

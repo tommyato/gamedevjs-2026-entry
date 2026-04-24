@@ -92,6 +92,7 @@ interface WavedashSdk {
   storeStats(): void;
   createLobby?(type: number, maxPlayers: number): Promise<{ success: boolean; data: string }>;
   joinLobby?(lobbyId: string): Promise<void>;
+  getUserId?(): string | null;
   leaveLobby?(lobbyId: string): Promise<void>;
   listAvailableLobbies?(): Promise<Array<{ id: string; playerCount: number }>>;
   getLobbyUsers?(lobbyId: string): Array<{ userId: string; username: string }>;
@@ -720,6 +721,21 @@ export function checkLaunchLobby(): string | null {
     // ignore
   }
   return null;
+}
+
+/**
+ * Returns the current logged-in Wavedash user's userId, or null if unavailable.
+ * Used to identify "self" in the lobby roster so we don't render ourselves twice.
+ */
+export function getMyUserId(): string | null {
+  const sdk = getWavedashSdkSync();
+  if (!sdk || typeof sdk.getUserId !== "function") return null;
+  try {
+    const id = sdk.getUserId();
+    return typeof id === "string" && id.length > 0 ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 export function getLobbyUsers(lobbyId: string): LobbyUser[] {
