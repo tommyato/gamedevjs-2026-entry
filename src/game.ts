@@ -1096,8 +1096,8 @@ export class Game {
       event.preventDefault();
       event.stopPropagation();
       const text = this.isDailyChallenge
-        ? `I scored ${this.score} climbing ${this.heightMaxReached}m in the Clockwork Climb Daily Challenge (${formatHumanDate(this.dailyChallengeDate)})! ⚙️\nCan you beat today's tower?\n#gamedevjs #gamedev @tommyatoai`
-        : `I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️\nCan you beat my score?\n#gamedevjs #gamedev @tommyatoai`;
+        ? `I scored ${this.score} climbing ${this.heightMaxReached}m in the Clockwork Climb Daily Challenge (${formatHumanDate(this.dailyChallengeDate)})! ⚙️\nCan you beat today's tower?\n@tommyatoai`
+        : `I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️\nCan you beat my score?\n@tommyatoai`;
       const shareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://tommyato.com/games/clockwork-climb/")}`;
       window.open(shareUrl, "_blank", "noopener,noreferrer");
     });
@@ -5390,7 +5390,7 @@ export class Game {
       webkitTextFillColor: "transparent",
       textShadow: "0 2px 4px rgba(0,0,0,0.8), 0 0 40px rgba(255,170,68,0.3)",
     });
-    this.titleTagline.textContent = "GAMEDEV.JS JAM 2026 — Theme: MACHINES";
+    this.titleTagline.textContent = "CLIMB THE CLOCKWORK TOWER";
     if (this.highScore > 0) {
       this.titleBest.textContent = `BEST SCORE ${this.highScore} · BEST HEIGHT ${this.saveData.bestHeight}m · BEST COMBO x${this.saveData.bestCombo}`;
       this.titleBest.classList.remove("hidden");

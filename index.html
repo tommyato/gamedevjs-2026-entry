@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Clockwork Climb — a timing-based 3D platformer for the Gamedev.js Jam 2026. Climb a massive clockwork tower as a tiny bronze robot. Theme: MACHINES.">
+  <meta name="description" content="Clockwork Climb — a timing-based 3D platformer. Climb a massive clockwork tower as a tiny bronze robot.">
   <meta name="author" content="tommyato">
-  <meta property="og:title" content="Clockwork Climb — Gamedev.js Jam 2026">
-  <meta property="og:description" content="Timing-based 3D platformer. Climb a massive clockwork tower as a tiny bronze robot. Theme: MACHINES.">
+  <meta property="og:title" content="Clockwork Climb">
+  <meta property="og:description" content="Timing-based 3D platformer. Climb a massive clockwork tower as a tiny bronze robot.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://tommyato.github.io/gamedevjs-2026-entry/">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="Clockwork Climb — Gamedev.js Jam 2026">
+  <meta name="twitter:title" content="Clockwork Climb">
   <meta name="twitter:description" content="Timing-based 3D platformer. Climb a massive clockwork tower as a tiny bronze robot.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
-  <title>CLOCKWORK CLIMB — GAMEDEV.JS JAM 2026</title>
+  <title>CLOCKWORK CLIMB</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: radial-gradient(circle at top, #1d140f 0%, #050508 65%); }
@@ -456,7 +456,7 @@
       flex-direction: column;
       gap: 0;
       /* Cap height so footer stays pinned; inner content scrolls if needed */
-      max-height: 520px;
+      max-height: 280px;
       overflow-y: auto;
     }
     .game-over-footer {
@@ -1079,8 +1079,8 @@
       border-color: rgba(127, 214, 255, 0.65);
       background: rgba(14, 28, 42, 0.88);
     }
-    @media (max-width: 1024px) {
-      /* Stack game-over on mobile/tablet */
+    @media (max-width: 720px) {
+      /* Stack game-over on mobile */
       .game-over-view {
         grid-template-columns: 1fr;
         max-width: min(520px, calc(100vw - 40px));
@@ -1286,7 +1286,7 @@
     <div id="title-overlay">
       <div class="title-copy-panel">
         <h1>CLOCKWORK CLIMB</h1>
-        <div class="tagline">GAMEDEV.JS JAM 2026 · MACHINES</div>
+        <div class="tagline">CLIMB THE CLOCKWORK TOWER</div>
         <div id="title-best" class="hidden"></div>
       </div>
       <div class="contracts-preview-panel" id="title-contracts-preview">

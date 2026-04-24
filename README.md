@@ -1,8 +1,6 @@
 # Clockwork Climb
 
-A timing-based 3D platformer built for [Gamedev.js Jam 2026](https://gamedevjs.com/jam/2026/) (April 13-26).
-
-**Theme: MACHINES**
+A timing-based 3D platformer. Climb a massive clockwork tower as a tiny bronze robot.
 
 ![Title Screen](screenshots/title.png)
 
@@ -102,9 +100,8 @@ npm run dev     # dev server at localhost:5174
 npm run build   # production build to dist/
 ```
 
-## Jam Challenges
+## Open Source
 
-- **Main Jam** — Peer-voted across Innovation, Theme (Machines), Gameplay, Graphics, Audio
 - **Open Source** — Full source code in this repository
 - **Wavedash Deployment** — Published at [wavedash.com/games/clockwork-climb](https://wavedash.com/games/clockwork-climb) with P2P multiplayer, 3 leaderboards, 20 achievements, cloud saves, and stats tracking
 

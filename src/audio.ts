@@ -1,6 +1,5 @@
 /**
  * Procedural audio skeleton — Web Audio API, zero external files.
- * Extend with game-specific sounds once theme is known.
  */
 
 let ctx: AudioContext | null = null;

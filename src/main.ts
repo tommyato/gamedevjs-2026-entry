@@ -1,6 +1,5 @@
 /**
- * Gamedev.js Jam 2026 — Entry Point
- * Theme: TBA April 13
+ * Clockwork Climb — Entry Point
  *
  * Starter template with:
  * - Three.js scene + bloom post-processing
