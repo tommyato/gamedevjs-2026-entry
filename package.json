@@ -13,6 +13,7 @@
     "verify:mp-seed": "node scripts/verify-mp-seed-sync.mjs",
     "verify:name-sync": "node scripts/verify-name-sync.mjs",
     "verify:last-survivor": "node scripts/verify-last-survivor.mjs",
+    "verify:orbit-cancel": "npm run build:sim && node scripts/verify-orbit-cancel.mjs",
     "verify-ui": "node scripts/verify-ui.mjs",
     "preview": "vite preview"
   },

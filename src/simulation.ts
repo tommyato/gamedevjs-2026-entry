@@ -110,6 +110,9 @@ export class ClockworkClimbSimulation {
    * glide completes toward its target (we only gate updates to the target).
    */
   private inputIdleSeconds = 0;
+  /** True on any frame where inputIdleSeconds ≥ ORBIT_IDLE_THRESHOLD; used to
+   *  detect the idle→active transition and cancel an in-progress glide. */
+  private wasInputIdle = false;
   private cameraY = 8.1;
   private deathFreezeTimer = 0;
   private nextChallengeZoneHeight = 100;
@@ -151,6 +154,7 @@ export class ClockworkClimbSimulation {
     this.unlockedThisRun.clear();
     this.orbitAngleTarget = Math.PI / 2;
     this.inputIdleSeconds = 0;
+    this.wasInputIdle = false;
     this.cameraY = 8.1;
     this.deathFreezeTimer = 0;
     this.nextChallengeZoneHeight = 100;
@@ -1404,6 +1408,15 @@ export class ClockworkClimbSimulation {
     const verticalLead = clamp(player.vy * 0.12, -1.2, 1.6);
     const followLerp = 1 - Math.exp(-dt * (player.onGround ? 5.5 : 4));
     const orbitLerp = 1 - Math.exp(-dt * 7);
+
+    // Cancel any in-progress glide the moment directional input resumes.
+    // inputIdleSeconds is already 0 on the resume frame (reset in step()), so
+    // inputIdle flips false and the wasInputIdle transition triggers a snap.
+    const inputIdle = this.inputIdleSeconds >= ORBIT_IDLE_THRESHOLD;
+    if (this.wasInputIdle && !inputIdle) {
+      this.orbitAngleTarget = this.state.orbitAngle;
+    }
+    this.wasInputIdle = inputIdle;
 
     // Gate target re-evaluation on input idle. Player steering input resets
     // inputIdleSeconds; the camera only re-targets after ORBIT_IDLE_THRESHOLD
