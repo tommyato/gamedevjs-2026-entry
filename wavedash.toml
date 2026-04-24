@@ -1,5 +1,5 @@
 game_id = "j97cp44d8dbag57y8c168mhxyx850tg6"
-upload_dir = "./dist"
+upload_dir = "./dist-wavedash"
 
 [custom]
-version = "1.0.0"
+version = "1.1.0"
