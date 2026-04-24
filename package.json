@@ -11,6 +11,7 @@
     "verify:layout": "npm run build:sim && node scripts/verify-layout.mjs",
     "verify:scripted-ai": "npm run build:sim && npm run build:scripted && node scripts/verify-scripted-ai.mjs",
     "verify:mp-seed": "node scripts/verify-mp-seed-sync.mjs",
+    "verify:name-sync": "node scripts/verify-name-sync.mjs",
     "verify-ui": "node scripts/verify-ui.mjs",
     "preview": "vite preview"
   },

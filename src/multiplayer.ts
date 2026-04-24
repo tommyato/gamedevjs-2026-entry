@@ -92,6 +92,17 @@ export class MultiplayerManager {
   private peers: Map<string, PeerGhost> = new Map();
   /** Pending match-progress updates for peers not yet seen via STATE. */
   private pendingProgress: Map<string, PeerMatchProgress> = new Map();
+  /**
+   * Display names received via NAME_UPDATE before the sender's first STATE.
+   *
+   * STATE broadcasts are gated to gameplay, so during the lobby phase the
+   * `peers` map stays empty — a peer-connect NAME_UPDATE would otherwise be
+   * dropped because there is no peer row to write into. Cache it here so the
+   * lobby roster, in-world labels, and the subsequent `handleState` peer
+   * materialization can all read the custom name instead of falling back to
+   * the SDK-provided coolname.
+   */
+  private pendingNames: Map<string, string> = new Map();
   private broadcastTimer = 0;
   private clock = 0;
   private connectedListenerBound = false;
@@ -359,7 +370,10 @@ export class MultiplayerManager {
       const dnfIdx = this.dnfPeers.findIndex((d) => d.userId === uid);
       if (dnfIdx !== -1) this.dnfPeers.splice(dnfIdx, 1);
 
-      const username = this.resolveUsername(uid);
+      // Prefer a cached NAME_UPDATE over the SDK's coolname fallback. The
+      // custom name may have arrived on peer-connect before this peer's first
+      // STATE tick materialised them here.
+      const username = this.pendingNames.get(uid) ?? this.resolveUsername(uid);
       const pending = this.pendingProgress.get(uid);
       this.peers.set(uid, {
         userId: uid,
@@ -442,11 +456,17 @@ export class MultiplayerManager {
   ): void {
     // edge: player edits name — validate on receive path the same way the
     // local input handler does. Strip control chars, trim, clamp, reject empty.
-    const peer = this.peers.get(uid);
-    if (!peer) return;
     const clean = msg.name.replace(/[\x00-\x1F\x7F]/g, "").trim().slice(0, 20);
     // edge: player tries to change name to "" — silently reject empty result.
-    if (clean.length > 0) peer.username = clean;
+    if (clean.length === 0) return;
+    // Always cache the name. During the lobby phase the `peers` map is empty
+    // (STATE is only broadcast in gameplay), so without this cache a NAME_UPDATE
+    // received on peer-connect would be silently dropped. getLobbyRoster() and
+    // handleState() both consult pendingNames so the custom name survives the
+    // lobby → match transition.
+    this.pendingNames.set(uid, clean);
+    const peer = this.peers.get(uid);
+    if (peer) peer.username = clean;
   }
 
   // ── Host disconnect detection ──────────────────────────────────────────────
@@ -647,6 +667,7 @@ export class MultiplayerManager {
       this.hostUserId = null; // SDK doesn't expose our own userId
       this.peers.clear();
       this.pendingProgress.clear();
+      this.pendingNames.clear();
       this.broadcastTimer = 0;
       this.matchState = "lobby";
     }
@@ -663,6 +684,7 @@ export class MultiplayerManager {
       this.hostUserId = getLobbyHostId(lobbyId);
       this.peers.clear();
       this.pendingProgress.clear();
+      this.pendingNames.clear();
       this.broadcastTimer = 0;
       this.matchState = "lobby";
     }
@@ -675,6 +697,7 @@ export class MultiplayerManager {
     this.lobbyId = null;
     this.peers.clear();
     this.pendingProgress.clear();
+    this.pendingNames.clear();
     this.broadcastTimer = 0;
     this.matchState = "lobby";
     this.hostSelf = false;
@@ -735,7 +758,10 @@ export class MultiplayerManager {
       const peer = this.peers.get(user.userId);
       out.push({
         userId: user.userId,
-        username: peer?.username ?? user.username,
+        // peer.username is authoritative once the peer has emitted STATE. Before
+        // that — i.e. during the lobby phase — fall back to the cached
+        // NAME_UPDATE (set on P2P connect) and only then to the SDK coolname.
+        username: peer?.username ?? this.pendingNames.get(user.userId) ?? user.username,
       });
     }
     return out;

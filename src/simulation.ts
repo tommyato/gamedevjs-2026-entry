@@ -55,7 +55,7 @@ const DEFAULT_FIXED_DT = SIM_FIXED_DT;
  * auto-orbit target is allowed to advance. Gates rotation while the
  * player is actively steering so the view doesn't yaw out from under them.
  */
-const ORBIT_IDLE_THRESHOLD = 0.75;
+const ORBIT_IDLE_THRESHOLD = 0.4;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HEIGHT = 0.6;
 const PLAYER_MOVE_SPEED = 5;
@@ -104,15 +104,6 @@ export class ClockworkClimbSimulation {
   private readonly unlockedThisRun = new Set<string>();
   private orbitAngleTarget = Math.PI / 2;
   /**
-   * When true, the orbit should travel the LONG way around (> 180°) to reach
-   * orbitAngleTarget because the short path passes through more gears. The
-   * remaining signed angle for this leg is tracked in orbitRemainingAngle so
-   * the easing can drive in the chosen direction without the per-frame
-   * normalization to [-π, π] snapping back to the short arc.
-   */
-  private orbitPathLong = false;
-  private orbitRemainingAngle = 0;
-  /**
    * Seconds since the player last issued movement input. Only advance the
    * auto-orbit target while idle ≥ ORBIT_IDLE_THRESHOLD, so the camera stops
    * rotating out from under an actively-steering player. An already-in-progress
@@ -159,8 +150,6 @@ export class ClockworkClimbSimulation {
     this.recentComboGearIds.clear();
     this.unlockedThisRun.clear();
     this.orbitAngleTarget = Math.PI / 2;
-    this.orbitPathLong = false;
-    this.orbitRemainingAngle = 0;
     this.inputIdleSeconds = 0;
     this.cameraY = 8.1;
     this.deathFreezeTimer = 0;
@@ -1475,103 +1464,23 @@ export class ClockworkClimbSimulation {
         if (!found) bestNudge = maxNudge;
       }
 
-      const newTarget = baseAngle + bestNudge;
-
-      // Choose the orbit rotation direction (CW vs CCW) that passes through
-      // fewer gears. The short angular arc is the default (current behaviour);
-      // only take the longer arc when it has strictly fewer gears in its sweep.
-      // Both paths are computed from the same sim state — deterministic on all
-      // clients. If both counts are equal, prefer the short arc (tie-break).
-      let shortDiff = newTarget - this.state.orbitAngle;
-      while (shortDiff > Math.PI) shortDiff -= Math.PI * 2;
-      while (shortDiff < -Math.PI) shortDiff += Math.PI * 2;
-
-      if (Math.abs(shortDiff) > 0.1) {
-        const longDiff = shortDiff > 0 ? shortDiff - Math.PI * 2 : shortDiff + Math.PI * 2;
-        const shortCount = this.countGearsInOrbitSweep(this.state.orbitAngle, shortDiff, verticalWindow);
-        const longCount = this.countGearsInOrbitSweep(this.state.orbitAngle, longDiff, verticalWindow);
-        if (longCount < shortCount) {
-          // Long arc has fewer gears — track the remaining signed angle so the
-          // per-frame easing drives in the chosen direction rather than being
-          // re-normalized to the short arc each tick.
-          this.orbitPathLong = true;
-          this.orbitRemainingAngle = longDiff;
-        } else {
-          this.orbitPathLong = false;
-        }
-      } else {
-        this.orbitPathLong = false;
-      }
-
-      this.orbitAngleTarget = newTarget;
+      this.orbitAngleTarget = baseAngle + bestNudge;
     }
 
-    // Easing toward the target in the chosen direction.
-    // When orbitPathLong is set we drive via the stored remaining angle instead
-    // of re-normalising to [-π, π] each frame (which would snap back to the
-    // short arc as soon as the camera crosses the 180° mid-point).
-    let angleDiff: number;
-    if (this.orbitPathLong) {
-      angleDiff = this.orbitRemainingAngle;
-    } else {
-      angleDiff = this.orbitAngleTarget - this.state.orbitAngle;
-      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-    }
+    // Shortest-arc easing toward the target. Normalising the signed delta to
+    // [-π, π] every frame guarantees the camera always travels the shorter
+    // way around; no stored direction / long-path bookkeeping needed.
+    let angleDiff = this.orbitAngleTarget - this.state.orbitAngle;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
     // Cap angular velocity to prevent wild spins on large angle jumps
     const maxAngularStep = 2.5 * dt; // ~143°/s — smooth but responsive
     const angularStep = angleDiff * orbitLerp;
     const clampedStep = clamp(angularStep, -maxAngularStep, maxAngularStep);
     this.state.orbitAngle += clampedStep;
-    if (this.orbitPathLong) {
-      this.orbitRemainingAngle -= clampedStep;
-      if (Math.abs(this.orbitRemainingAngle) < 0.001) {
-        // Arrived — hand back to standard easing for the residual micro-drift.
-        this.orbitPathLong = false;
-      }
-    }
 
     const targetCamY = player.y + 6.1 + verticalLead;
     this.cameraY = lerp(this.cameraY, targetCamY, followLerp);
-  }
-
-  /**
-   * Counts how many gears fall within an angular sweep in the XZ plane.
-   *
-   * Uses world-space azimuth (atan2(gear.z, gear.x)) — the same coordinate
-   * system as state.orbitAngle — so the result is fully deterministic from
-   * simulation state alone and identical on every peer.
-   *
-   * @param startAngle  Current camera azimuth (radians, world space).
-   * @param sweepAngle  Signed sweep: positive = CCW, negative = CW.
-   * @param verticalWindow  Gears outside ±verticalWindow of player.y are ignored.
-   */
-  private countGearsInOrbitSweep(
-    startAngle: number,
-    sweepAngle: number,
-    verticalWindow: number,
-  ): number {
-    const player = this.state.player;
-    const TWO_PI = Math.PI * 2;
-    let count = 0;
-    for (const gear of this.state.gears) {
-      if (gear.id === this.state.activeGearId) continue;
-      if (Math.abs(gear.y - player.y) > verticalWindow) continue;
-      // World-space azimuth of the gear, normalised to [0, 2π) relative to startAngle.
-      let rel = Math.atan2(gear.z, gear.x) - startAngle;
-      while (rel < 0) rel += TWO_PI;
-      while (rel >= TWO_PI) rel -= TWO_PI;
-      if (sweepAngle >= 0) {
-        // CCW sweep: gear is inside [startAngle, startAngle + sweepAngle]
-        if (rel <= sweepAngle) count++;
-      } else {
-        // CW sweep (sweepAngle < 0): gear's CW distance from startAngle is
-        // (2π − rel); it's inside the sweep when that distance ≤ |sweepAngle|,
-        // i.e. rel ≥ 2π + sweepAngle.
-        if (rel >= TWO_PI + sweepAngle) count++;
-      }
-    }
-    return count;
   }
 
   private updateScores() {

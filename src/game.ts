@@ -82,6 +82,14 @@ import type { GearVariant, SimAction, SimBolt, SimEvent, SimGear, SimPlayer, Sim
 
 const GHOST_COLORS = [0x00ddff, 0xff00dd, 0x00ff88, 0xff8800];
 
+/**
+ * Vertical-velocity magnitude (m/s) below which a grounded player counts as
+ * "stationary" for the purpose of latching the camera Y. A small value — the
+ * gear rotation alone can push the player a few cm/s vertically while they
+ * stand still; anything real (jumping, falling) dwarfs this.
+ */
+const CAMERA_Y_FREEZE_VY_THRESHOLD = 0.5;
+
 type GhostVisual = {
   group: THREE.Group;
   body: THREE.Mesh;
@@ -657,6 +665,13 @@ export class Game {
   private readonly magnetPulseNextTimes = new Map<number, number>();
   private backgroundGenerationHeight = 0;
   private cameraKick = 0;
+  /**
+   * Cached camera Y while the player is grounded and stationary. Gears spin
+   * every frame, so even "standing still" the sim's player.y micro-oscillates;
+   * latching the camera Y avoids a visible vertical bob. Unset until the first
+   * grounded+stationary frame, cleared on any game-reset path.
+   */
+  private lastGroundedCamY: number | null = null;
   private readonly cameraDistancePulses: CameraDistancePulse[] = [];
   private readonly cameraShakeOffset = new THREE.Vector3();
   private cameraShakeTimer = 0;
@@ -1812,6 +1827,9 @@ export class Game {
     this.dailyPreviousBest = null;
     this.sim.setSeed(this.regularSeed);
     this.state = GameState.Title;
+    // Clear camera-Y latch so the next run doesn't freeze against a stale
+    // grounded Y from a previous run (different seed → different layout).
+    this.lastGroundedCamY = null;
     // Dismissing the game-over overlay — flush any queued achievement
     // unlocks as toasts so they can't be silently lost.
     this.flushAchievementUnlockQueue();
@@ -3830,6 +3848,7 @@ export class Game {
     this.zoneAnnouncementTimer = 0;
     this.lastAnnouncedZone = -1;
     this.cameraKick = 0;
+    this.lastGroundedCamY = null;
     this.cameraShakeTimer = 0;
     this.cameraShakeOffset.set(0, 0, 0);
     this.cameraDistancePulses.length = 0;
@@ -4969,14 +4988,38 @@ export class Game {
     const playerX = state.player.x;
     const playerY = state.player.y;
     const playerZ = state.player.z;
-    const verticalLead = THREE.MathUtils.clamp(state.player.vy * 0.12, -1.2, 1.6);
     const followLerp = 1 - Math.exp(-dt * (state.player.onGround ? 5.5 : 4));
     const cameraPullback = this.updateCameraDistancePulses(dt);
 
     const radius = 12 + Math.max(-state.player.vy * 0.08, 0) + cameraPullback;
     const targetCamX = Math.cos(state.orbitAngle) * radius;
     const targetCamZ = Math.sin(state.orbitAngle) * radius;
-    const targetCamY = playerY + 6.1 + verticalLead + this.cameraKick;
+
+    // Camera Y — freeze while on-ground and stationary so the rotating gear
+    // beneath the player doesn't induce a constant vertical bob. Otherwise
+    // track the player with a velocity-proportional lookahead (verticalLead).
+    // cameraKick is added live in both branches so landing-impact kicks remain
+    // expressive and decay naturally; only the stable playerY+6.1 component is
+    // latched, never the kick (latching a transient would bake a permanent
+    // offset into the frozen camera).
+    const stationaryGrounded =
+      state.player.onGround && Math.abs(state.player.vy) < CAMERA_Y_FREEZE_VY_THRESHOLD;
+    // verticalLead doubles as the lookAt-target lookahead further down; zero it
+    // while latched so the look target also stays steady.
+    const verticalLead = stationaryGrounded
+      ? 0
+      : THREE.MathUtils.clamp(state.player.vy * 0.12, -1.2, 1.6);
+    let targetCamY: number;
+    if (stationaryGrounded) {
+      if (this.lastGroundedCamY === null) {
+        this.lastGroundedCamY = playerY + 6.1;
+      }
+      targetCamY = this.lastGroundedCamY + this.cameraKick;
+    } else {
+      targetCamY = playerY + 6.1 + verticalLead + this.cameraKick;
+      // Unlatch — next time we re-enter grounded+stationary we'll re-latch.
+      this.lastGroundedCamY = null;
+    }
 
     this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, targetCamX, followLerp);
     this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, targetCamY, followLerp);
