@@ -2009,8 +2009,9 @@ export class Game {
       this.multiplayerNameDebounceHandle = window.setTimeout(() => {
         this.multiplayerNameDebounceHandle = null;
         const trimmed = nameInput.value.trim();
+        // edge: player tries to change name to "" — reject, revert to persisted
+        // coolname default. Min 1 char, max 20, control chars already stripped.
         if (trimmed.length === 0) {
-          // Empty → revert display to current persisted name (no network call)
           nameInput.value = this.getLobbyDisplayName();
         } else {
           this.setLobbyDisplayName(trimmed);
@@ -2165,8 +2166,8 @@ export class Game {
   private setupMultiplayerCallbacks(): void {
     this.multiplayer.setCallbacks({
       onMatchStart: (startAtMs, _matchId) => {
-        // Late-joiner: MATCH_START arrived after the start timestamp has already
-        // passed. Don't call startGame() — stay in lobby and show a notice.
+        // edge: client joins after MATCH_START — late-joiner stays in lobby and
+        // sees a notice. They'll enter normally when onMatchStart fires next round.
         if (Date.now() > startAtMs) {
           this.setMultiplayerStatus("MATCH IN PROGRESS — WAIT FOR NEXT ROUND");
           return;
@@ -2199,6 +2200,11 @@ export class Game {
         // Hide timer immediately — do NOT show frozen "00:00" on results screen.
         this.hideMatchTimer();
         this.hideCountdown();
+        // Reset lobby status text for late-joiners (who are still on lobby panel)
+        // and for the next-round transition for all clients.
+        // edge: late-join spectator state — clears "MATCH IN PROGRESS" notice so
+        // the lobby shows the correct "Waiting for host…" / ready status.
+        this.updateLobbyStatusText();
         // If still playing (player finished but didn't die), stop the game cleanly.
         if (this.state === GameState.Playing) {
           this.state = GameState.GameOver;
@@ -2213,7 +2219,9 @@ export class Game {
           this.cameraDistancePulses.length = 0;
           this.comboFovPulseTimer = 0;
         }
-        // Patch in local player's current display name.
+        // edge: player edits name mid-match — peer names in results[] come from
+        // peer.username which handleNameUpdate keeps current; local name is read
+        // from localStorage so it's always the latest value too.
         const localName = this.getLobbyDisplayName();
         const resolvedResults = results.map((r) =>
           r.isLocal ? { ...r, name: localName } : r
@@ -2221,10 +2229,25 @@ export class Game {
         this.showEndScreen(resolvedResults);
       },
       onLobbyCancelled: () => {
-        // Host disconnected in lobby — return to title with a toast.
+        // edge: host disconnects in lobby — clear any orphaned countdown overlay
+        // (carry-forward from Session 4: mid-countdown leak), then return to title.
+        this.hideCountdown();
+        this.countdownActive = false;
         this.hideMultiplayerPanel();
         void this.multiplayer.leaveLobby();
-        this.showToast("HOST DISCONNECTED — LOBBY CLOSED");
+        this.showMpToast("HOST DISCONNECTED — LOBBY CLOSED", 3000);
+      },
+      onPeerLeft: (userId) => {
+        // Refresh the lobby player list whenever a peer departs.
+        this.renderPlayerList();
+        // edge: host disconnects mid-match — match continues (seed and start
+        // anchor are already known). Show a 1-shot toast; do NOT cancel the match.
+        if (
+          this.multiplayer.getMatchState() === "in_match" &&
+          this.multiplayer.getHostUserId() === userId
+        ) {
+          this.showMpToast("HOST DISCONNECTED — MATCH CONTINUES", 4000);
+        }
       },
     });
   }
@@ -2285,6 +2308,10 @@ export class Game {
   }
 
   private async leaveMultiplayer(): Promise<void> {
+    // edge: mid-countdown leak — if the local player leaves while a countdown
+    // is active, clear the overlay so it doesn't stay on screen after leaving.
+    this.hideCountdown();
+    this.countdownActive = false;
     await this.multiplayer.leaveLobby();
     this.clearGhostMeshes();
     this.multiplayerInviteUrl = null;
@@ -2612,6 +2639,7 @@ export class Game {
     header.textContent = "RESULTS — Race to 100 m";
     card.appendChild(header);
 
+    // edge: match end with 0 finishers, all dead — show "NO ONE MADE IT" sub-header.
     if (!anyFinished) {
       const sub = document.createElement("div");
       Object.assign(sub.style, {
@@ -3939,6 +3967,8 @@ export class Game {
   }
 
   private tickMultiplayer(dt: number, state: SimState) {
+    // edge: solo gameplay — all multiplayer paths are gated here; no MP calls
+    // execute in solo mode.
     if (!this.multiplayer.isActive()) return;
     this.multiplayer.update(
       dt,
@@ -5537,6 +5567,40 @@ export class Game {
       pop.element.remove();
     }
     this.scorePops.length = 0;
+  }
+
+  /**
+   * Multiplayer event toast — creates a fixed-position self-removing div that
+   * works from any game state (including Title where the hud toast isn't
+   * ticked). Uses gold text + frosted-glass aesthetic by default.
+   * @param durationMs Visibility duration in milliseconds (~3000 for lobby events, ~4000 for mid-match).
+   * @param color Override CSS color; defaults to lobby gold.
+   */
+  private showMpToast(text: string, durationMs: number, color = "#ffe19d"): void {
+    const el = document.createElement("div");
+    Object.assign(el.style, {
+      position: "fixed",
+      top: "72px",
+      left: "50%",
+      transform: "translateX(-50%)",
+      padding: "10px 22px",
+      borderRadius: "999px",
+      border: "1px solid rgba(255, 225, 157, 0.4)",
+      background: "rgba(18, 12, 4, 0.88)",
+      backdropFilter: "blur(8px)",
+      color,
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      fontSize: "13px",
+      fontWeight: "700",
+      letterSpacing: "2px",
+      zIndex: "1100",
+      pointerEvents: "none",
+      textAlign: "center",
+      whiteSpace: "nowrap",
+    } as CSSStyleDeclaration);
+    el.textContent = text;
+    document.body.appendChild(el);
+    window.setTimeout(() => el.remove(), durationMs);
   }
 
   private showToast(message: string) {

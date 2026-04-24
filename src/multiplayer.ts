@@ -62,6 +62,10 @@ type MultiplayerCallbacks = {
   onPeerFinished?: (userId: string) => void;
   onMatchEnded?: (results: MatchResult[]) => void;
   onLobbyCancelled?: () => void;
+  /** Fired when a peer's STATE stream times out and they are removed from the
+   *  peers map. Fires for both lobby and in-match departures. The game layer
+   *  uses this to refresh the player list and detect host-gone-mid-match. */
+  onPeerLeft?: (userId: string) => void;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -301,7 +305,10 @@ export class MultiplayerManager {
       // ready_toggle: Session 3 will consume
     }
 
-    // Remove stale peers (no STATE received within timeout window)
+    // Remove stale peers (no STATE received within timeout window).
+    // edge: peer disconnects mid-match — marked DNF, race continues.
+    // edge: host disconnects mid-match — same prune path; onPeerLeft fires so
+    //       the game layer can show a "match continues" toast (see game.ts).
     for (const [userId, peer] of this.peers) {
       if (this.clock - peer.lastUpdate > PEER_TIMEOUT_SECONDS) {
         // During an active match, record as DNF if they hadn't finished/died cleanly.
@@ -314,6 +321,7 @@ export class MultiplayerManager {
           });
         }
         this.peers.delete(userId);
+        this.callbacks.onPeerLeft?.(userId);
       }
     }
   }
@@ -337,6 +345,12 @@ export class MultiplayerManager {
       existing.onGround = msg.onGround;
       existing.lastUpdate = this.clock;
     } else {
+      // edge: same-userId rejoin — if this peer was in dnfPeers (timed out
+      // mid-match), remove the stale DNF entry so they don't appear twice in
+      // the results table.
+      const dnfIdx = this.dnfPeers.findIndex((d) => d.userId === uid);
+      if (dnfIdx !== -1) this.dnfPeers.splice(dnfIdx, 1);
+
       const username = this.resolveUsername(uid);
       const pending = this.pendingProgress.get(uid);
       this.peers.set(uid, {
@@ -369,6 +383,8 @@ export class MultiplayerManager {
     // Monotonic guard: reject duplicate/stale match ids
     if (this.lastMatchId > 0 && msg.matchId <= this.lastMatchId) return;
     this.lastMatchId = msg.matchId;
+    // edge: two clients' clocks drift — OK because startMsRel is relative to
+    // each peer's own local clock; wall-clock timestamps are never compared.
     this.enterCountdown(Date.now() + msg.startMsRel, msg.matchId);
   }
 
@@ -416,14 +432,22 @@ export class MultiplayerManager {
     uid: string,
     msg: TypedMessage & { type: "name_update" }
   ): void {
+    // edge: player edits name — validate on receive path the same way the
+    // local input handler does. Strip control chars, trim, clamp, reject empty.
     const peer = this.peers.get(uid);
-    if (peer) peer.username = msg.name;
+    if (!peer) return;
+    const clean = msg.name.replace(/[\x00-\x1F\x7F]/g, "").trim().slice(0, 20);
+    // edge: player tries to change name to "" — silently reject empty result.
+    if (clean.length > 0) peer.username = clean;
   }
 
   // ── Host disconnect detection ──────────────────────────────────────────────
 
   private tickHostDisconnect(dt: number): void {
-    // Only run on non-host clients in lobby state with a known host
+    // edge: host disconnects in lobby — if host is absent from lobby+peers for
+    // HOST_ABSENT_THRESHOLD seconds, fires onLobbyCancelled so the game layer
+    // can show a toast and return clients to title. Only runs in lobby state;
+    // mid-match host departure is handled by the drainInbound stale-peer path.
     if (this.hostSelf || this.matchState !== "lobby" || !this.lobbyId || !this.hostUserId) return;
 
     const users = getLobbyUsers(this.lobbyId);
@@ -472,7 +496,7 @@ export class MultiplayerManager {
     const now = Date.now();
     const elapsed = now - this.localStartAt;
 
-    // Path 2: 120 s hard cap
+    // edge: match end on 120 s timeout — highest score among living players wins.
     if (elapsed >= 120_000) {
       this.fireMatchEnd();
       return;
