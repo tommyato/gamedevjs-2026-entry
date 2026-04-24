@@ -20,6 +20,7 @@ import {
   playMilestone,
   playPistonLaunch,
   playSteamHiss,
+  playTone,
   playWindGust,
   setAudioEnabled,
   setMusicIntensity,
@@ -574,6 +575,13 @@ export class Game {
   private multiplayerInviteLinkField: HTMLInputElement | null = null;
   private multiplayerNameDebounceHandle: number | null = null;
   private multiplayerPollHandle: number | null = null;
+  /** True while the multiplayer countdown is running — gates all player input. */
+  private countdownActive = false;
+  private multiplayerCountdownOverlay: HTMLDivElement | null = null;
+  /** Last integer second rendered to the overlay (prevents per-frame DOM writes). */
+  private countdownLastRenderedSec = -1;
+  /** setTimeout handle for hiding the overlay ~400 ms after "GO!" appears. */
+  private countdownGoTimer: number | null = null;
   private readonly ghostTmpVec = new THREE.Vector3();
   private readonly backgroundGroup = new THREE.Group();
   private readonly titleBackdropGroup = new THREE.Group();
@@ -2144,9 +2152,22 @@ export class Game {
 
   private setupMultiplayerCallbacks(): void {
     this.multiplayer.setCallbacks({
-      onMatchStart: (startAtMs, matchId) => {
-        // Session 4: hide lobby, start countdown, call startGame() with input gated.
-        console.log(`[mp] match starting matchId=${matchId} startAt=${new Date(startAtMs).toISOString()}`);
+      onMatchStart: (startAtMs, _matchId) => {
+        // Late-joiner: MATCH_START arrived after the start timestamp has already
+        // passed. Don't call startGame() — stay in lobby and show a notice.
+        if (Date.now() > startAtMs) {
+          this.setMultiplayerStatus("MATCH IN PROGRESS — WAIT FOR NEXT ROUND");
+          return;
+        }
+        this.hideMultiplayerPanel();
+        this.startGame();
+        this.countdownActive = true;
+        this.showCountdown();
+      },
+      onCountdownComplete: () => {
+        // Countdown elapsed — inputs become live. The GO! overlay hides itself
+        // via the 400 ms timer scheduled in updateCountdownOverlay().
+        this.countdownActive = false;
       },
       onPeerDied: (userId) => {
         // Session 5: update peer ghost display, check end condition.
@@ -2250,6 +2271,107 @@ export class Game {
     }
     this.multiplayerPanel.style.display = "none";
     this.multiplayerLobbyVisible = false;
+  }
+
+  // ── Multiplayer countdown overlay ──────────────────────────────────────────
+
+  /** Builds and appends the full-screen countdown DOM overlay (lazy, called on first show). */
+  private createCountdownOverlay(): HTMLDivElement {
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed",
+      inset: "0",
+      display: "none",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: "900",
+      background: "rgba(0, 0, 0, 0.5)",
+      backdropFilter: "blur(6px)",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      pointerEvents: "none",
+    } as CSSStyleDeclaration);
+
+    const text = document.createElement("div");
+    Object.assign(text.style, {
+      fontSize: "clamp(80px, 18vw, 160px)",
+      fontWeight: "900",
+      color: "#ffe19d",
+      textShadow: "0 0 40px rgba(255, 180, 60, 0.7), 0 4px 20px rgba(0, 0, 0, 0.7)",
+      letterSpacing: "-0.02em",
+      textAlign: "center",
+      lineHeight: "1",
+    } as CSSStyleDeclaration);
+    text.dataset.role = "countdown-text";
+
+    overlay.appendChild(text);
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+
+  private showCountdown(): void {
+    if (!this.multiplayerCountdownOverlay) {
+      this.multiplayerCountdownOverlay = this.createCountdownOverlay();
+    }
+    this.countdownLastRenderedSec = -1;
+    this.multiplayerCountdownOverlay.style.display = "flex";
+  }
+
+  private hideCountdown(): void {
+    if (this.multiplayerCountdownOverlay) {
+      this.multiplayerCountdownOverlay.style.display = "none";
+    }
+    if (this.countdownGoTimer !== null) {
+      clearTimeout(this.countdownGoTimer);
+      this.countdownGoTimer = null;
+    }
+    this.countdownLastRenderedSec = -1;
+  }
+
+  /**
+   * Called each frame while countdownActive. Polls getCountdownMsRemaining()
+   * and updates the overlay text only when the displayed integer second changes,
+   * avoiding per-frame DOM writes. Plays audio cues on each second transition
+   * and schedules the overlay hide ~400 ms after "GO!" appears.
+   */
+  private updateCountdownOverlay(): void {
+    const remaining = this.multiplayer.getCountdownMsRemaining();
+    if (remaining === null || !this.multiplayerCountdownOverlay) return;
+
+    const textEl = this.multiplayerCountdownOverlay.querySelector(
+      "[data-role='countdown-text']"
+    ) as HTMLElement | null;
+    if (!textEl) return;
+
+    let label: string;
+    let renderedSec: number;
+
+    if (remaining > 0) {
+      renderedSec = Math.ceil(remaining / 1000); // 3, 2, 1
+      label = String(renderedSec);
+    } else {
+      renderedSec = 0;
+      label = "GO!";
+    }
+
+    if (renderedSec !== this.countdownLastRenderedSec) {
+      this.countdownLastRenderedSec = renderedSec;
+      textEl.textContent = label;
+
+      if (renderedSec > 0) {
+        // Short 220 Hz beep on each second tick
+        if (getAudioEnabled()) playTone(220, 0.08, "sine", 0.12);
+      } else {
+        // 440 Hz chime when GO! appears
+        if (getAudioEnabled()) playTone(440, 0.15, "sine", 0.15);
+        // Schedule overlay hide ~400 ms after GO! — only once
+        if (this.countdownGoTimer === null) {
+          this.countdownGoTimer = window.setTimeout(() => {
+            this.countdownGoTimer = null;
+            this.hideCountdown();
+          }, 400);
+        }
+      }
+    }
   }
 
   private setMultiplayerStatus(text: string) {
@@ -3289,10 +3411,18 @@ export class Game {
       dt *= 0.7;
     }
 
+    // Countdown overlay update — runs before input so the display is current
+    // this frame. Only polls when countdownActive to avoid per-frame overhead.
+    if (this.countdownActive) {
+      this.updateCountdownOverlay();
+    }
+
+    // Gate all player input during the pre-match countdown.
+    const blocked = this.countdownActive;
     const action: SimAction = {
-      moveX: this.input.getMovement().x,
-      moveY: this.input.getMovement().y,
-      jump: this.input.justPressed("space"),
+      moveX: blocked ? 0 : this.input.getMovement().x,
+      moveY: blocked ? 0 : this.input.getMovement().y,
+      jump: blocked ? false : this.input.justPressed("space"),
     };
 
     const { state, events } = this.sim.step(action, dt);

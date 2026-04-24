@@ -57,6 +57,7 @@ export type PeerGhost = {
 
 type MultiplayerCallbacks = {
   onMatchStart?: (startAtMs: number, matchId: number) => void;
+  onCountdownComplete?: () => void;
   onPeerDied?: (userId: string) => void;
   onPeerFinished?: (userId: string) => void;
   onMatchEnded?: (results: MatchResult[]) => void;
@@ -87,6 +88,8 @@ export class MultiplayerManager {
   private matchState: MatchState = "lobby";
   private currentMatchId = 0;
   private lastMatchId = 0;
+  /** Absolute wall-clock ms at which the match starts. Set in enterCountdown(). */
+  private localStartAt = 0;
 
   // Host tracking
   private hostSelf = false;
@@ -118,6 +121,15 @@ export class MultiplayerManager {
     return this.hostSelf;
   }
 
+  /**
+   * Returns milliseconds until the match starts, clamped to ≥ 0.
+   * Returns null when not in 'countdown' state.
+   */
+  getCountdownMsRemaining(): number | null {
+    if (this.matchState !== "countdown") return null;
+    return Math.max(0, this.localStartAt - Date.now());
+  }
+
   hasProtocolVersionMismatch(): boolean {
     return this._protocolVersionMismatch;
   }
@@ -125,21 +137,35 @@ export class MultiplayerManager {
   // ── Host-only API ──────────────────────────────────────────────────────────
 
   /**
-   * Initiates a match. Host-only — no-op if called on a non-host client.
-   * Assigns a fresh matchId, broadcasts MATCH_START (reliable), transitions
-   * local state to "countdown", and fires onMatchStart on the host side.
-   *
-   * Countdown duration is DEFAULT_COUNTDOWN_MS; Session 4 will expose it.
+   * Initiates a match. Host-only — no-op if called on a non-host client or
+   * if the match has already left the lobby state (double-click guard).
+   * Assigns a fresh matchId, broadcasts MATCH_START (reliable), then calls
+   * enterCountdown() which transitions state and fires onMatchStart.
    */
   startMatch(): void {
     if (!this.isActive() || !this.hostSelf) return;
+    if (this.matchState !== "lobby") return;
     const now = Date.now();
     // Use lower 32 bits of epoch ms as matchId — monotonically increasing
     // within a ~50-day window, which is sufficient for multiplayer sessions.
-    this.currentMatchId = now >>> 0;
-    broadcastMessage(true, encodeMatchStart(DEFAULT_COUNTDOWN_MS, this.currentMatchId));
+    const matchId = now >>> 0;
+    this.lastMatchId = matchId;
+    broadcastMessage(true, encodeMatchStart(DEFAULT_COUNTDOWN_MS, matchId));
+    this.enterCountdown(now + DEFAULT_COUNTDOWN_MS, matchId);
+  }
+
+  // ── Shared countdown entry ─────────────────────────────────────────────────
+
+  /**
+   * Common path for entering countdown state, called by both the host (from
+   * startMatch) and non-host peers (from handleMatchStart). Sets localStartAt,
+   * advances the state machine, and fires onMatchStart.
+   */
+  private enterCountdown(startAtMs: number, matchId: number): void {
+    this.currentMatchId = matchId;
+    this.localStartAt = startAtMs;
     this.matchState = "countdown";
-    this.callbacks.onMatchStart?.(now + DEFAULT_COUNTDOWN_MS, this.currentMatchId);
+    this.callbacks.onMatchStart?.(startAtMs, matchId);
   }
 
   // ── Local event broadcasts ─────────────────────────────────────────────────
@@ -191,6 +217,7 @@ export class MultiplayerManager {
 
     this.drainInbound();
     this.tickHostDisconnect(dt);
+    this.tickCountdown();
   }
 
   /**
@@ -286,9 +313,7 @@ export class MultiplayerManager {
     // Monotonic guard: reject duplicate/stale match ids
     if (this.lastMatchId > 0 && msg.matchId <= this.lastMatchId) return;
     this.lastMatchId = msg.matchId;
-    this.currentMatchId = msg.matchId;
-    this.matchState = "countdown";
-    this.callbacks.onMatchStart?.(Date.now() + msg.startMsRel, msg.matchId);
+    this.enterCountdown(Date.now() + msg.startMsRel, msg.matchId);
   }
 
   private handleDied(
@@ -356,6 +381,20 @@ export class MultiplayerManager {
       }
     } else {
       this.hostAbsentTimer = 0;
+    }
+  }
+
+  // ── Countdown tick ─────────────────────────────────────────────────────────
+
+  /**
+   * Called every update() tick. When the countdown timer elapses, transitions
+   * matchState → 'in_match' and fires onCountdownComplete exactly once.
+   */
+  private tickCountdown(): void {
+    if (this.matchState !== "countdown") return;
+    if (Date.now() >= this.localStartAt) {
+      this.matchState = "in_match";
+      this.callbacks.onCountdownComplete?.();
     }
   }
 
