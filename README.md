@@ -22,8 +22,8 @@ You're a tiny bronze robot climbing an infinite clockwork tower. Jump between ro
 - **Combo system** — Land on consecutive gears within 2.5s for score multipliers (2x-5x) with fireworks celebration
 - **Challenge zones** — Every 100m: 8-12 dense gears, guaranteed bolt drops, 2x score multiplier
 - **5 environment zones** — Bronze Depths, Iron Works, Silver Spires, Golden Heights, and Chrome Abyss (100m+) — each with distinct colors and difficulty scaling
-- **P2P multiplayer ghost racing** — Race against other players in real-time via Wavedash WebRTC lobbies (up to 8 players). Binary position encoding for low-latency state sync.
-- **AI ghost mode** — Race against a reinforcement learning-trained agent. Pure JavaScript MLP inference (22-64-64-8 network, ~6K params, no ML dependencies). Trained via PPO on a headless ECS simulation.
+- **VERSUS multiplayer (1–4 players)** — Real-time race to 100m via Wavedash P2P WebRTC lobbies. Shared deterministic seed derived from the lobby id (FNV-1a 32-bit) so every player climbs the exact same tower. Ties broken by score; 120 s hard cap; last survivor wins immediately if everyone else falls. Binary position encoding for low-latency state sync.
+- **Async ghost replay** — "Play a Ghost" pulls a recorded run from the shared remote pool (`api.tommyato.com/games/clockwork-climb/ghosts`) and replays it as a translucent companion on the same seed, so you can chase someone else's best line solo.
 - **20 achievements** — Via Wavedash SDK, from beginner milestones to expert challenges
 - **3 leaderboards** — High score, highest climb, and best combo with local fallback
 - **Cloud saves** — Full progression persistence via Wavedash SDK
@@ -34,7 +34,7 @@ You're a tiny bronze robot climbing an infinite clockwork tower. Jump between ro
 - **Share on X** — One-tap score sharing
 - **Pause menu** — Escape key / mobile button, restart option
 - **Tutorial overlay** — First-play-only control hints (desktop and mobile variants)
-- **Mobile support** — Virtual joystick + jump button, responsive UI
+- **Gamepad support (preferred)** — Standard Gamepad API, full d-pad / stick + face-button mapping. Plays best on a controller — the spiral camera and jump-timing read most cleanly with analog input. Keyboard (WASD/Arrows + Space) and touch (virtual joystick + jump button) also fully supported.
 
 ![Game Over](screenshots/gameover.png)
 
@@ -67,9 +67,9 @@ src/
 
 ~7,800 lines of TypeScript. The production build is a single HTML file (~670KB) with no external assets — everything is procedurally generated at runtime.
 
-### Reinforcement Learning
+### Reinforcement Learning (training infrastructure)
 
-The headless simulation (`simulation.ts`) exposes a Gym-compatible API that enables RL training without a browser. The AI ghost was trained using PPO (Proximal Policy Optimization) on this simulation — learning to climb, collect bolts, and navigate gear mechanics through millions of training steps. The trained model runs as a pure JavaScript MLP in the browser with zero ML library dependencies.
+The headless simulation (`simulation.ts`) exposes a Gym-compatible API that enables RL training without a browser — `reset()` / `step(action)` / `getObservation()` are all callable from Python via a JS-bridge. We use this to train PPO agents (CleanRL on Apple Silicon) that explore the gear-mechanics design space and surface balance issues. Pure JavaScript MLP inference (22-64-64-8 network, ~6K params, no ML dependencies) keeps trained policies runnable in-browser when needed. Player-facing "Play a Ghost" pulls human runs from the shared pool — the RL infra here is dev-side tooling, not a shipped game mode.
 
 ### How the procedural generation works
 

@@ -1057,6 +1057,8 @@
       overflow: auto;
     }
     .hidden { display: none !important; }
+    /* Hide username editor on platforms where name editing is disabled (e.g. Wavedash). */
+    body.platform-wavedash #title-username-row { display: none; }
     /* Username editor — appears on both title and game-over screens */
     .cc-username-row {
       display: flex;
@@ -1367,7 +1369,7 @@
         <button type="button" id="title-contracts-reroll">REROLL</button>
       </div>
       <div id="title-actions">
-        <div class="cc-username-row">
+        <div id="title-username-row" class="cc-username-row">
           <label class="cc-username-label" for="title-username-input">YOUR NAME</label>
           <input type="text" id="title-username-input" class="cc-username-input" maxlength="24" autocomplete="off" spellcheck="false" placeholder="loading…" />
         </div>
