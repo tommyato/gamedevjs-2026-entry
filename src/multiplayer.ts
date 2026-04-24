@@ -513,10 +513,11 @@ export class MultiplayerManager {
   // ── Match-end resolver ────────────────────────────────────────────────────
 
   /**
-   * Called every update() tick while in 'in_match'. Checks three end paths:
+   * Called every update() tick while in 'in_match'. Checks four end paths:
    * 1. All known players (local + active peers; DNFs count as done) are dead/finished.
    * 2. 120 s hard timeout since localStartAt.
    * 3. First-finisher 5 s grace period has expired.
+   * 4. Exactly one participant remains alive and nobody has finished.
    */
   private tickMatchEnd(): void {
     if (this.matchState !== "in_match" || this.matchEndFired) return;
@@ -534,6 +535,23 @@ export class MultiplayerManager {
     if (this.firstFinisherGraceStart !== null && (now - this.firstFinisherGraceStart) >= 5_000) {
       this.fireMatchEnd();
       return;
+    }
+
+    // Path 4: last survivor — if exactly one participant remains alive and
+    // nobody has finished, end immediately and crown that player.
+    const totalParticipants = 1 + this.peers.size + this.dnfPeers.length;
+    const anyoneFinished =
+      this.localFinishedFlag ||
+      [...this.peers.values()].some((p) => p.matchProgress.finished !== undefined);
+    if (totalParticipants >= 2 && !anyoneFinished) {
+      const localAlive = !this.localDead && !this.localFinishedFlag;
+      const peersAlive = [...this.peers.values()].filter(
+        (p) => p.matchProgress.dead === undefined && p.matchProgress.finished === undefined
+      ).length;
+      if ((localAlive ? 1 : 0) + peersAlive === 1) {
+        this.fireMatchEnd();
+        return;
+      }
     }
 
     // Path 1: all known players done (local must be dead or finished first)
