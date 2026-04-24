@@ -33,6 +33,7 @@ import {
 } from "./audio";
 import { BoltCollectible } from "./bolt";
 import { Gear } from "./gear";
+import { GearPool } from "./gear-pool";
 import { Input } from "./input";
 import { ParticleSystem } from "./particles";
 import {
@@ -510,6 +511,7 @@ export class Game {
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
   private topDownShadow!: TopDownShadowSystem;
+  private gearPool!: GearPool;
   private readonly landingCueGroup = new THREE.Group();
   private readonly landingCueCoreMaterial = new THREE.MeshBasicMaterial({
     color: 0x160e0a,
@@ -747,6 +749,11 @@ export class Game {
     this.scene.background = new THREE.Color(0x000000); // Skydome covers visible field; black fills any gaps
     this.scene.fog = new THREE.FogExp2(0x140d0a, 0.014);
     this.scene.add(this.titleBackdropGroup);
+
+    // Gear object pool — persists across restartGame() for maximum reuse savings.
+    // disposeAll() is called on page unload only.
+    this.gearPool = new GearPool(this.scene);
+    window.addEventListener("pagehide", () => { this.gearPool.disposeAll(); }, { once: true });
 
     // Animated noise skydome — large BackSide sphere follows camera position (not rotation).
     // Noise sampled in object-space direction (= world direction from camera), giving a
@@ -1220,6 +1227,8 @@ export class Game {
           this.showAchievementToast(formatAchievementId('FIRST_CLIMB'));
         },
         getGameState: () => GameState[this.state],
+        // GearPool profiling — read window.__gearAllocs directly or via this accessor.
+        gearAllocs: () => this.gearPool.allocCount,
       };
     }
 
@@ -3516,8 +3525,9 @@ export class Game {
   }
 
   private resetVisualWorld() {
+    // Return all active game gears to the pool (removes from scene; keeps for reuse).
     for (const gear of this.visualGearMap.values()) {
-      this.scene.remove(gear.mesh);
+      this.gearPool.release(gear);
     }
     for (const bolt of this.visualBoltMap.values()) {
       this.scene.remove(bolt.mesh);
@@ -4310,7 +4320,8 @@ export class Game {
       if (nextGearIds.has(id)) {
         continue;
       }
-      this.scene.remove(gear.mesh);
+      // Release to pool (removes mesh from scene; keeps instance for future reuse).
+      this.gearPool.release(gear);
       this.visualGearMap.delete(id);
       this.gearTickNextTimes.delete(id);
       this.bouncyGearSquashTimers.delete(id);
@@ -4323,9 +4334,9 @@ export class Game {
     for (const simGear of state.gears) {
       let gear = this.visualGearMap.get(simGear.id);
       if (!gear) {
+        // createGearVisual now calls gearPool.acquire(), which adds the mesh to the scene.
         gear = this.createGearVisual(simGear);
         this.visualGearMap.set(simGear.id, gear);
-        this.scene.add(gear.mesh);
         if (this.gearFreezeActive) {
           gear.setFreezeEmissive(true);
         }
@@ -4392,7 +4403,9 @@ export class Game {
     };
     const baseColor = variantBaseColors[simGear.variant as GearVariant] ?? palette[simGear.id % palette.length];
     const band = getDifficultyBand(simGear.y);
-    const gear = new Gear({
+    // Acquire from pool (adds mesh to scene; reuses a free entry if one exists in the
+    // same variant × tooth-count bucket, otherwise constructs a new Gear instance).
+    const gear = this.gearPool.acquire({
       color: baseColor,
       danger: band.danger,
       height: simGear.height,
@@ -4400,6 +4413,7 @@ export class Game {
       rotationSpeed: simGear.rotationSpeed,
       variant: simGear.variant as GearVariant,
     });
+    // enableTopDownShadow is idempotent — no-op if already patched on a reused gear.
     gear.enableTopDownShadow(this.topDownShadow.uniforms);
     gear.rotationDir = simGear.rotationDir;
     return gear;

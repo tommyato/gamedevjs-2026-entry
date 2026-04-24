@@ -23,11 +23,14 @@ export type GearOptions = {
   variant?: GearVariant;
 };
 
+/** Alias used by GearPool.acquire() and Gear.reset() — same shape as GearOptions. */
+export type GearInit = GearOptions;
+
 export class Gear {
   public readonly mesh: THREE.Group;
   public readonly radius: number;
   public readonly height: number;
-  public readonly rotationSpeed: number;
+  public rotationSpeed: number;
   public rotationDir: number;
   public readonly variant: GearVariant;
 
@@ -203,6 +206,95 @@ export class Gear {
       this.addMagnetIndicator();
     }
 
+  }
+
+  /**
+   * Reset this Gear instance so it can be reused by the GearPool for a new sim gear.
+   * Geometry is NEVER rebuilt — the pool keys by (variant, tooth-count bucket) so the
+   * geometry structure (tooth count, sub-mesh set) is identical across reuse.
+   * Material colours are updated in-place; no new material objects are created.
+   * The mesh is NOT added to the scene here — the pool's acquire() does that.
+   */
+  reset(opts: GearInit): void {
+    // ── Animation state ──────────────────────────────────────────────────────
+    this.active = true;
+    this.crumbleArmed = false;
+    this.crumbleTimer = 0;
+    this.crumbleFallVelocity = 0;
+    this.crumbleFallDistance = 0;
+    this.reverseTimer = 0;
+    this.pistonTime = Math.random() * Math.PI * 2;
+    this.magnetTime = 0;
+    this.milestoneTime = 0;
+    this.checkpointActivationPulse = 0;
+    this.landingHighlightActive = false;
+    this.landingHighlightT = 0;
+
+    // ── Transform ────────────────────────────────────────────────────────────
+    // applySimGearToVisual() always sets position/rotation immediately after acquire(),
+    // but reset to a clean state here for correctness.
+    this.mesh.scale.setScalar(1);
+    this.mesh.rotation.set(0, 0, 0);
+    this.restPosition.set(0, 0, 0);
+    this.mesh.position.set(0, 0, 0);
+
+    // ── Kinematics ───────────────────────────────────────────────────────────
+    this.rotationSpeed = opts.rotationSpeed ?? 0.5;
+    this.rotationDir = Math.random() > 0.5 ? 1 : -1;
+
+    // ── Material colours ─────────────────────────────────────────────────────
+    // Recompute using the same formulas as the constructor. variant is immutable
+    // (pool keys by variant), so variant-specific branches are identical.
+    const baseColor = new THREE.Color(opts.color ?? 0x8b4513);
+    const variantColor = applyVariantTint(baseColor, this.variant);
+    const danger = opts.danger ?? 0;
+    const bodyColor = variantColor.clone().lerp(this.hazardColor, danger * 0.32);
+    const topColor = variantColor.clone().offsetHSL(0.02, 0.12, 0.16).lerp(this.hazardColor, danger * 0.2);
+    const toothColor = variantColor.clone().multiplyScalar(0.95).lerp(this.hazardColor, danger * 0.26);
+
+    this.bodyMaterial.color.copy(
+      bodyColor.clone().multiplyScalar(
+        this.variant === "crumbling" ? 0.72 : this.variant === "milestone" ? 1.0 : 0.82,
+      ),
+    );
+    this.bodyMaterial.emissive.copy(
+      this.variant === "milestone"
+        ? new THREE.Color(0xd7a530)
+        : bodyColor.clone().multiplyScalar(0.08 + danger * 0.1),
+    );
+    this.bodyMaterial.emissiveIntensity = this.variant === "milestone" ? 0.38 : 0.3;
+
+    this.topSurfaceMaterial.color.copy(topColor);
+    this.topSurfaceMaterial.emissive.copy(topColor.clone().multiplyScalar(0.2 + danger * 0.14));
+
+    this.toothMaterial.color.copy(toothColor);
+    this.toothMaterial.emissive.copy(toothColor.clone().multiplyScalar(0.1 + danger * 0.1));
+
+    // ── Landing ring ─────────────────────────────────────────────────────────
+    if (this.landingRingMaterial) {
+      this.landingRingMaterial.emissiveIntensity = 0.5 + danger * 0.15;
+      this.landingRingBaseEmissiveIntensity = this.landingRingMaterial.emissiveIntensity;
+      this.landingRingMaterial.opacity = 1;
+      this.landingRingMaterial.transparent = false;
+    }
+
+    // ── Restore opacity (in case gear was mid-spawn-fade when released) ──────
+    const coreMaterials = [
+      this.bodyMaterial,
+      this.topSurfaceMaterial,
+      this.detailMaterial,
+      this.accentMaterial,
+      this.toothMaterial,
+    ];
+    for (const mat of coreMaterials) {
+      mat.opacity = 1;
+      mat.transparent = false;
+    }
+
+    // Re-anchor material defaults so crumble/freeze animations reset to the new colours.
+    this.rememberMaterialDefaults(this.bodyMaterial);
+    this.rememberMaterialDefaults(this.topSurfaceMaterial);
+    this.rememberMaterialDefaults(this.toothMaterial);
   }
 
   enableTopDownShadow(uniforms: TopDownShadowUniforms) {
