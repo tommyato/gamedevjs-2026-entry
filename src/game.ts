@@ -772,10 +772,13 @@ export class Game {
             // Highlight where noise exceeds threshold — dark base, aurora-like peaks
             float bloom = smoothstep(0.50, 0.70, n);
 
-            // Optional luminance pulse (Cosmic Void: 0.5 Hz, Storm Deck: 6 Hz)
+            // Optional luminance pulse — very slow ambient breathe only.
+            // Capped at low amplitude so the skydome reads as atmospheric,
+            // not like a flickering light. Frequencies in BIOME_SKYDOME_CONFIGS
+            // should stay well under 1 Hz.
             float pulse = 1.0;
             if (uPulseFreq > 0.0) {
-              pulse = 0.6 + 0.4 * (0.5 + 0.5 * sin(uTime * uPulseFreq * 6.2832));
+              pulse = 0.85 + 0.15 * (0.5 + 0.5 * sin(uTime * uPulseFreq * 6.2832));
             }
 
             vec3 color = uBiomeColor * bloom * 0.26 * pulse;
@@ -5166,8 +5169,10 @@ const BIOME_PARTICLE_CONFIGS = [
 const BIOME_SKYDOME_CONFIGS = [
   // Workshop (0–25m): calm slow drift
   { scrollSpeed: 1.0, pulseFreq: 0.0 },
-  // Storm Deck (25–50m): faster scroll + electrical flicker modulation
-  { scrollSpeed: 1.5, pulseFreq: 6.0 },
+  // Storm Deck (25–50m): faster scroll; no luminance flicker (was 6 Hz — read
+  // as a broken light). Biome already reads distinct from Workshop via its
+  // palette + the 1.5× scroll speed.
+  { scrollSpeed: 1.5, pulseFreq: 0.0 },
   // Brass Cathedral (50–75m): calm golden drift
   { scrollSpeed: 1.0, pulseFreq: 0.0 },
   // Chrome Spire (75–100m): calm icy drift
