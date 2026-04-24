@@ -587,8 +587,9 @@
       min-width: 100px;
     }
     .title-tertiary-row .title-action-btn {
-      flex: 0 1 auto;
-      min-width: 140px;
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
       font-size: 12px;
       padding: 9px 22px;
       letter-spacing: 3px;
@@ -5635,16 +5636,16 @@ Can you beat my score?
           <input type="text" id="title-username-input" class="cc-username-input" maxlength="24" autocomplete="off" spellcheck="false" placeholder="loading…" />
         </div>
         <button type="button" class="prompt title-action-btn title-play-primary" id="title-play-btn">PLAY</button>
+        <div class="title-tertiary-row">
+          <button type="button" class="title-action-btn" id="title-btn-achievements">ACHIEVEMENTS</button>
+          <button type="button" class="title-action-btn" id="title-btn-leaderboard">LEADERBOARD</button>
+        </div>
         <div class="title-mode-row">
           <button type="button" class="title-action-btn" id="title-btn-daily">DAILY</button>
           <button type="button" class="title-action-btn" id="title-btn-raceai">RACE AI</button>
           <button type="button" class="title-action-btn" id="title-btn-versus">VERSUS</button>
         </div>
         <div id="title-leaderboard-summary"></div>
-        <div class="title-tertiary-row">
-          <button type="button" class="title-action-btn" id="title-btn-achievements">ACHIEVEMENTS</button>
-          <button type="button" class="title-action-btn" id="title-btn-leaderboard">LEADERBOARD</button>
-        </div>
       </div>
       <div class="game-over-view hidden" id="game-over-view">
         <div id="game-over-left-col">
