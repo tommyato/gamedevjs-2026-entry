@@ -734,6 +734,83 @@ export function playAchievementUnlock() {
   }
 }
 
+/**
+ * Ascending major triad stinger — victory cue when the local player finishes rank 1.
+ * C5→E5→G5 (~523→659→784 Hz), 120 ms spacing, with reverb-feel exponential decay.
+ * Only audible if audio context is active; no-ops otherwise.
+ */
+export function playRankRevealVictory() {
+  if (!ctx || !masterGain) return;
+  const t = ctx.currentTime;
+  const notes = [523, 659, 784];
+  const spacing = 0.12;
+  const noteDur = 0.30;
+
+  for (let i = 0; i < notes.length; i++) {
+    const start = t + i * spacing;
+
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(notes[i], start);
+
+    // Harmonic partial for warmth / bell-like quality
+    const partial = ctx.createOscillator();
+    partial.type = "sine";
+    partial.frequency.setValueAtTime(notes[i] * 2, start);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.10, start + 0.010);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + noteDur);
+
+    osc.connect(gain);
+    partial.connect(gain);
+    gain.connect(masterGain);
+    osc.start(start);
+    partial.start(start);
+    osc.stop(start + noteDur + 0.01);
+    partial.stop(start + noteDur + 0.01);
+  }
+}
+
+/**
+ * Descending minor-third stinger — neutral cue for rank > 1 or DNF.
+ * G4→Eb4 (392→329 Hz), 180 ms spacing, with a slight detune for a "soft loss" feel.
+ */
+export function playRankRevealNeutral() {
+  if (!ctx || !masterGain) return;
+  const t = ctx.currentTime;
+  const notes = [392, 329];
+  const spacing = 0.18;
+  const noteDur = 0.32;
+
+  for (let i = 0; i < notes.length; i++) {
+    const start = t + i * spacing;
+
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(notes[i], start);
+
+    // Slightly detuned copy (~10 cents) for a gentle "deflated" colour
+    const osc2 = ctx.createOscillator();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(notes[i] * 1.006, start);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.08, start + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + noteDur);
+
+    osc.connect(gain);
+    osc2.connect(gain);
+    gain.connect(masterGain);
+    osc.start(start);
+    osc2.start(start);
+    osc.stop(start + noteDur + 0.01);
+    osc2.stop(start + noteDur + 0.01);
+  }
+}
+
 export function setAudioEnabled(enabled: boolean) {
   audioEnabled = enabled;
   applyMasterVolume();

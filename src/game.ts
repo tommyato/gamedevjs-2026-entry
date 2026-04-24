@@ -19,6 +19,8 @@ import {
   playMagnetPulse,
   playMilestone,
   playPistonLaunch,
+  playRankRevealNeutral,
+  playRankRevealVictory,
   playSteamHiss,
   playTone,
   playWindGust,
@@ -64,7 +66,7 @@ import {
   GhostRecorder,
   type GhostRecord,
 } from "./ghost-recorder";
-import { GhostPlayback, loadGhostChallenge } from "./ghost-playback";
+import { GhostPlayback } from "./ghost-playback";
 import {
   fetchGhosts as fetchRemoteGhosts,
   fetchGhostUploadThreshold,
@@ -2236,6 +2238,17 @@ export class Game {
           r.isLocal ? { ...r, name: localName } : r
         );
         this.showEndScreen(resolvedResults);
+        // Rank-reveal stinger — only fires in multiplayer; solo path is untouched.
+        if (this.multiplayer.isActive()) {
+          const localResult = resolvedResults.find((r) => r.isLocal);
+          if (localResult) {
+            if (localResult.rank === 1) {
+              playRankRevealVictory();
+            } else {
+              playRankRevealNeutral();
+            }
+          }
+        }
       },
       onLobbyCancelled: () => {
         // edge: host disconnects in lobby — clear any orphaned countdown overlay
@@ -3258,9 +3271,8 @@ export class Game {
   }
 
   /**
-   * Try the remote ghost pool first (up to 5 ghosts, pick one at random), fall
-   * back to the on-disk `public/ghost-challenge.json` if the server returned
-   * nothing. If both sources fail the PLAY A GHOST button stays hidden.
+   * Fetch up to 5 ghosts from the remote pool and pick one at random.
+   * If the pool returns nothing the PLAY A GHOST button stays hidden.
    * Called once at init.
    */
   private async setupGhostChallenge(): Promise<void> {
@@ -3272,14 +3284,7 @@ export class Game {
       console.log(
         `[game] Ghost challenge loaded (remote) — ${picked.name} · ${picked.height}m · ${picked.frames.length} frames (pool size ${remote.length})`,
       );
-      return;
     }
-
-    const local = await loadGhostChallenge();
-    if (!local) return;
-    this.ghostChallengeRecord = local;
-    if (this.aiGhostButton) this.aiGhostButton.style.display = "inline-flex";
-    console.log(`[game] Ghost challenge loaded (local) — ${local.name} · ${local.height}m · ${local.frames.length} frames`);
   }
 
   /**
@@ -3558,10 +3563,10 @@ export class Game {
   private buildTitleBackdrop() {
     this.clearTitleBackdrop();
     const configurations = [
-      { x: -8.4, y: 3.4, z: -13.5, scale: 3.2, rotationSpeed: 0.024, radius: 3.2, color: 0xa16a34, variant: "normal" as GearVariant, bobAmplitude: 0.14, bobPhase: 0.2 },
+      { x: -8.4, y: 3.4, z: -13.5, scale: 2.6, rotationSpeed: 0.024, radius: 3.2, color: 0xa16a34, variant: "normal" as GearVariant, bobAmplitude: 0.14, bobPhase: 0.2 },
       { x: -4.8, y: 6.2, z: -14.2, scale: 2.2, rotationSpeed: -0.034, radius: 2.5, color: 0xffa34d, variant: "speed" as GearVariant, bobAmplitude: 0.1, bobPhase: 1.4 },
       { x: 4.8, y: 6.2, z: -14.2, scale: 2.2, rotationSpeed: 0.034, radius: 2.5, color: 0x5d8fb3, variant: "wind" as GearVariant, bobAmplitude: 0.1, bobPhase: 2.6 },
-      { x: 8.4, y: 3.4, z: -13.5, scale: 3.2, rotationSpeed: -0.024, radius: 3.2, color: 0x5aa95f, variant: "bouncy" as GearVariant, bobAmplitude: 0.14, bobPhase: 3.1 },
+      { x: 8.4, y: 3.4, z: -13.5, scale: 2.6, rotationSpeed: -0.024, radius: 3.2, color: 0x5aa95f, variant: "bouncy" as GearVariant, bobAmplitude: 0.14, bobPhase: 3.1 },
       { x: 0, y: 10.8, z: -17.5, scale: 3.5, rotationSpeed: 0.018, radius: 3.0, color: 0x8b63d0, variant: "magnetic" as GearVariant, bobAmplitude: 0.16, bobPhase: 4.2 },
     ];
 
