@@ -4,9 +4,9 @@ A timing-based 3D platformer. Climb a massive clockwork tower as a tiny bronze r
 
 ![Title Screen](screenshots/title.png)
 
-## [Play Now](https://tommyato.github.io/gamedevjs-2026-entry/)
+## Play Now
 
-Also on [itch.io](https://tommyatoai.itch.io/clockwork-climb) | [Wavedash](https://wavedash.com/games/clockwork-climb) | [tommyato.com](https://tommyato.com/games/clockwork-climb/)
+[GitHub Pages](https://tommyato.github.io/gamedevjs-2026-entry/) | [itch.io](https://tommyatoai.itch.io/clockwork-climb) | [Wavedash](https://wavedash.com/games/clockwork-climb) | [tommyato.com](https://tommyato.com/games/clockwork-climb/)
 
 ## About
 
@@ -22,10 +22,10 @@ You're a tiny bronze robot climbing an infinite clockwork tower. Jump between ro
 - **Combo system** — Land on consecutive gears within 2.5s for score multipliers (2x-5x) with fireworks celebration
 - **Challenge zones** — Every 100m: 8-12 dense gears, guaranteed bolt drops, 2x score multiplier
 - **5 environment zones** — Bronze Depths, Iron Works, Silver Spires, Golden Heights, and Chrome Abyss (100m+) — each with distinct colors and difficulty scaling
-- **VERSUS multiplayer (1–4 players)** — Real-time race to 100m via Wavedash P2P WebRTC lobbies. Shared deterministic seed derived from the lobby id (FNV-1a 32-bit) so every player climbs the exact same tower. Ties broken by score; 120 s hard cap; last survivor wins immediately if everyone else falls. Binary position encoding for low-latency state sync.
-- **Async ghost replay** — "Play a Ghost" pulls a recorded run from the shared remote pool (`api.tommyato.com/games/clockwork-climb/ghosts`) and replays it as a translucent companion on the same seed, so you can chase someone else's best line solo.
+- **Race multiplayer (1–4 players)** — Real-time Race to 100m. The Wavedash build uses Wavedash P2P WebRTC lobbies; itch.io, GitHub Pages, and tommyato.com use the Colyseus server at `wss://mp.tommyato.com`. The server stamps the shared tower seed on room create so every player climbs the exact same tower. Ties break by score; 120 s hard cap; last survivor wins immediately if everyone else falls.
+- **Versus Ghost** — Chase a recorded run from the shared remote pool (`api.tommyato.com/games/clockwork-climb/ghosts`) as a translucent companion on the same seed, so you can practice routes solo without joining a live race.
 - **20 achievements** — Via Wavedash SDK, from beginner milestones to expert challenges
-- **3 leaderboards** — High score, highest climb, and best combo with local fallback
+- **4 leaderboards** — High score, highest climb, best combo, and daily score
 - **Cloud saves** — Full progression persistence via Wavedash SDK
 - **Procedural audio** — 4-layer music system (bass drone, gear rhythm, D-minor chime melody, tension noise) that intensifies with height. Zero audio files — everything synthesized via Web Audio API.
 - **Orbit camera** — Camera tracks player angular position via `atan2()`, spiraling ~90 degrees per 40m of climbing. Freezes during jumps to prevent disorientation.
@@ -34,7 +34,7 @@ You're a tiny bronze robot climbing an infinite clockwork tower. Jump between ro
 - **Share on X** — One-tap score sharing
 - **Pause menu** — Escape key / mobile button, restart option
 - **Tutorial overlay** — First-play-only control hints (desktop and mobile variants)
-- **Gamepad support (preferred)** — Standard Gamepad API, full d-pad / stick + face-button mapping. Plays best on a controller — the spiral camera and jump-timing read most cleanly with analog input. Keyboard (WASD/Arrows + Space) and touch (virtual joystick + jump button) also fully supported.
+- **Gamepad-preferred controls** — Standard Gamepad API, full d-pad / stick + face-button mapping. Clockwork Climb feels best on a controller; the spiral camera and jump timing read most cleanly with analog input. Keyboard (WASD/Arrows + Space) and touch (virtual joystick + jump button) are also fully supported.
 
 ![Game Over](screenshots/gameover.png)
 
@@ -51,17 +51,18 @@ src/
   sim-types.ts  — Type definitions for the simulation layer (SimGear, SimBolt, SimPlayer)
   game.ts       — Render/controller layer (2,989 lines). Steps simulation, syncs
                   Three.js visuals, handles camera, HUD, state machine, UI overlays.
-  multiplayer.ts— P2P ghost racing via Wavedash SDK WebRTC lobbies. Binary
-                  position encoding for real-time state sync.
-  ai-ghost.ts   — Pure JavaScript MLP inference for the RL-trained AI ghost.
-                  No external ML dependencies.
+  multiplayer.ts— Deterministic multiplayer transport + replication.
+                  Wavedash builds use SDK WebRTC; tommyato builds use Colyseus.
+  ai-ghost.ts   — Dev-side AI ghost experimentation and model loading helpers.
+                  Title-screen Versus Ghost uses recorded server ghosts.
   player.ts     — Player rendering (bronze cylinder), visual effects
   gear.ts       — 8 gear platform types with distinct visuals and mechanics
   bolt.ts       — Collectible bolt spawning, pickup detection, floating animation
   input.ts      — Keyboard + touch input abstraction, virtual joystick for mobile
   particles.ts  — Landing sparks, steam puffs, jump trails, bolt pickup effects
-  platform.ts   — Wavedash SDK wrapper (leaderboards, achievements, cloud saves,
-                  stats, P2P lobbies, lifecycle hooks)
+  platform-services.ts — Shared platform interfaces and leaderboard slug types
+  platform-wavedash.ts — Wavedash SDK implementation for store builds
+  platform-tommyato.ts — Colyseus + HTTP services for itch.io / GH Pages / portal
   audio.ts      — Procedural music engine (4 layers) + SFX (Web Audio API)
 ```
 
@@ -69,7 +70,7 @@ src/
 
 ### Reinforcement Learning (training infrastructure)
 
-The headless simulation (`simulation.ts`) exposes a Gym-compatible API that enables RL training without a browser — `reset()` / `step(action)` / `getObservation()` are all callable from Python via a JS-bridge. We use this to train PPO agents (CleanRL on Apple Silicon) that explore the gear-mechanics design space and surface balance issues. Pure JavaScript MLP inference (22-64-64-8 network, ~6K params, no ML dependencies) keeps trained policies runnable in-browser when needed. Player-facing "Play a Ghost" pulls human runs from the shared pool — the RL infra here is dev-side tooling, not a shipped game mode.
+The headless simulation (`simulation.ts`) exposes a Gym-compatible API that enables RL training without a browser — `reset()` / `step(action)` / `getObservation()` are all callable from Python via a JS-bridge. We use this to probe balance and level-feel during development. Lightweight in-browser policy loading still exists for dev experiments, but the shipped title-screen Versus Ghost mode pulls recorded human runs from the shared ghost pool.
 
 ### How the procedural generation works
 
@@ -84,26 +85,28 @@ The tower generates infinitely using a streaming approach:
 ## Tech Stack
 
 - **[Three.js](https://threejs.org/) r183** — 3D rendering, bloom post-processing
-- **[Wavedash SDK](https://wavedash.com)** — P2P multiplayer (WebRTC), leaderboards, achievements, cloud saves, stats
+- **[Wavedash SDK](https://wavedash.com)** — Wavedash build services: P2P multiplayer, leaderboards, achievements, cloud saves, stats
+- **[Colyseus](https://www.colyseus.io/)** — tommyato build race lobbies on `mp.tommyato.com`
 - **TypeScript** — Type-safe game logic
 - **Vite** — Dev server + production bundler
 - **vite-plugin-singlefile** — Bundles everything into one HTML file
 - **Web Audio API** — Procedural music and sound effects
 - **UnrealBloomPass** — Post-processing glow effect
-- **PPO (CleanRL)** — Reinforcement learning for the AI ghost agent
+- **PPO (CleanRL)** — Development-time balancing experiments
 
 ## Development
 
 ```bash
 npm install
 npm run dev     # dev server at localhost:5174
-npm run build   # production build to dist/
+npm run build:wavedash  # Wavedash store build to dist-wavedash/
+npm run build:tommyato  # itch.io / GitHub Pages / tommyato.com build to dist-tommyato/
 ```
 
 ## Open Source
 
 - **Open Source** — Full source code in this repository
-- **Wavedash Deployment** — Published at [wavedash.com/games/clockwork-climb](https://wavedash.com/games/clockwork-climb) with P2P multiplayer, 3 leaderboards, 20 achievements, cloud saves, and stats tracking
+- **Wavedash Deployment** — Published at [wavedash.com/games/clockwork-climb](https://wavedash.com/games/clockwork-climb) with WebRTC Race multiplayer, 4 leaderboards, 20 achievements, cloud saves, and stats tracking
 
 ## Credits
 

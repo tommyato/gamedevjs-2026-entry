@@ -2010,7 +2010,7 @@ export class Game {
       marginBottom: "10px",
       textAlign: "center",
     } as CSSStyleDeclaration);
-    titleEl.textContent = "VERSUS — Race to 100 m";
+    titleEl.textContent = "RACE — First to 100 m";
     panel.appendChild(titleEl);
 
     // ── 2. Rules card ─────────────────────────────────────────────────────────
@@ -3372,7 +3372,7 @@ export class Game {
     if (!btn) return;
     this.aiGhostButton = btn;
 
-    btn.textContent = "PLAY A GHOST";
+    btn.textContent = "VERSUS GHOST";
     Object.assign(btn.style, {
       border: "1px solid rgba(155, 216, 255, 0.45)",
       background: "linear-gradient(180deg, rgba(14, 30, 46, 0.92), rgba(8, 16, 28, 0.82))",
