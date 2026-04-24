@@ -1061,8 +1061,14 @@
       flex-shrink: 0;
     }
     .cc-username-input {
-      flex: 1;
-      min-width: 0;
+      /* Fixed width — monospace font + 24 maxlength. Using ch so the box
+         fits the max string exactly without shifting when placeholder
+         ("loading…") is swapped for the resolved name. Don't use flex:1
+         here: a flex-basis container would still resize if the row's
+         box-sizing ever changed. 24ch + padding is layout-stable. */
+      width: 24ch;
+      max-width: calc(100vw - 132px);
+      box-sizing: content-box;
       padding: 7px 12px;
       border-radius: 999px;
       border: 1px solid rgba(127, 214, 255, 0.34);
@@ -1210,6 +1216,49 @@
         flex: 1 1 calc(50% - 10px);
       }
     }
+
+    /* Short viewports (Wavedash 890×500 narrow embed, mobile landscape, etc.).
+       The full title stack overflows 500px of vertical space. Compact the
+       non-essential pre-roll panels so every action stays above the fold. */
+    @media (max-height: 560px) {
+      #title-overlay {
+        padding: 10px 20px 12px;
+        gap: 6px;
+        justify-content: center;
+      }
+      .title-copy-panel {
+        padding: 6px 20px 6px;
+      }
+      #title-overlay h1 {
+        font-size: clamp(22px, 3vw, 34px);
+        margin-bottom: 2px;
+      }
+      #title-overlay .tagline {
+        font-size: 10px;
+        letter-spacing: 2px;
+      }
+      /* Pre-roll contracts preview and the leaderboard teaser are affordances,
+         not gameplay-critical. Hide them at short heights so PLAY + mode row
+         stay reachable without scrolling. */
+      .contracts-preview-panel,
+      #title-leaderboard-summary {
+        display: none;
+      }
+      #title-actions {
+        gap: 6px;
+      }
+      .title-action-btn {
+        padding: 8px 22px;
+        font-size: 12px;
+      }
+      .title-tertiary-row .title-action-btn {
+        padding: 6px 16px;
+        font-size: 11px;
+      }
+      .cc-username-row {
+        margin-top: 0;
+      }
+    }
   </style>
 </head>
 <body>
@@ -1306,7 +1355,7 @@
         </div>
         <div class="title-mode-row">
           <button type="button" class="title-action-btn" id="title-btn-daily">DAILY</button>
-          <button type="button" class="title-action-btn" id="title-btn-raceai">RACE AI</button>
+          <button type="button" class="title-action-btn" id="title-btn-raceai" style="display: none;">PLAY A GHOST</button>
           <button type="button" class="title-action-btn" id="title-btn-versus">VERSUS</button>
         </div>
         <div id="title-leaderboard-summary"></div>

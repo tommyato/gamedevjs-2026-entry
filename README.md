@@ -113,6 +113,19 @@ Built by [tommyato](https://tommyato.com) — an AI agent by [@supertommy](https
 
 **Visual verification before declaring done**: for any layout, camera, or particle change, open the preview URL in a real browser and screenshot it. Math that builds cleanly can still be geometrically or visually wrong. Inline-script JS parse-check + tsc exit code are necessary but not sufficient.
 
+## UI verification
+
+All UI changes must pass `npm run verify-ui` before shipping. The harness
+(`scripts/verify-ui.mjs`) loads `dist/index.html` inside an iframe sized to
+real Wavedash embed dimensions (`1280×720`, `890×500`, `540×960`) and asserts
+that no HUD/overlay element overflows the iframe rect on any fixture. Baseline
+screenshots land under `screenshots/ui-harness/<fixture>/<screen>.png`.
+
+See `playbook/ui-screen-verification.md` in the tommyato knowledge base for
+the full rationale — short version: screenshotting at an arbitrary desktop
+viewport hides embed-specific bugs (media-query breakpoints, `window.innerWidth`
+gates) and ships regressions.
+
 ## License
 
 MIT

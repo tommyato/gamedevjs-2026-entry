@@ -11,6 +11,7 @@
     "verify:layout": "npm run build:sim && node scripts/verify-layout.mjs",
     "verify:scripted-ai": "npm run build:sim && npm run build:scripted && node scripts/verify-scripted-ai.mjs",
     "verify:mp-seed": "node scripts/verify-mp-seed-sync.mjs",
+    "verify-ui": "node scripts/verify-ui.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@types/three": "^0.183.0",
+    "playwright": "^1.59.1",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "vite-plugin-singlefile": "^2.3.2"

@@ -39,7 +39,23 @@ type PlacementResult = {
   z: number;
 };
 
-const DEFAULT_FIXED_DT = 1 / 60;
+/**
+ * Canonical simulation timestep. All gameplay logic (gear rotation, physics,
+ * orbit, camera) advances in discrete ticks of this size so that two clients
+ * running the same seed + input sequence produce identical state regardless
+ * of wall-clock frame rate. The game-tick path in `Game.updatePlaying`
+ * accumulates wall-clock dt and fires exactly `floor(acc / SIM_FIXED_DT)`
+ * sim.step calls per render frame — see `src/game.ts` for the accumulator.
+ */
+export const SIM_FIXED_DT = 1 / 60;
+const DEFAULT_FIXED_DT = SIM_FIXED_DT;
+
+/**
+ * Require this many seconds of no movement input before the camera
+ * auto-orbit target is allowed to advance. Gates rotation while the
+ * player is actively steering so the view doesn't yaw out from under them.
+ */
+const ORBIT_IDLE_THRESHOLD = 0.75;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HEIGHT = 0.6;
 const PLAYER_MOVE_SPEED = 5;
@@ -87,6 +103,13 @@ export class ClockworkClimbSimulation {
   private readonly recentComboGearIds = new Set<number>();
   private readonly unlockedThisRun = new Set<string>();
   private orbitAngleTarget = Math.PI / 2;
+  /**
+   * Seconds since the player last issued movement input. Only advance the
+   * auto-orbit target while idle ≥ ORBIT_IDLE_THRESHOLD, so the camera stops
+   * rotating out from under an actively-steering player. An already-in-progress
+   * glide completes toward its target (we only gate updates to the target).
+   */
+  private inputIdleSeconds = 0;
   private cameraY = 8.1;
   private deathFreezeTimer = 0;
   private nextChallengeZoneHeight = 100;
@@ -127,6 +150,7 @@ export class ClockworkClimbSimulation {
     this.recentComboGearIds.clear();
     this.unlockedThisRun.clear();
     this.orbitAngleTarget = Math.PI / 2;
+    this.inputIdleSeconds = 0;
     this.cameraY = 8.1;
     this.deathFreezeTimer = 0;
     this.nextChallengeZoneHeight = 100;
@@ -171,6 +195,14 @@ export class ClockworkClimbSimulation {
     this.state.elapsedTime += stepDt;
     this.state.gameTime += stepDt;
     this.timeSinceLastLanding += stepDt;
+
+    // Track movement-input idle time for the orbit debounce. Jump-only presses
+    // still count as idle — the orbit should only yield to directional input.
+    if (resolvedAction.moveX === 0 && resolvedAction.moveY === 0) {
+      this.inputIdleSeconds += stepDt;
+    } else {
+      this.inputIdleSeconds = 0;
+    }
 
     if (this.state.comboLandings > 0 && this.timeSinceLastLanding > COMBO_WINDOW) {
       this.breakCombo();
@@ -1373,7 +1405,11 @@ export class ClockworkClimbSimulation {
     const followLerp = 1 - Math.exp(-dt * (player.onGround ? 5.5 : 4));
     const orbitLerp = 1 - Math.exp(-dt * 7);
 
-    if (player.onGround) {
+    // Gate target re-evaluation on input idle. Player steering input resets
+    // inputIdleSeconds; the camera only re-targets after ORBIT_IDLE_THRESHOLD
+    // of no movement input. An in-progress glide toward an older target is
+    // handled by the angle-step below, so we never snap back mid-glide.
+    if (player.onGround && this.inputIdleSeconds >= ORBIT_IDLE_THRESHOLD) {
       const playerDist = Math.hypot(player.x, player.z);
       const baseAngle = playerDist > 0.5 ? Math.atan2(player.z, player.x) : this.orbitAngleTarget;
       let bestNudge = 0;

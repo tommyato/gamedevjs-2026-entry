@@ -1,0 +1,5 @@
+# UI-harness baseline screenshots go through Git LFS to keep the repo clone
+# size sane. The top-level `screenshots/*.png` files (title.png, gameplay.png,
+# gameover.png, cover-v2-candidate.png) pre-date this policy and stay as raw
+# blobs to avoid a history rewrite. Only new harness output is LFS-tracked.
+screenshots/ui-harness/**/*.png filter=lfs diff=lfs merge=lfs -text

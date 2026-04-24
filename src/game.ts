@@ -77,7 +77,7 @@ import { getLocalUsername as getCoolLocalUsername, setLocalUsername as setCoolLo
 import { MultiplayerManager, BROADCAST_INTERVAL_SECONDS, type MatchResult, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
 import { applyTopDownShadowToObject, TopDownShadowSystem } from "./shadow";
-import { ClockworkClimbSimulation } from "./simulation";
+import { ClockworkClimbSimulation, SIM_FIXED_DT } from "./simulation";
 import type { GearVariant, SimAction, SimBolt, SimEvent, SimGear, SimPlayer, SimPowerUp, SimState } from "./sim-types";
 
 const GHOST_COLORS = [0x00ddff, 0xff00dd, 0x00ff88, 0xff8800];
@@ -419,8 +419,16 @@ export class Game {
 
   private readonly input = new Input();
   private readonly regularSeed = Math.floor(Math.random() * 0x1_0000_0000);
-  private readonly sim = new ClockworkClimbSimulation({ seed: this.regularSeed });
+  private readonly sim = new ClockworkClimbSimulation({ seed: this.regularSeed, fixedDt: SIM_FIXED_DT });
   private simState: SimState | null = null;
+  /**
+   * Fixed-timestep accumulator. Wall-clock dt feeds into here each render frame;
+   * we drain it in SIM_FIXED_DT chunks so the sim advances deterministically
+   * regardless of browser frame jitter. Needed for multiplayer: two clients
+   * with the same seed + input sequence now reach the same state, so remote
+   * ghosts render on the correct gear. See src/simulation.ts:SIM_FIXED_DT.
+   */
+  private simAccumulator = 0;
   private state = GameState.Title;
   private isDailyChallenge = false;
   private dailyChallengeDate = utcDateKey();
@@ -3301,59 +3309,24 @@ export class Game {
   }
 
   private setupAIGhostButton(): void {
-    // The scripted AI ghost was pulled (2026-04-23) because it gets stuck on
-    // gear layouts where one gear occludes the direct jump path to another.
-    // The replacement is a human-recorded ghost (see "PLAY A GHOST" below).
-    //
-    // The scripted / ONNX / MLP code paths stay in the repo as dev-only
-    // fallbacks via the `?_ai=1|onnx|mlp` query params — they're useful for
-    // debugging, just not shipped in the title-screen UI.
-    const AI_GHOST_READY = false;
-
-    const btn = document.getElementById("title-btn-raceai") as HTMLButtonElement | null;
-    if (!btn) return;
-    this.aiGhostButton = btn;
-
-    // ----- PLAY A GHOST (human playback challenge) -----
+    // PLAY A GHOST (human playback challenge).
     //
     // Ghost source: the remote multi-game ghost pool at
     //   https://api.tommyato.com/games/clockwork-climb/ghosts
     // On init we fetch up to 5 ghosts and pick one at random per session.
     //
-    // The button stays hidden until `setupGhostChallenge` confirms a ghost
-    // was successfully fetched — so a failed fetch won't strand a dead
-    // button on the title screen.
-    const GHOST_CHALLENGE_READY = true;
+    // The button is hidden in the HTML by default and only revealed by
+    // setupGhostChallenge once a ghost is successfully fetched — so a failed
+    // fetch won't strand a dead button on the title screen, and there's no
+    // text flash on first paint (the old scripted-AI button label was
+    // removed 2026-04-24 with Build #47).
+    //
+    // The scripted / ONNX / MLP AI paths stay in the repo as dev-only
+    // fallbacks via the `?_ai=1|onnx|mlp` query params — no title-screen UI.
+    const btn = document.getElementById("title-btn-raceai") as HTMLButtonElement | null;
+    if (!btn) return;
+    this.aiGhostButton = btn;
 
-    if (!AI_GHOST_READY && !GHOST_CHALLENGE_READY) {
-      btn.style.display = "none";
-      return;
-    }
-
-    if (AI_GHOST_READY) {
-      // Legacy scripted-AI path (unused in production). Left for reference.
-      btn.textContent = this.aiGhostEnabled ? "AI: ON" : "RACE AI";
-      Object.assign(btn.style, {
-        border: "1px solid rgba(255, 196, 120, 0.45)",
-        background: "linear-gradient(180deg, rgba(46, 32, 14, 0.92), rgba(24, 16, 8, 0.82))",
-        boxShadow: "0 10px 28px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255, 226, 176, 0.18)",
-        color: "#ffe1a9",
-      } as CSSStyleDeclaration);
-      btn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void this.handleAIGhostButtonClick();
-      });
-      btn.addEventListener("touchend", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void this.handleAIGhostButtonClick();
-      }, { passive: false });
-      return;
-    }
-
-    // Challenge mode — button is revealed by setupGhostChallenge once a remote
-    // ghost is loaded. Hidden by default so a failed fetch leaves a clean title.
     btn.textContent = "PLAY A GHOST";
     Object.assign(btn.style, {
       border: "1px solid rgba(155, 216, 255, 0.45)",
@@ -3439,51 +3412,6 @@ export class Game {
   private refreshUsernameUi(): void {
     const input = document.getElementById("title-username-input") as HTMLInputElement | null;
     if (input && document.activeElement !== input) input.value = this.getLocalUsername();
-  }
-
-  private async handleAIGhostButtonClick(): Promise<void> {
-    const btn = this.aiGhostButton;
-    if (!btn) return;
-
-    if (this.aiGhostEnabled) {
-      // Toggle OFF — use "AI GHOST: OFF" once the model has been initialized
-      this.aiGhostEnabled = false;
-      btn.textContent = this.aiGhost ? "AI GHOST: OFF" : "RACE THE AI";
-      // Remove ghost mesh if it exists
-      this.disposeGhostVisual("__ai_ghost__");
-      return;
-    }
-
-    // Toggle ON
-    this.aiGhostEnabled = true;
-
-    if (!this.aiGhost) {
-      this.aiGhost = new AIGhost(getAIGhostModelUrl());
-    }
-
-    if (!this.aiGhost.isReady()) {
-      btn.textContent = "LOADING AI...";
-      btn.style.cursor = "default";
-      btn.style.opacity = "0.65";
-
-      const ok = await this.aiGhost.load();
-
-      btn.style.opacity = "1";
-      btn.style.cursor = "pointer";
-
-      if (!ok) {
-        this.aiGhostEnabled = false;
-        btn.textContent = "RACE THE AI";
-        return;
-      }
-    }
-
-    btn.textContent = "AI GHOST: ON";
-
-    // Launch the run immediately
-    if (this.state === GameState.Title || this.state === GameState.GameOver) {
-      this.startGame();
-    }
   }
 
   private resetAIGhost(): void {
@@ -3856,7 +3784,7 @@ export class Game {
 
     // Keyboard restart from title. Click-to-start on empty title is handled by
     // the titleOverlay click listener, which correctly ignores clicks that
-    // land on a button (ACHIEVEMENTS, MULTIPLAYER, AI GHOST, RACE THE AI).
+    // land on a button (ACHIEVEMENTS, MULTIPLAYER, PLAY A GHOST, etc.).
     if (this.input.justPressed("space")) {
       this.startGame();
     }
@@ -4024,15 +3952,39 @@ export class Game {
 
     // Gate all player input during the pre-match countdown.
     const blocked = this.countdownActive;
+    const movement = blocked ? { x: 0, y: 0 } : this.input.getMovement();
+    const jumpPressed = blocked ? false : this.input.justPressed("space");
     const action: SimAction = {
-      moveX: blocked ? 0 : this.input.getMovement().x,
-      moveY: blocked ? 0 : this.input.getMovement().y,
-      jump: blocked ? false : this.input.justPressed("space"),
+      moveX: movement.x,
+      moveY: movement.y,
+      jump: jumpPressed,
     };
 
-    const { state, events } = this.sim.step(action, dt);
+    // Fixed-timestep accumulator. Drive the sim in SIM_FIXED_DT ticks so two
+    // multiplayer clients on the same seed + input produce identical gear
+    // angles, physics, and orbit — prevents ghost drift over a long match.
+    // Clamp at 0.25s to avoid spiral-of-death on tab resume.
+    this.simAccumulator = Math.min(0.25, this.simAccumulator + dt);
+
+    let state: SimState = this.simState ?? this.sim.getState();
+    const aggregatedEvents: SimEvent[] = [];
+    let firstStep = true;
+    while (this.simAccumulator >= SIM_FIXED_DT) {
+      // `jump` is edge-triggered ("just pressed"). Only deliver it to the
+      // first sim step of this render frame, otherwise we'd queue N jumps
+      // per key press when multiple ticks fire in one frame.
+      if (!firstStep && action.jump) {
+        action.jump = false;
+      }
+      const result = this.sim.step(action, SIM_FIXED_DT);
+      state = result.state;
+      for (const ev of result.events) aggregatedEvents.push(ev);
+      this.simAccumulator -= SIM_FIXED_DT;
+      firstStep = false;
+    }
+
     this.consumeState(state);
-    this.handleEvents(events, state);
+    this.handleEvents(aggregatedEvents, state);
 
     // ── Multiplayer finish detection (100 m crossing) ──────────────────────────
     if (
@@ -4112,6 +4064,33 @@ export class Game {
       state.player.onGround
     );
     this.updateGhosts(dt);
+  }
+
+  /**
+   * Test-only: force the solo game-over UI to appear in its "normal" shape
+   * with mock stats. Used by scripts/verify-ui.mjs to capture the gameover
+   * screen at each fixture without waiting for a natural death. Gated on
+   * `window.__ccGame` being set, which only happens with `?verify-ui=1`.
+   */
+  debugForceGameOver(): void {
+    if (this.state === GameState.GameOver) return;
+    this.score = 1234;
+    this.heightMaxReached = 87;
+    this.heightScore = 870;
+    this.boltScore = 240;
+    this.boltCount = 18;
+    this.bestCombo = 5;
+    this.contractBonus = 0;
+    // Populate leaderboard entries so the panel has something to render.
+    this.gameOverLeaderboardEntries = [
+      { username: "alpha", score: 2400, rank: 1 },
+      { username: "beta", score: 1800, rank: 2 },
+      { username: this.getLocalUsername(), score: 1234, rank: 3 },
+      { username: "delta", score: 900, rank: 4 },
+      { username: "echo", score: 600, rank: 5 },
+    ];
+    const state = this.simState ?? this.sim.getState();
+    this.finishGame(state);
   }
 
   private finishGame(state: SimState) {
