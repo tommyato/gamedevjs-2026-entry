@@ -250,6 +250,9 @@ function formatCountdown(ms: number): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+/** Rounds to integer and adds thousands separators. */
+const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
+
 // -------------------------------------------------------------------------
 // Run Contracts — per-run mini-challenges that award a score bonus on
 // completion. Three are rolled at the start of each non-daily run and shown
@@ -1125,8 +1128,8 @@ export class Game {
       event.preventDefault();
       event.stopPropagation();
       const text = this.isDailyChallenge
-        ? `I scored ${this.score} climbing ${this.heightMaxReached}m in the Clockwork Climb Daily Challenge (${formatHumanDate(this.dailyChallengeDate)})! ⚙️\nCan you beat today's tower?\n@tommyatoai`
-        : `I scored ${this.score} climbing ${this.heightMaxReached}m in Clockwork Climb! ⚙️\nCan you beat my score?\n@tommyatoai`;
+        ? `I scored ${fmt(this.score)} climbing ${fmt(this.heightMaxReached)}m in the Clockwork Climb Daily Challenge (${formatHumanDate(this.dailyChallengeDate)})! ⚙️\nCan you beat today's tower?\n@tommyatoai`
+        : `I scored ${fmt(this.score)} climbing ${fmt(this.heightMaxReached)}m in Clockwork Climb! ⚙️\nCan you beat my score?\n@tommyatoai`;
       const shareUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://tommyato.com/games/clockwork-climb/")}`;
       window.open(shareUrl, "_blank", "noopener,noreferrer");
     });
@@ -1332,8 +1335,8 @@ export class Game {
       this.gameOverLeaderboardList,
       this.gameOverLeaderboardEntries,
       slug === "daily-score"
-        ? `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · THIS RUN ${this.score}`
-        : `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
+        ? `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · THIS RUN ${fmt(this.score)}`
+        : `THIS RUN ${fmt(this.score)} · BEST ${fmt(this.saveData.bestScore)}`
     );
     this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
     this.renderTitleLeaderboardSummary();
@@ -1355,7 +1358,7 @@ export class Game {
       `<div style="display:grid; grid-template-columns: 32px 1fr auto; gap:10px; align-items:baseline; font-size:13px; letter-spacing:1px;">
         <span style="color:#c7a271;">#${entry.rank}</span>
         <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(entry.username)}</span>
-        <span style="color:#ffaa44; font-weight:700;">${entry.score}</span>
+        <span style="color:#ffaa44; font-weight:700;">${fmt(entry.score)}</span>
       </div>`
     )).join("");
   }
@@ -1369,14 +1372,14 @@ export class Game {
     const scoreTarget = Math.max(500, Math.ceil(bestEntry.score / 500) * 500);
     const heightTarget = Math.max(25, Math.ceil(this.saveData.bestHeight / 25) * 25 || 25);
     const comboTarget = Math.max(3, Math.min(10, Math.ceil(Math.max(this.saveData.bestCombo, this.bestCombo) / 2) + 1));
-    return `TARGETS · SCORE ${scoreTarget}+ · HEIGHT ${heightTarget}m+ · COMBO x${comboTarget}+`;
+    return `TARGETS · SCORE ${fmt(scoreTarget)}+ · HEIGHT ${fmt(heightTarget)}m+ · COMBO x${comboTarget}+`;
   }
 
   private getGameOverCallout() {
     if (this.isDailyChallenge) {
       const countdown = formatCountdown(getUtcMsUntilTomorrow());
       return this.dailyPreviousBest !== null
-        ? `DAILY BEST: ${this.dailyPreviousBest} · COME BACK TOMORROW · NEW RUN IN ${countdown} UTC`
+        ? `DAILY BEST: ${fmt(this.dailyPreviousBest)} · COME BACK TOMORROW · NEW RUN IN ${countdown} UTC`
         : `COME BACK TOMORROW · NEW RUN IN ${countdown} UTC`;
     }
     return `CHECKPOINTS · NEXT ${this.nextMilestone}m · ZONES 25/50/75/100`;
@@ -1508,7 +1511,7 @@ export class Game {
       `<div style="display:grid; grid-template-columns: 40px 1fr auto; gap:12px; padding:8px 4px; align-items:baseline; font-size:14px; letter-spacing:1px; border-bottom:1px solid rgba(127,214,255,0.08);">
         <span style="color:#c7a271;">#${entry.rank}</span>
         <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(entry.username)}</span>
-        <span style="color:#ffaa44; font-weight:700;">${entry.score}</span>
+        <span style="color:#ffaa44; font-weight:700;">${fmt(entry.score)}</span>
       </div>`
     )).join("");
     this.leaderboardModalBody.innerHTML = rows;
@@ -1523,8 +1526,8 @@ export class Game {
       return;
     }
     const top = entries[0];
-    const heightPart = this.saveData.bestHeight > 0 ? ` · ${this.saveData.bestHeight}m` : "";
-    el.textContent = `#1 ${top.username} · ${top.score}${heightPart}`;
+    const heightPart = this.saveData.bestHeight > 0 ? ` · ${fmt(this.saveData.bestHeight)}m` : "";
+    el.textContent = `#1 ${top.username} · ${fmt(top.score)}${heightPart}`;
   }
 
   // -----------------------------------------------------------------------
@@ -1650,7 +1653,7 @@ export class Game {
         <div style="display:grid; grid-template-columns: 14px 1fr auto; gap:10px; align-items:baseline; font-size:12px; letter-spacing:1px;">
           <span style="color:#c7a271;">◯</span>
           <span style="color:#f3d7b1;">${escapeHtml(c.def.label)}</span>
-          <span style="color:#ffaa44; font-weight:700;">+${c.def.reward}</span>
+          <span style="color:#ffaa44; font-weight:700;">+${fmt(c.def.reward)}</span>
         </div>
       `)
       .join("");
@@ -1664,7 +1667,7 @@ export class Game {
         const tickColor = c.complete ? "#9aff9a" : "#c7a271";
         const labelColor = c.complete ? "#cfeed0" : "#f3d7b1";
         const labelDecoration = c.complete ? "line-through" : "none";
-        const progress = c.complete ? `+${c.def.reward}` : formatContractProgress(c);
+        const progress = c.complete ? `+${fmt(c.def.reward)}` : formatContractProgress(c);
         const progressColor = c.complete ? "#9aff9a" : "#ffaa44";
         const pulseScale = c.celebrateTimer > 0 ? 1 + c.celebrateTimer * 0.2 : 1;
         return `
@@ -2852,13 +2855,13 @@ export class Game {
 
       // Score
       const scoreCell = document.createElement("div");
-      scoreCell.textContent = String(r.score);
+      scoreCell.textContent = fmt(r.score);
       Object.assign(scoreCell.style, { color: "#cfeaff" } as CSSStyleDeclaration);
       row.appendChild(scoreCell);
 
       // Height
       const heightCell = document.createElement("div");
-      heightCell.textContent = `${Math.floor(r.height)}m`;
+      heightCell.textContent = `${fmt(r.height)}m`;
       Object.assign(heightCell.style, { color: "#a8d8f0" } as CSSStyleDeclaration);
       row.appendChild(heightCell);
 
@@ -3308,7 +3311,7 @@ export class Game {
           visual.label.style.display = "block";
           visual.label.style.left = `${screenX}px`;
           visual.label.style.top = `${screenY}px`;
-          visual.label.textContent = `${peer.username} · ${peer.score}`;
+          visual.label.textContent = `${peer.username} · ${fmt(peer.score)}`;
         } else {
           visual.label.style.display = "none";
         }
@@ -3522,7 +3525,7 @@ export class Game {
         v.label.style.display = "block";
         v.label.style.left = `${hw + this.ghostTmpVec.x * hw}px`;
         v.label.style.top = `${hh - this.ghostTmpVec.y * hh}px`;
-        v.label.textContent = `AI \u00B7 ${gs.score}`;
+        v.label.textContent = `AI \u00B7 ${fmt(gs.score)}`;
       } else {
         v.label.style.display = "none";
       }
@@ -4269,14 +4272,14 @@ export class Game {
       textShadow: "",
     });
     if (isNewBest) {
-      this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
+      this.titleTagline.textContent = `★ NEW BEST ★  SCORE ${fmt(this.score)} · HEIGHT ${fmt(this.heightMaxReached)}m`;
       this.titleTagline.classList.add("new-best");
     } else {
-      this.titleTagline.textContent = `SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m · BEST ${this.highScore}`;
+      this.titleTagline.textContent = `SCORE ${fmt(this.score)} · HEIGHT ${fmt(this.heightMaxReached)}m · BEST ${fmt(this.highScore)}`;
       this.titleTagline.classList.remove("new-best");
     }
     if (this.isDailyChallenge) {
-      this.titleTagline.textContent = `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · SCORE ${this.score} · HEIGHT ${this.heightMaxReached}m`;
+      this.titleTagline.textContent = `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · SCORE ${fmt(this.score)} · HEIGHT ${fmt(this.heightMaxReached)}m`;
       this.titleTagline.classList.remove("new-best");
     }
     this.titlePrompt.textContent = "RESTART";
@@ -4284,19 +4287,19 @@ export class Game {
     this.refreshUsernameUi();
 
     const gameSeconds = Math.floor(state.gameTime);
-    this.gameOverHeightEl.textContent = String(this.heightScore);
-    this.gameOverBoltsEl.textContent = String(this.boltScore);
-    this.gameOverBoltCountEl.textContent = String(this.boltCount);
+    this.gameOverHeightEl.textContent = fmt(this.heightScore);
+    this.gameOverBoltsEl.textContent = fmt(this.boltScore);
+    this.gameOverBoltCountEl.textContent = fmt(this.boltCount);
     this.gameOverComboEl.textContent = `x${this.bestCombo}`;
     this.gameOverTimeEl.textContent = `${gameSeconds}s`;
-    this.gameOverTotalEl.textContent = String(this.score);
+    this.gameOverTotalEl.textContent = fmt(this.score);
 
     const contractsRow = document.getElementById("go-contracts-row");
     const contractsValue = document.getElementById("go-contracts");
     if (contractsRow && contractsValue) {
       if (this.contractBonus > 0 && !this.isDailyChallenge) {
         const completed = this.activeContracts.filter((c) => c.complete).length;
-        contractsValue.textContent = `+${this.contractBonus} · ${completed}/${this.activeContracts.length}`;
+        contractsValue.textContent = `+${fmt(this.contractBonus)} · ${completed}/${this.activeContracts.length}`;
         contractsRow.classList.remove("hidden");
       } else {
         contractsRow.classList.add("hidden");
@@ -4317,8 +4320,8 @@ export class Game {
       this.gameOverLeaderboardList,
       this.gameOverLeaderboardEntries,
       this.isDailyChallenge
-        ? `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · THIS RUN ${this.score}`
-        : `THIS RUN ${this.score} · BEST ${this.saveData.bestScore}`
+        ? `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · THIS RUN ${fmt(this.score)}`
+        : `THIS RUN ${fmt(this.score)} · BEST ${fmt(this.saveData.bestScore)}`
     );
     this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
     this.gameOverView.classList.remove("hidden");
@@ -5431,7 +5434,7 @@ export class Game {
     });
     this.titleTagline.textContent = "CLIMB THE CLOCKWORK TOWER";
     if (this.highScore > 0) {
-      this.titleBest.textContent = `BEST SCORE ${this.highScore} · BEST HEIGHT ${this.saveData.bestHeight}m · BEST COMBO x${this.saveData.bestCombo}`;
+      this.titleBest.textContent = `BEST SCORE ${fmt(this.highScore)} · BEST HEIGHT ${fmt(this.saveData.bestHeight)}m · BEST COMBO x${this.saveData.bestCombo}`;
       this.titleBest.classList.remove("hidden");
     } else {
       this.titleBest.textContent = "";
@@ -5515,20 +5518,20 @@ export class Game {
     // HEIGHT = current live height in meters (grows continuously). BEST = the
     // all-time best height. Previously HEIGHT incorrectly showed score, which
     // meant current height was only visible when it was beating best.
-    this.hudScore.textContent = `${Math.round(this.heightMaxReached)}m`;
-    this.hudBest.textContent = `${Math.max(this.saveData.bestHeight, this.heightMaxReached)}m`;
-    this.hudBestScore.textContent = String(this.saveData.bestScore);
-    this.hudScoreLive.textContent = String(this.score);
-    this.hudBolts.textContent = String(this.boltCount);
+    this.hudScore.textContent = `${fmt(this.heightMaxReached)}m`;
+    this.hudBest.textContent = `${fmt(Math.max(this.saveData.bestHeight, this.heightMaxReached))}m`;
+    this.hudBestScore.textContent = fmt(this.saveData.bestScore);
+    this.hudScoreLive.textContent = fmt(this.score);
+    this.hudBolts.textContent = fmt(this.boltCount);
 
     const aiGs = this.aiGhostEnabled ? this.aiGhost?.getGhostState() : null;
-    const aiHeightStr = aiGs ? ` · AI ${Math.round(aiGs.height)}m` : "";
+    const aiHeightStr = aiGs ? ` · AI ${fmt(aiGs.height)}m` : "";
     if (this.isChallengeMode && this.ghostPlayback) {
-      this.hudStatus.textContent = `CHASING ${this.ghostPlayback.ghostName.toUpperCase()} (${this.ghostPlayback.ghostHeight}m) · YOU ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`;
+      this.hudStatus.textContent = `CHASING ${this.ghostPlayback.ghostName.toUpperCase()} (${fmt(this.ghostPlayback.ghostHeight)}m) · YOU ${fmt(this.heightMaxReached)}m · NEXT ${this.nextMilestone}m`;
     } else {
       this.hudStatus.textContent = this.isDailyChallenge
-        ? `DAILY · ${formatHumanDate(this.dailyChallengeDate)} · SAME TOWER FOR EVERYONE · HEIGHT ${this.heightMaxReached}m · NEXT ${this.nextMilestone}m`
-        : `HEIGHT ${this.heightMaxReached}m${aiHeightStr} · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
+        ? `DAILY · ${formatHumanDate(this.dailyChallengeDate)} · SAME TOWER FOR EVERYONE · HEIGHT ${fmt(this.heightMaxReached)}m · NEXT ${this.nextMilestone}m`
+        : `HEIGHT ${fmt(this.heightMaxReached)}m${aiHeightStr} · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
     }
 
     if (this.hudAiBadge) {
@@ -5705,7 +5708,7 @@ export class Game {
     const hudRect = this.hud.getBoundingClientRect();
     const scoreRect = this.hudScore.getBoundingClientRect();
     const element = document.createElement("div");
-    element.textContent = `+${amount}`;
+    element.textContent = `+${fmt(amount)}`;
     element.style.position = "absolute";
     element.style.left = `${scoreRect.left - hudRect.left + scoreRect.width * 0.5}px`;
     element.style.top = `${scoreRect.top - hudRect.top + 8}px`;
@@ -5872,7 +5875,7 @@ export class Game {
         <div class="gameover-contract-row complete">
           <span style="color:#9aff9a;">✓</span>
           <span style="color:#cfeed0; text-decoration:line-through;">${escapeHtml(c.def.label)}</span>
-          <span style="color:#9aff9a; font-weight:700;">+${c.def.reward}</span>
+          <span style="color:#9aff9a; font-weight:700;">+${fmt(c.def.reward)}</span>
         </div>
       `),
       ...incomplete.map((c) => `
@@ -5884,7 +5887,7 @@ export class Game {
       `),
     ].join("");
     const bonusLine = this.contractBonus > 0
-      ? `<div class="gameover-contracts-bonus">CONTRACT BONUS · +${this.contractBonus}</div>`
+      ? `<div class="gameover-contracts-bonus">CONTRACT BONUS · +${fmt(this.contractBonus)}</div>`
       : "";
     el.classList.remove("hidden");
     el.innerHTML = `
