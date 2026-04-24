@@ -1906,7 +1906,6 @@ export class Game {
 
     const panel = document.createElement("div");
     Object.assign(panel.style, {
-      marginTop: "12px",
       padding: "20px 20px 16px",
       borderRadius: "18px",
       border: "1px solid rgba(127, 214, 255, 0.32)",
@@ -1915,17 +1914,50 @@ export class Game {
       backdropFilter: "blur(14px)",
       fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
       color: "#d7f8ff",
-      width: "min(400px, calc(100vw - 40px))",
+      width: "min(420px, calc(100vw - 40px))",
       boxSizing: "border-box",
       textAlign: "left",
       pointerEvents: "auto",
-      display: "none",
+      position: "relative",
+      maxHeight: "80vh",
+      overflowY: "auto",
     } as CSSStyleDeclaration);
     panel.addEventListener("click", (event) => event.stopPropagation());
     panel.addEventListener("touchend", (event) => {
       event.preventDefault();
       event.stopPropagation();
     }, { passive: false });
+
+    // ── 0. Close / Back button ────────────────────────────────────────────────
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.textContent = "← BACK";
+    Object.assign(closeBtn.style, {
+      position: "absolute",
+      top: "14px",
+      right: "16px",
+      padding: "4px 12px",
+      borderRadius: "999px",
+      border: "1px solid rgba(127, 214, 255, 0.3)",
+      background: "transparent",
+      color: "#7fd6ff",
+      cursor: "pointer",
+      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+      fontSize: "10px",
+      fontWeight: "700",
+      letterSpacing: "1.5px",
+    } as CSSStyleDeclaration);
+    closeBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.leaveMultiplayer();
+    });
+    closeBtn.addEventListener("touchend", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.leaveMultiplayer();
+    }, { passive: false });
+    panel.appendChild(closeBtn);
 
     // ── 1. Title ──────────────────────────────────────────────────────────────
     const titleEl = document.createElement("div");
@@ -2150,8 +2182,33 @@ export class Game {
     status.textContent = "";
     panel.appendChild(status);
     this.multiplayerStatus = status;
-    this.multiplayerPanel = panel;
-    button.insertAdjacentElement("afterend", panel);
+    // Wrap the inner panel in a full-coverage backdrop overlay so it renders
+    // as a proper modal over the title screen, not as a flex child of the
+    // mode-row. Mount the wrapper on #title-overlay (which is position:absolute
+    // and covers the full game area) so z-index stacking works correctly.
+    const panelWrapper = document.createElement("div");
+    Object.assign(panelWrapper.style, {
+      position: "absolute",
+      inset: "0",
+      display: "none",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: "25",
+      background: "rgba(0, 0, 0, 0.65)",
+      backdropFilter: "blur(8px)",
+      overflowY: "auto",
+      padding: "20px",
+      boxSizing: "border-box",
+    } as CSSStyleDeclaration);
+    panelWrapper.addEventListener("click", (event) => event.stopPropagation());
+    panelWrapper.addEventListener("touchend", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    }, { passive: false });
+    panelWrapper.appendChild(panel);
+    const titleOverlay = document.getElementById("title-overlay");
+    (titleOverlay ?? container).appendChild(panelWrapper);
+    this.multiplayerPanel = panelWrapper;
 
     const labelLayer = document.createElement("div");
     Object.assign(labelLayer.style, {
@@ -2346,7 +2403,7 @@ export class Game {
     if (this.multiplayerNameInput) {
       this.multiplayerNameInput.value = this.getLobbyDisplayName();
     }
-    this.multiplayerPanel.style.display = "block";
+    this.multiplayerPanel.style.display = "flex";
     this.multiplayerLobbyVisible = true;
     this.refreshMultiplayerPanel();
     this.startLobbyPolling();

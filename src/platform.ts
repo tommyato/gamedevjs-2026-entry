@@ -698,7 +698,7 @@ export async function getInviteLink(): Promise<string | null> {
   const sdk = getWavedashSdkSync();
   if (!sdk || typeof sdk.getLobbyInviteLink !== "function") return null;
   try {
-    const response = await sdk.getLobbyInviteLink(true);
+    const response = await sdk.getLobbyInviteLink(false);
     if (response && response.success && typeof response.data === "string") {
       return response.data;
     }
