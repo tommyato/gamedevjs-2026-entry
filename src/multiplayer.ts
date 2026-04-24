@@ -1,8 +1,9 @@
 import {
   addMultiplayerListener,
-  broadcastPlayerState,
+  broadcastMessage,
   checkLaunchLobby,
   createMultiplayerLobby,
+  getLobbyHostId,
   getInviteLink,
   getLobbyUserCount,
   getLobbyUsers,
@@ -12,6 +13,27 @@ import {
   leaveMultiplayerLobby,
   readPeerMessages,
 } from "./platform";
+
+import {
+  type MatchResult,
+  type MatchState,
+  type TypedMessage,
+  decodeMessage,
+  encodeDied,
+  encodeFinished,
+  encodeMatchStart,
+  encodeNameUpdate,
+  encodeState,
+} from "./protocol";
+
+export type { MatchResult, MatchState };
+
+// ── Peer ghost ────────────────────────────────────────────────────────────────
+
+export type PeerMatchProgress = {
+  dead?: { score: number; height: number };
+  finished?: { ms: number; score: number; height: number };
+};
 
 export type PeerGhost = {
   userId: string;
@@ -28,79 +50,125 @@ export type PeerGhost = {
   prevY: number;
   prevZ: number;
   prevUpdate: number;
+  matchProgress: PeerMatchProgress;
 };
 
-const STATE_BYTES = 23;
-const BROADCAST_INTERVAL = 1 / 10; // 10Hz
+// ── Callbacks ─────────────────────────────────────────────────────────────────
+
+type MultiplayerCallbacks = {
+  onMatchStart?: (startAtMs: number, matchId: number) => void;
+  onPeerDied?: (userId: string) => void;
+  onPeerFinished?: (userId: string) => void;
+  onMatchEnded?: (results: MatchResult[]) => void;
+  onLobbyCancelled?: () => void;
+};
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const BROADCAST_INTERVAL = 1 / 10; // 10 Hz
 const PEER_TIMEOUT_SECONDS = 5;
+/** Countdown duration sent with MATCH_START. Session 4 will make this configurable. */
+const DEFAULT_COUNTDOWN_MS = 3500;
+/** Seconds host must be absent from lobby + peers before firing onLobbyCancelled. */
+const HOST_ABSENT_THRESHOLD = 5;
+
+// ── Manager ───────────────────────────────────────────────────────────────────
 
 export class MultiplayerManager {
   private lobbyId: string | null = null;
   private peers: Map<string, PeerGhost> = new Map();
+  /** Pending match-progress updates for peers not yet seen via STATE. */
+  private pendingProgress: Map<string, PeerMatchProgress> = new Map();
   private broadcastTimer = 0;
   private clock = 0;
   private connectedListenerBound = false;
 
-  // 23-byte binary encoding:
-  //   0..3  Float32 x
-  //   4..7  Float32 y
-  //   8..11 Float32 z
-  //   12..15 Float32 height
-  //   16..19 Uint32 score
-  //   20..21 Uint16 combo
-  //   22     Uint8 flags (bit0 = onGround)
-  encodeState(
-    x: number,
-    y: number,
-    z: number,
-    height: number,
-    score: number,
-    combo: number,
-    onGround: boolean
-  ): Uint8Array {
-    const buffer = new ArrayBuffer(STATE_BYTES);
-    const view = new DataView(buffer);
-    view.setFloat32(0, x, true);
-    view.setFloat32(4, y, true);
-    view.setFloat32(8, z, true);
-    view.setFloat32(12, height, true);
-    view.setUint32(16, Math.max(0, Math.min(0xffffffff, Math.floor(score))), true);
-    view.setUint16(20, Math.max(0, Math.min(0xffff, Math.floor(combo))), true);
-    view.setUint8(22, onGround ? 1 : 0);
-    return new Uint8Array(buffer);
+  // Match state machine
+  private matchState: MatchState = "lobby";
+  private currentMatchId = 0;
+  private lastMatchId = 0;
+
+  // Host tracking
+  private hostSelf = false;
+  private hostUserId: string | null = null;
+  private hostAbsentTimer = 0;
+
+  /** Set when peer sends a message with a different protocol version. */
+  private _protocolVersionMismatch = false;
+
+  private callbacks: MultiplayerCallbacks = {};
+
+  // ── Callback registration ──────────────────────────────────────────────────
+
+  setCallbacks(cbs: MultiplayerCallbacks): void {
+    this.callbacks = { ...this.callbacks, ...cbs };
   }
 
-  decodeState(data: Uint8Array): {
-    x: number;
-    y: number;
-    z: number;
-    height: number;
-    score: number;
-    combo: number;
-    onGround: boolean;
-  } | null {
-    if (data.length < STATE_BYTES) return null;
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-    const x = view.getFloat32(0, true);
-    const y = view.getFloat32(4, true);
-    const z = view.getFloat32(8, true);
-    const height = view.getFloat32(12, true);
-    const score = view.getUint32(16, true);
-    const combo = view.getUint16(20, true);
-    const flags = view.getUint8(22);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-      return null;
-    }
-    return {
-      x,
-      y,
-      z,
-      height,
-      score,
-      combo,
-      onGround: (flags & 0x01) !== 0,
-    };
+  // ── Match state getters ────────────────────────────────────────────────────
+
+  getMatchState(): MatchState {
+    return this.matchState;
   }
+
+  getCurrentMatchId(): number {
+    return this.currentMatchId;
+  }
+
+  isHost(): boolean {
+    return this.hostSelf;
+  }
+
+  hasProtocolVersionMismatch(): boolean {
+    return this._protocolVersionMismatch;
+  }
+
+  // ── Host-only API ──────────────────────────────────────────────────────────
+
+  /**
+   * Initiates a match. Host-only — no-op if called on a non-host client.
+   * Assigns a fresh matchId, broadcasts MATCH_START (reliable), transitions
+   * local state to "countdown", and fires onMatchStart on the host side.
+   *
+   * Countdown duration is DEFAULT_COUNTDOWN_MS; Session 4 will expose it.
+   */
+  startMatch(): void {
+    if (!this.isActive() || !this.hostSelf) return;
+    const now = Date.now();
+    // Use lower 32 bits of epoch ms as matchId — monotonically increasing
+    // within a ~50-day window, which is sufficient for multiplayer sessions.
+    this.currentMatchId = now >>> 0;
+    broadcastMessage(true, encodeMatchStart(DEFAULT_COUNTDOWN_MS, this.currentMatchId));
+    this.matchState = "countdown";
+    this.callbacks.onMatchStart?.(now + DEFAULT_COUNTDOWN_MS, this.currentMatchId);
+  }
+
+  // ── Local event broadcasts ─────────────────────────────────────────────────
+
+  /**
+   * Broadcasts DIED (reliable) for the local player. Call from finishGame()
+   * when the player dies during a multiplayer match.
+   */
+  notifyDied(score: number, height: number): void {
+    if (!this.isActive()) return;
+    broadcastMessage(true, encodeDied(this.currentMatchId, score, height));
+  }
+
+  /**
+   * Broadcasts FINISHED (reliable) when the local player reaches the finish
+   * height. Call when the player crosses 100 m during a multiplayer match.
+   */
+  notifyFinished(finishMs: number, score: number, height: number): void {
+    if (!this.isActive()) return;
+    broadcastMessage(true, encodeFinished(this.currentMatchId, finishMs, score, height));
+  }
+
+  /** Broadcasts NAME_UPDATE (reliable) when the local display name changes. */
+  sendNameUpdate(name: string): void {
+    if (!this.isActive()) return;
+    broadcastMessage(true, encodeNameUpdate(name));
+  }
+
+  // ── Per-tick update ────────────────────────────────────────────────────────
 
   update(
     dt: number,
@@ -118,63 +186,48 @@ export class MultiplayerManager {
     this.broadcastTimer += dt;
     if (this.broadcastTimer >= BROADCAST_INTERVAL) {
       this.broadcastTimer = 0;
-      const payload = this.encodeState(playerX, playerY, playerZ, height, score, combo, onGround);
-      broadcastPlayerState(payload);
+      broadcastMessage(false, encodeState(playerX, playerY, playerZ, height, score, combo, onGround));
     }
 
     this.drainInbound();
+    this.tickHostDisconnect(dt);
   }
 
-  // Drain the peer message channel without broadcasting — useful while idling
-  // on the title/game-over screen so peer counts stay fresh but we don't spam
-  // peers with a bogus "(0,0,0)" player position.
+  /**
+   * Drains inbound messages and ticks host-disconnect detection without
+   * broadcasting state. Use on title/game-over screens so peer counts stay
+   * fresh without emitting a bogus (0,0,0) position.
+   */
   pollPeers(dt: number): void {
     if (!this.isActive()) return;
     this.clock += dt;
     this.drainInbound();
+    this.tickHostDisconnect(dt);
   }
 
+  // ── Inbound message handling ───────────────────────────────────────────────
+
   private drainInbound(): void {
-    const messages = readPeerMessages();
-    for (const message of messages) {
-      const decoded = this.decodeState(message.payload);
-      if (!decoded) continue;
-      const existing = this.peers.get(message.fromUserId);
-      if (existing) {
-        existing.prevX = existing.x;
-        existing.prevY = existing.y;
-        existing.prevZ = existing.z;
-        existing.prevUpdate = existing.lastUpdate;
-        existing.x = decoded.x;
-        existing.y = decoded.y;
-        existing.z = decoded.z;
-        existing.height = decoded.height;
-        existing.score = decoded.score;
-        existing.combo = decoded.combo;
-        existing.onGround = decoded.onGround;
-        existing.lastUpdate = this.clock;
-      } else {
-        const username = this.resolveUsername(message.fromUserId);
-        this.peers.set(message.fromUserId, {
-          userId: message.fromUserId,
-          username,
-          x: decoded.x,
-          y: decoded.y,
-          z: decoded.z,
-          height: decoded.height,
-          score: decoded.score,
-          combo: decoded.combo,
-          onGround: decoded.onGround,
-          lastUpdate: this.clock,
-          prevX: decoded.x,
-          prevY: decoded.y,
-          prevZ: decoded.z,
-          prevUpdate: this.clock,
-        });
+    for (const message of readPeerMessages()) {
+      const msg = decodeMessage(message.payload);
+      if (!msg) continue;
+      const uid = message.fromUserId;
+
+      if (msg.type === "state") {
+        this.handleState(uid, msg);
+      } else if (msg.type === "match_start") {
+        this.handleMatchStart(uid, msg);
+      } else if (msg.type === "died") {
+        this.handleDied(uid, msg);
+      } else if (msg.type === "finished") {
+        this.handleFinished(uid, msg);
+      } else if (msg.type === "name_update") {
+        this.handleNameUpdate(uid, msg);
       }
+      // ready_toggle: Session 3 will consume
     }
 
-    // Remove stale peers
+    // Remove stale peers (no STATE received within timeout window)
     for (const [userId, peer] of this.peers) {
       if (this.clock - peer.lastUpdate > PEER_TIMEOUT_SECONDS) {
         this.peers.delete(userId);
@@ -182,20 +235,131 @@ export class MultiplayerManager {
     }
   }
 
-  private resolveUsername(userId: string): string {
-    if (!this.lobbyId) return userId;
+  private handleState(
+    uid: string,
+    msg: TypedMessage & { type: "state" }
+  ): void {
+    const existing = this.peers.get(uid);
+    if (existing) {
+      existing.prevX = existing.x;
+      existing.prevY = existing.y;
+      existing.prevZ = existing.z;
+      existing.prevUpdate = existing.lastUpdate;
+      existing.x = msg.x;
+      existing.y = msg.y;
+      existing.z = msg.z;
+      existing.height = msg.height;
+      existing.score = msg.score;
+      existing.combo = msg.combo;
+      existing.onGround = msg.onGround;
+      existing.lastUpdate = this.clock;
+    } else {
+      const username = this.resolveUsername(uid);
+      const pending = this.pendingProgress.get(uid);
+      this.peers.set(uid, {
+        userId: uid,
+        username,
+        x: msg.x,
+        y: msg.y,
+        z: msg.z,
+        height: msg.height,
+        score: msg.score,
+        combo: msg.combo,
+        onGround: msg.onGround,
+        lastUpdate: this.clock,
+        prevX: msg.x,
+        prevY: msg.y,
+        prevZ: msg.z,
+        prevUpdate: this.clock,
+        matchProgress: pending ?? {},
+      });
+      if (pending) this.pendingProgress.delete(uid);
+    }
+  }
+
+  private handleMatchStart(
+    uid: string,
+    msg: TypedMessage & { type: "match_start" }
+  ): void {
+    // Reject from unexpected senders when host is known
+    if (this.hostUserId && uid !== this.hostUserId) return;
+    // Monotonic guard: reject duplicate/stale match ids
+    if (this.lastMatchId > 0 && msg.matchId <= this.lastMatchId) return;
+    this.lastMatchId = msg.matchId;
+    this.currentMatchId = msg.matchId;
+    this.matchState = "countdown";
+    this.callbacks.onMatchStart?.(Date.now() + msg.startMsRel, msg.matchId);
+  }
+
+  private handleDied(
+    uid: string,
+    msg: TypedMessage & { type: "died" }
+  ): void {
+    if (msg.matchId !== this.currentMatchId) return;
+    const peer = this.peers.get(uid);
+    if (peer) {
+      if (!peer.matchProgress.dead) {
+        peer.matchProgress.dead = { score: msg.score, height: msg.height };
+      }
+    } else {
+      const prog = this.pendingProgress.get(uid) ?? {};
+      prog.dead = prog.dead ?? { score: msg.score, height: msg.height };
+      this.pendingProgress.set(uid, prog);
+    }
+    this.callbacks.onPeerDied?.(uid);
+  }
+
+  private handleFinished(
+    uid: string,
+    msg: TypedMessage & { type: "finished" }
+  ): void {
+    if (msg.matchId !== this.currentMatchId) return;
+    const peer = this.peers.get(uid);
+    if (peer) {
+      if (!peer.matchProgress.finished) {
+        peer.matchProgress.finished = { ms: msg.finishMs, score: msg.score, height: msg.height };
+      }
+    } else {
+      const prog = this.pendingProgress.get(uid) ?? {};
+      prog.finished = prog.finished ?? { ms: msg.finishMs, score: msg.score, height: msg.height };
+      this.pendingProgress.set(uid, prog);
+    }
+    this.callbacks.onPeerFinished?.(uid);
+  }
+
+  private handleNameUpdate(
+    uid: string,
+    msg: TypedMessage & { type: "name_update" }
+  ): void {
+    const peer = this.peers.get(uid);
+    if (peer) peer.username = msg.name;
+  }
+
+  // ── Host disconnect detection ──────────────────────────────────────────────
+
+  private tickHostDisconnect(dt: number): void {
+    // Only run on non-host clients in lobby state with a known host
+    if (this.hostSelf || this.matchState !== "lobby" || !this.lobbyId || !this.hostUserId) return;
+
     const users = getLobbyUsers(this.lobbyId);
-    const match = users.find((user) => user.userId === userId);
-    return match?.username ?? userId;
+    const hostPresent =
+      users.some((u) => u.userId === this.hostUserId) ||
+      this.peers.has(this.hostUserId!);
+
+    if (!hostPresent) {
+      this.hostAbsentTimer += dt;
+      if (this.hostAbsentTimer >= HOST_ABSENT_THRESHOLD) {
+        // Clear to prevent re-firing
+        this.hostUserId = null;
+        this.hostAbsentTimer = 0;
+        this.callbacks.onLobbyCancelled?.();
+      }
+    } else {
+      this.hostAbsentTimer = 0;
+    }
   }
 
-  getPeers(): PeerGhost[] {
-    return Array.from(this.peers.values());
-  }
-
-  getClock(): number {
-    return this.clock;
-  }
+  // ── Lobby lifecycle ────────────────────────────────────────────────────────
 
   async createLobby(): Promise<string | null> {
     if (!isMultiplayerAvailable()) return null;
@@ -203,8 +367,12 @@ export class MultiplayerManager {
     const id = await createMultiplayerLobby();
     if (id) {
       this.lobbyId = id;
+      this.hostSelf = true;
+      this.hostUserId = null; // SDK doesn't expose our own userId
       this.peers.clear();
+      this.pendingProgress.clear();
       this.broadcastTimer = 0;
+      this.matchState = "lobby";
     }
     return id;
   }
@@ -215,8 +383,12 @@ export class MultiplayerManager {
     const ok = await joinMultiplayerLobby(lobbyId);
     if (ok) {
       this.lobbyId = lobbyId;
+      this.hostSelf = false;
+      this.hostUserId = getLobbyHostId(lobbyId);
       this.peers.clear();
+      this.pendingProgress.clear();
       this.broadcastTimer = 0;
+      this.matchState = "lobby";
     }
     return ok;
   }
@@ -226,8 +398,26 @@ export class MultiplayerManager {
     const id = this.lobbyId;
     this.lobbyId = null;
     this.peers.clear();
+    this.pendingProgress.clear();
     this.broadcastTimer = 0;
+    this.matchState = "lobby";
+    this.hostSelf = false;
+    this.hostUserId = null;
+    this.currentMatchId = 0;
+    this.lastMatchId = 0;
+    this.hostAbsentTimer = 0;
+    this._protocolVersionMismatch = false;
     await leaveMultiplayerLobby(id);
+  }
+
+  // ── Accessors ──────────────────────────────────────────────────────────────
+
+  getPeers(): PeerGhost[] {
+    return Array.from(this.peers.values());
+  }
+
+  getClock(): number {
+    return this.clock;
   }
 
   async getInviteLink(): Promise<string | null> {
@@ -254,6 +444,14 @@ export class MultiplayerManager {
     return this.lobbyId !== null;
   }
 
+  isAvailable(): boolean {
+    return isMultiplayerAvailable();
+  }
+
+  getPeerCount(): number {
+    return this.peers.size;
+  }
+
   /**
    * Returns a deterministic 32-bit unsigned integer seed derived from the
    * current lobby id. Every peer in the same lobby hashes the same lobby id
@@ -272,12 +470,13 @@ export class MultiplayerManager {
     return hash >>> 0;
   }
 
-  getPeerCount(): number {
-    return this.peers.size;
-  }
+  // ── Internal ───────────────────────────────────────────────────────────────
 
-  isAvailable(): boolean {
-    return isMultiplayerAvailable();
+  private resolveUsername(userId: string): string {
+    if (!this.lobbyId) return userId;
+    const users = getLobbyUsers(this.lobbyId);
+    const match = users.find((user) => user.userId === userId);
+    return match?.username ?? userId;
   }
 
   private ensureListeners(): void {
@@ -286,7 +485,7 @@ export class MultiplayerManager {
     const connectedEvent = events.P2P_CONNECTION_ESTABLISHED ?? "p2p_connection_established";
     addMultiplayerListener(connectedEvent, (_event: unknown) => {
       // When a new peer connects, immediately push our broadcast so they see us
-      // without waiting for the next 100ms tick.
+      // without waiting for the next 100 ms tick.
       this.broadcastTimer = BROADCAST_INTERVAL;
     });
     this.connectedListenerBound = true;

@@ -1159,6 +1159,7 @@ export class Game {
     this.setupGameOverButtons();
     void this.loadAchievementCatalog();
     this.setupMultiplayerUi(container);
+    this.setupMultiplayerCallbacks();
     this.initAIGhost();
     this.setupAIGhostButton();
     void this.setupGhostChallenge();
@@ -1973,6 +1974,35 @@ export class Game {
     if (launchLobby) {
       void this.joinMultiplayerFromLaunch(launchLobby);
     }
+  }
+
+  // ── Multiplayer callback stubs ─────────────────────────────────────────────
+  // Full implementations land in Sessions 3-5; these ensure the callbacks are
+  // wired and reachable now so later sessions can fill in the bodies.
+
+  private setupMultiplayerCallbacks(): void {
+    this.multiplayer.setCallbacks({
+      onMatchStart: (startAtMs, matchId) => {
+        // Session 4: hide lobby, start countdown, call startGame() with input gated.
+        console.log(`[mp] match starting matchId=${matchId} startAt=${new Date(startAtMs).toISOString()}`);
+      },
+      onPeerDied: (userId) => {
+        // Session 5: update peer ghost display, check end condition.
+        console.log(`[mp] peer died: ${userId}`);
+      },
+      onPeerFinished: (userId) => {
+        // Session 5: update peer ghost display, check end condition.
+        console.log(`[mp] peer finished: ${userId}`);
+      },
+      onMatchEnded: (_results) => {
+        // Session 5: show end screen with rankings.
+        console.log("[mp] match ended");
+      },
+      onLobbyCancelled: () => {
+        // Session 3/6: show "host left" toast, return to title.
+        console.log("[mp] lobby cancelled — host disconnected");
+      },
+    });
   }
 
   private async openMultiplayerLobby(): Promise<void> {
@@ -3011,6 +3041,10 @@ export class Game {
 
   private finishGame(state: SimState) {
     this.state = GameState.GameOver;
+    // Notify peers of local death before any other state changes.
+    if (this.multiplayer.isActive()) {
+      this.multiplayer.notifyDied(this.score, this.heightMaxReached);
+    }
     this.input.setTouchControlsVisible(false);
     this.hideTutorialOverlay(true);
     this.hideLandingCueHard();

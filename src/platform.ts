@@ -661,14 +661,20 @@ export async function leaveMultiplayerLobby(lobbyId: string): Promise<void> {
   }
 }
 
-export function broadcastPlayerState(data: Uint8Array): void {
+/** Broadcasts a P2P message on channel 0, reliable or unreliable. */
+export function broadcastMessage(reliable: boolean, data: Uint8Array): void {
   const sdk = getWavedashSdkSync();
   if (!sdk || typeof sdk.broadcastP2PMessage !== "function") return;
   try {
-    sdk.broadcastP2PMessage(0, false, data);
+    sdk.broadcastP2PMessage(0, reliable, data);
   } catch {
-    // drop message silently — fire-and-forget position updates
+    // drop silently
   }
+}
+
+/** @deprecated Use broadcastMessage(false, data) instead. */
+export function broadcastPlayerState(data: Uint8Array): void {
+  broadcastMessage(false, data);
 }
 
 export function readPeerMessages(): PeerMessage[] {
@@ -731,6 +737,14 @@ export function getLobbyUsers(lobbyId: string): LobbyUser[] {
     // ignore
   }
   return [];
+}
+
+/**
+ * Returns the userId of the lobby host (first user in the list, by convention
+ * the lobby creator). Returns null when the SDK is unavailable or the list is empty.
+ */
+export function getLobbyHostId(lobbyId: string): string | null {
+  return getLobbyUsers(lobbyId)[0]?.userId ?? null;
 }
 
 export function getLobbyUserCount(lobbyId: string): number {
