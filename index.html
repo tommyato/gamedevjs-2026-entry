@@ -256,11 +256,14 @@
       text-shadow: none;
     }
 
-    /* Right-rail HUD on wide viewports (>= 1280px). Stacks score / best /
+    /* Right-rail HUD on wide viewports (>= 960px). Stacks score / best /
        bolts / combo / contracts / powerups in a 300px rail along the right
        edge, leaving ~78% of the canvas to the gameplay (which the camera
-       offsets toward to keep the player centered in the playable area). */
-    @media (min-width: 1280px) {
+       offsets toward to keep the player centered in the playable area).
+       960 px threshold covers typical Wavedash iframe widths (~1000-1100 px);
+       the previous 1280 threshold left the rail inactive in-frame, so the
+       HUD overlapped the centered player sprite. */
+    @media (min-width: 960px) {
       body.hud-rail #hud {
         padding: 0;
       }

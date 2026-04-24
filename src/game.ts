@@ -74,7 +74,7 @@ import {
   pickRandom as pickRandomGhost,
 } from "./remote-ghosts";
 import { getLocalUsername as getCoolLocalUsername, setLocalUsername as setCoolLocalUsername } from "./coolname";
-import { MultiplayerManager, type MatchResult, type PeerGhost } from "./multiplayer";
+import { MultiplayerManager, BROADCAST_INTERVAL_SECONDS, type MatchResult, type PeerGhost } from "./multiplayer";
 import { Player } from "./player";
 import { applyTopDownShadowToObject, TopDownShadowSystem } from "./shadow";
 import { ClockworkClimbSimulation } from "./simulation";
@@ -598,6 +598,10 @@ export class Game {
   private matchTimerCriticalLastSec = -1;
   // ── End screen ────────────────────────────────────────────────────────────
   private endScreenOverlay: HTMLDivElement | null = null;
+  /** Non-host-only label showing "Waiting for host…" or "Host left — match over". */
+  private endScreenWaitText: HTMLDivElement | null = null;
+  /** Latched once we've swapped the wait text to "host left" so we don't keep re-rendering. */
+  private endScreenHostLeftShown = false;
   private readonly ghostTmpVec = new THREE.Vector3();
   private readonly backgroundGroup = new THREE.Group();
   private readonly titleBackdropGroup = new THREE.Group();
@@ -1511,12 +1515,15 @@ export class Game {
   }
 
   // -----------------------------------------------------------------------
-  // HUD rail — on wide viewports (>= 1280px), render the HUD as a right
+  // HUD rail — on wide viewports (>= 960px), render the HUD as a right
   // rail so the gameplay claims the left ~78% of the canvas. CSS does the
   // actual layout; this method just toggles the body class that gates it.
   // -----------------------------------------------------------------------
   private applyHudRailState(): void {
-    const wide = window.innerWidth >= 1280;
+    // Threshold matches the @media (min-width) in index.html that activates the
+    // right-rail HUD styling. 960 px captures typical Wavedash iframe widths
+    // (~1000-1100 px); 1280 px was too tight and left the rail inactive in-frame.
+    const wide = window.innerWidth >= 960;
     document.body.classList.toggle("hud-rail", wide);
   }
 
@@ -2004,7 +2011,10 @@ export class Game {
 
     const playerList = document.createElement("div");
     Object.assign(playerList.style, {
-      minHeight: "60px",
+      // Sized for 4 rows @ ~30 px each plus 2 px gaps so the list renders with
+      // no internal scroll at the 4-player cap. Build #43 set this to 60 px,
+      // which was already full at 2 players.
+      minHeight: "140px",
       marginBottom: "10px",
       display: "flex",
       flexDirection: "column",
@@ -2869,6 +2879,11 @@ export class Game {
 
     const isHost = this.multiplayer.isHost();
 
+    // Reset non-host wait-text refs for this render. If we're host they stay
+    // null; the updateGameOver tick skips the host-left check when null.
+    this.endScreenWaitText = null;
+    this.endScreenHostLeftShown = false;
+
     if (isHost) {
       const startBtn = makeBtn("Cooldown…", "rgba(255,196,120,0.4)");
       startBtn.disabled = true;
@@ -2902,6 +2917,7 @@ export class Game {
       } as CSSStyleDeclaration);
       waitText.textContent = "Waiting for host to start next match…";
       btnRow.appendChild(waitText);
+      this.endScreenWaitText = waitText;
     }
 
     const leaveBtn = makeBtn("LEAVE LOBBY", "rgba(255,120,120,0.4)");
@@ -2931,6 +2947,27 @@ export class Game {
     if (this.endScreenOverlay) {
       this.endScreenOverlay.style.display = "none";
     }
+    this.endScreenWaitText = null;
+    this.endScreenHostLeftShown = false;
+  }
+
+  /**
+   * Polled by updateGameOver while the multiplayer end screen is up. If the
+   * host has left the lobby (SDK roster no longer contains their userId),
+   * swap the non-host wait label from "Waiting for host…" to a terminal
+   * "Host left — match over. Choose LEAVE LOBBY to return." line.
+   *
+   * The endScreenWaitText ref is only populated for non-host clients, so this
+   * is a no-op for hosts and for clients that have already been notified.
+   */
+  private updateEndScreenHostLeftState(): void {
+    const label = this.endScreenWaitText;
+    if (!label || this.endScreenHostLeftShown) return;
+    if (!this.endScreenOverlay || this.endScreenOverlay.style.display === "none") return;
+    if (this.multiplayer.isLobbyHostPresent()) return;
+    label.textContent = "Host left — match over. Tap LEAVE LOBBY to return.";
+    label.style.color = "#ff9a9a";
+    this.endScreenHostLeftShown = true;
   }
 
   private refreshMultiplayerPanel() {
@@ -2998,7 +3035,9 @@ export class Game {
       display: "flex",
       alignItems: "center",
       gap: "6px",
-      padding: "5px 8px",
+      // Tightened from "5px 8px" to keep 4 rows under the 140 px list cap
+      // (4 × 30 + gaps ≈ 128 px, giving a small safety margin).
+      padding: "4px 8px",
       borderRadius: "8px",
       background: isSelf ? "rgba(127, 214, 255, 0.08)" : "rgba(0, 0, 0, 0.15)",
       fontSize: "12px",
@@ -3205,8 +3244,13 @@ export class Game {
       const visual = this.ensureGhostVisual(peer, index);
 
       const clock = this.multiplayer.getClock();
-      const span = Math.max(0.02, peer.lastUpdate - peer.prevUpdate);
-      const t = THREE.MathUtils.clamp((clock - peer.lastUpdate) / span + 1, 0, 1.25);
+      // Render peers one broadcast interval behind the latest packet so packets
+      // always interpolate cleanly between prev → current. Pure interpolation
+      // (no extrapolation) — clamp [0, 1] so late packets freeze at current
+      // instead of overshooting and snapping back (the Build #43 jerk source).
+      const renderTime = clock - BROADCAST_INTERVAL_SECONDS;
+      const span = Math.max(0.001, peer.lastUpdate - peer.prevUpdate);
+      const t = THREE.MathUtils.clamp((renderTime - peer.prevUpdate) / span, 0, 1);
       const x = THREE.MathUtils.lerp(peer.prevX, peer.x, t);
       const y = THREE.MathUtils.lerp(peer.prevY, peer.y, t);
       const z = THREE.MathUtils.lerp(peer.prevZ, peer.z, t);
@@ -3363,7 +3407,12 @@ export class Game {
     if (!input) return;
     input.value = this.getLocalUsername();
     const commit = () => {
+      // Persist the typed value to coolname storage and flip the override flag
+      // so getLocalUsername() prefers it over the Wavedash SDK cached name.
+      // The SDK exposes no setDisplayName surface, so this localStorage flag
+      // is the only way to make the user's edit stick across a page reload.
       setCoolLocalUsername(input.value);
+      try { localStorage.setItem("cc.usernameOverrideSdk", "1"); } catch { /* ignore */ }
       input.value = this.getLocalUsername();
     };
     input.addEventListener("blur", commit);
@@ -4291,6 +4340,16 @@ export class Game {
   }
 
   private getLocalUsername(): string {
+    // User-override flag: once the player has manually edited their name on
+    // the title screen, their locally stored coolname takes priority over the
+    // SDK-cached display name. Without this, the Wavedash SDK's `getUser()`
+    // name is preferred, and the typed value is immediately overwritten on
+    // the next refresh (the Build #43 "name reverts on blur" bug).
+    try {
+      if (localStorage.getItem("cc.usernameOverrideSdk") === "1") {
+        return getCoolLocalUsername();
+      }
+    } catch { /* localStorage may be unavailable */ }
     try {
       const wavedashName = getUsername();
       // Only use the wavedash name if it's a real user-set value — not the SDK
@@ -4352,6 +4411,11 @@ export class Game {
       if (this.multiplayer.getMatchState() === "in_match") {
         this.updateMatchTimerOverlay();
       }
+      // Host-left detection for the post-match end screen (non-host clients).
+      // When the host bails out of the lobby after a match ends, the SDK
+      // roster drops them within ≈ 1 s; swap the "waiting for host" line
+      // for "host left — match over" so the non-host doesn't sit forever.
+      this.updateEndScreenHostLeftState();
     }
 
     // Keyboard-only restart. Mouse clicks on the game-over overlay are routed
@@ -4935,7 +4999,7 @@ export class Game {
     // the player's depth by projecting the desired NDC offset back to world.
     let lookOffsetX = 0;
     let lookOffsetZ = 0;
-    if (window.innerWidth >= 1280) {
+    if (window.innerWidth >= 960) {
       // Aim ~22% of the view width to the right of the player in screen
       // space. Convert to world units via fov + distance-to-player.
       const distToPlayer = Math.hypot(
@@ -5409,7 +5473,10 @@ export class Game {
   }
 
   private updateHud(dt: number) {
-    this.hudScore.textContent = String(this.score);
+    // HEIGHT = current live height in meters (grows continuously). BEST = the
+    // all-time best height. Previously HEIGHT incorrectly showed score, which
+    // meant current height was only visible when it was beating best.
+    this.hudScore.textContent = `${Math.round(this.heightMaxReached)}m`;
     this.hudBest.textContent = `${Math.max(this.saveData.bestHeight, this.heightMaxReached)}m`;
     this.hudBolts.textContent = String(this.boltCount);
 

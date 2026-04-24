@@ -71,7 +71,10 @@ type MultiplayerCallbacks = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const BROADCAST_INTERVAL = 1 / 10; // 10 Hz
+/** Seconds between STATE broadcasts. Exported so the render-side interpolator
+ *  can use the same value as the render-behind delay for pure interpolation. */
+export const BROADCAST_INTERVAL_SECONDS = 1 / 20; // 20 Hz
+const BROADCAST_INTERVAL = BROADCAST_INTERVAL_SECONDS;
 const PEER_TIMEOUT_SECONDS = 5;
 /** Countdown duration sent with MATCH_START. Session 4 will make this configurable. */
 const DEFAULT_COUNTDOWN_MS = 3500;
@@ -749,6 +752,24 @@ export class MultiplayerManager {
   /** Returns the userId of the lobby host, or null if we are the host / unknown. */
   getHostUserId(): string | null {
     return this.hostUserId;
+  }
+
+  /**
+   * Returns true if the lobby host is still present in the SDK lobby roster.
+   *
+   * Drives the end-screen "host left — match over" transition for non-host
+   * clients. Reuses the same SDK roster signal as the lobby-cancel watchdog,
+   * so detection latency matches Wavedash's own member-list refresh (≈ 1 s).
+   *
+   * - If we ARE the host, trivially true.
+   * - If hostUserId or lobbyId is unknown, trivially true (no evidence of departure).
+   * - Otherwise, checks the roster for a user whose userId === hostUserId.
+   */
+  isLobbyHostPresent(): boolean {
+    if (this.hostSelf) return true;
+    if (!this.hostUserId || !this.lobbyId) return true;
+    const users = getLobbyUsers(this.lobbyId);
+    return users.some((u) => u.userId === this.hostUserId);
   }
 
   /**
