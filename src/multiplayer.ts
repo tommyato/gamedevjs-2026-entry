@@ -254,6 +254,24 @@ export class MultiplayerManager {
     return this.lobbyId !== null;
   }
 
+  /**
+   * Returns a deterministic 32-bit unsigned integer seed derived from the
+   * current lobby id. Every peer in the same lobby hashes the same lobby id
+   * to the same value, so the tower layout is synchronized without a
+   * seed-broadcast round-trip. Returns null when no lobby is active.
+   *
+   * Uses FNV-1a 32-bit — pure, deterministic, dependency-free.
+   */
+  getSyncedSeed(): number | null {
+    if (!this.lobbyId) return null;
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < this.lobbyId.length; i++) {
+      hash ^= this.lobbyId.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return hash >>> 0;
+  }
+
   getPeerCount(): number {
     return this.peers.size;
   }

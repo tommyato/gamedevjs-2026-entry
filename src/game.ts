@@ -2413,12 +2413,17 @@ export class Game {
 
   private resetAIGhost(): void {
     if (!this.aiGhostEnabled || !this.aiGhost?.isReady()) return;
-    // Use the same seed as the player's current run so the ghost sees the
-    // same gear layout. Daily runs use the calendar seed; normal runs use
-    // the session-rolled seed.
-    const seed = this.isDailyChallenge
-      ? dailySeed(this.dailyChallengeDate)
-      : this.regularSeed;
+    // Seed priority: daily > challenge mode > multiplayer > regular.
+    // The AI ghost must run on the same tower as the player.
+    let seed: number;
+    if (this.isDailyChallenge) {
+      seed = dailySeed(this.dailyChallengeDate);
+    } else if (this.isChallengeMode) {
+      seed = this.ghostChallengeRecord?.seed ?? CHALLENGE_SEED;
+    } else {
+      const mpSeed = this.multiplayer.isActive() ? this.multiplayer.getSyncedSeed() : null;
+      seed = mpSeed ?? this.regularSeed;
+    }
     this.aiGhost.reset(seed);
   }
 
@@ -2512,7 +2517,11 @@ export class Game {
       const record = this.ghostRecorder.buildRecord({
         id: `cc-${utcDateKey()}`,
         name: this.getLocalUsername(),
-        seed: this.isChallengeMode ? CHALLENGE_SEED : this.regularSeed,
+        seed: this.isChallengeMode
+          ? CHALLENGE_SEED
+          : this.multiplayer.isActive()
+          ? (this.multiplayer.getSyncedSeed() ?? this.regularSeed)
+          : this.regularSeed,
         score: this.score,
         height: this.heightMaxReached,
       });
@@ -2790,7 +2799,8 @@ export class Game {
     } else if (!this.isDailyChallenge) {
       this.dailyChallengeDate = utcDateKey();
       this.dailyPreviousBest = null;
-      this.sim.setSeed(this.regularSeed);
+      const mpSeed = this.multiplayer.isActive() ? this.multiplayer.getSyncedSeed() : null;
+      this.sim.setSeed(mpSeed ?? this.regularSeed);
     }
     initAudio();
     playClick();
