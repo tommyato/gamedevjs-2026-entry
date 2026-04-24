@@ -1,0 +1,21 @@
+{
+  "name": "cc-mp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clockwork Climb multiplayer server (Colyseus). Deployed to mp.tommyato.com.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@colyseus/schema": "^2.0.0",
+    "colyseus": "^0.15.0",
+    "express": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}
