@@ -259,6 +259,9 @@ type ContractDef = {
   readonly label: string;
   readonly target: number;
   readonly reward: number;
+  // Category tag — prevents a single roll from picking two contracts that
+  // track the same thing (e.g. both "collect 15 bolts" and "collect 30 bolts").
+  readonly category: string;
   // Returns current (unclamped) progress value in the same unit as `target`.
   readonly progress: (ctx: ContractCtx) => number;
   // Optional custom progress text (e.g. "12/50m"); defaults to "n/target".
@@ -278,6 +281,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Reach 50m",
     target: 50,
     reward: 500,
+    category: "reach",
     progress: (ctx) => ctx.state.heightMaxReached,
     format: (p, t) => `${Math.min(Math.floor(p), t)}/${t}m`,
   },
@@ -286,6 +290,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Reach 100m",
     target: 100,
     reward: 1000,
+    category: "reach",
     progress: (ctx) => ctx.state.heightMaxReached,
     format: (p, t) => `${Math.min(Math.floor(p), t)}/${t}m`,
   },
@@ -294,6 +299,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Collect 15 bolts",
     target: 15,
     reward: 400,
+    category: "collect",
     progress: (ctx) => ctx.state.boltCount,
   },
   {
@@ -301,6 +307,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Collect 30 bolts",
     target: 30,
     reward: 800,
+    category: "collect",
     progress: (ctx) => ctx.state.boltCount,
   },
   {
@@ -308,6 +315,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Hit a 5x combo",
     target: 5,
     reward: 500,
+    category: "combo",
     progress: (ctx) => ctx.state.bestCombo,
     format: (p, t) => `x${Math.min(Math.floor(p), t)}/x${t}`,
   },
@@ -316,6 +324,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Hit an 8x combo",
     target: 8,
     reward: 1000,
+    category: "combo",
     progress: (ctx) => ctx.state.bestCombo,
     format: (p, t) => `x${Math.min(Math.floor(p), t)}/x${t}`,
   },
@@ -324,6 +333,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Land 5 near-misses",
     target: 5,
     reward: 600,
+    category: "near-miss",
     progress: (ctx) => ctx.nearMisses,
   },
   {
@@ -331,6 +341,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Survive 60s",
     target: 60,
     reward: 500,
+    category: "survive",
     progress: (ctx) => ctx.runTime,
     format: (p, t) => `${Math.min(Math.floor(p), t)}/${t}s`,
   },
@@ -339,6 +350,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Survive 45s without a shield break",
     target: 45,
     reward: 700,
+    category: "no-shield-break",
     progress: (ctx) => ctx.timeSinceLastShieldBreak,
     format: (p, t) => `${Math.min(Math.floor(p), t)}/${t}s`,
   },
@@ -347,6 +359,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Chain 3 air bolts",
     target: 3,
     reward: 500,
+    category: "air-bolt-chain",
     progress: (ctx) => ctx.state.bestAirBoltChain,
   },
   {
@@ -354,6 +367,7 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Clear 1 Challenge Zone",
     target: 1,
     reward: 600,
+    category: "challenge-zone",
     progress: (ctx) => ctx.state.completedChallengeZones,
   },
   {
@@ -361,17 +375,21 @@ const CONTRACT_POOL: readonly ContractDef[] = [
     label: "Collect 3 power-ups",
     target: 3,
     reward: 400,
+    category: "powerups",
     progress: (ctx) => ctx.powerupsCollected,
   },
 ];
 
 function pickRandomContracts(count: number): ContractInstance[] {
-  const pool = [...CONTRACT_POOL];
+  // Dedup by category so a single roll can't produce two contracts that
+  // track the same thing (e.g. "Collect 15 bolts" and "Collect 30 bolts").
+  let pool = [...CONTRACT_POOL];
   const picked: ContractInstance[] = [];
   for (let i = 0; i < count && pool.length > 0; i += 1) {
     const idx = Math.floor(Math.random() * pool.length);
     const [def] = pool.splice(idx, 1);
     picked.push({ def, progress: 0, complete: false, celebrateTimer: 0 });
+    pool = pool.filter((p) => p.category !== def.category);
   }
   return picked;
 }
