@@ -349,6 +349,9 @@ export class WavedashPlatform implements IPlatformServices {
 
   // ── Identity ──────────────────────────────────────────────────────────────
 
+  /** Wavedash profile name is owned by the platform — editing inside the game is not supported. */
+  readonly canEditUsername = false;
+
   getUsername(): string {
     const wavedash = this.getSdkSync();
     if (!wavedash) return DEFAULT_USERNAME;

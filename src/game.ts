@@ -2055,7 +2055,7 @@ export class Game {
     panel.appendChild(playerList);
     this.multiplayerPlayerList = playerList;
 
-    // ── 4. Name input ─────────────────────────────────────────────────────────
+    // ── 4. Name input (editable) / name display (read-only) ──────────────────
     const nameLabel = document.createElement("div");
     Object.assign(nameLabel.style, {
       fontSize: "10px",
@@ -2066,49 +2066,67 @@ export class Game {
     nameLabel.textContent = "YOUR NAME";
     panel.appendChild(nameLabel);
 
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.maxLength = 20;
-    nameInput.value = this.getLobbyDisplayName();
-    Object.assign(nameInput.style, {
-      width: "100%",
-      boxSizing: "border-box",
-      padding: "5px 10px",
-      borderRadius: "8px",
-      border: "1px solid rgba(127, 214, 255, 0.3)",
-      background: "rgba(10, 22, 34, 0.65)",
-      color: "#d7f8ff",
-      fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
-      fontSize: "12px",
-      outline: "none",
-      marginBottom: "10px",
-    } as CSSStyleDeclaration);
-    nameInput.addEventListener("keydown", (e) => e.stopPropagation());
-    nameInput.addEventListener("keyup", (e) => e.stopPropagation());
-    nameInput.addEventListener("keypress", (e) => e.stopPropagation());
-    nameInput.addEventListener("input", () => {
-      // Strip control chars, enforce max length
-      const raw = nameInput.value.replace(/[\x00-\x1F\x7F]/g, "").slice(0, 20);
-      if (nameInput.value !== raw) nameInput.value = raw;
-      if (this.multiplayerNameDebounceHandle !== null) {
-        clearTimeout(this.multiplayerNameDebounceHandle);
-      }
-      this.multiplayerNameDebounceHandle = window.setTimeout(() => {
-        this.multiplayerNameDebounceHandle = null;
-        const trimmed = nameInput.value.trim();
-        // edge: player tries to change name to "" — reject, revert to persisted
-        // coolname default. Min 1 char, max 20, control chars already stripped.
-        if (trimmed.length === 0) {
-          nameInput.value = this.getLobbyDisplayName();
-        } else {
-          this.setLobbyDisplayName(trimmed);
-          this.multiplayer.sendNameUpdate(trimmed);
-          this.renderPlayerList();
+    if (this.platform.canEditUsername) {
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.maxLength = 20;
+      nameInput.value = this.getLobbyDisplayName();
+      Object.assign(nameInput.style, {
+        width: "100%",
+        boxSizing: "border-box",
+        padding: "5px 10px",
+        borderRadius: "8px",
+        border: "1px solid rgba(127, 214, 255, 0.3)",
+        background: "rgba(10, 22, 34, 0.65)",
+        color: "#d7f8ff",
+        fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+        fontSize: "12px",
+        outline: "none",
+        marginBottom: "10px",
+      } as CSSStyleDeclaration);
+      nameInput.addEventListener("keydown", (e) => e.stopPropagation());
+      nameInput.addEventListener("keyup", (e) => e.stopPropagation());
+      nameInput.addEventListener("keypress", (e) => e.stopPropagation());
+      nameInput.addEventListener("input", () => {
+        // Strip control chars, enforce max length
+        const raw = nameInput.value.replace(/[\x00-\x1F\x7F]/g, "").slice(0, 20);
+        if (nameInput.value !== raw) nameInput.value = raw;
+        if (this.multiplayerNameDebounceHandle !== null) {
+          clearTimeout(this.multiplayerNameDebounceHandle);
         }
-      }, 300);
-    });
-    panel.appendChild(nameInput);
-    this.multiplayerNameInput = nameInput;
+        this.multiplayerNameDebounceHandle = window.setTimeout(() => {
+          this.multiplayerNameDebounceHandle = null;
+          const trimmed = nameInput.value.trim();
+          // edge: player tries to change name to "" — reject, revert to persisted
+          // coolname default. Min 1 char, max 20, control chars already stripped.
+          if (trimmed.length === 0) {
+            nameInput.value = this.getLobbyDisplayName();
+          } else {
+            this.setLobbyDisplayName(trimmed);
+            this.multiplayer.sendNameUpdate(trimmed);
+            this.renderPlayerList();
+          }
+        }, 300);
+      });
+      panel.appendChild(nameInput);
+      this.multiplayerNameInput = nameInput;
+    } else {
+      // Platform owns the name (e.g. Wavedash) — show it read-only.
+      const nameDisplay = document.createElement("div");
+      nameDisplay.textContent = this.platform.getUsername();
+      Object.assign(nameDisplay.style, {
+        padding: "5px 10px",
+        borderRadius: "8px",
+        border: "1px solid rgba(127, 214, 255, 0.15)",
+        background: "rgba(10, 22, 34, 0.35)",
+        color: "#7fd6ff",
+        fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", monospace',
+        fontSize: "12px",
+        marginBottom: "10px",
+        opacity: "0.7",
+      } as CSSStyleDeclaration);
+      panel.appendChild(nameDisplay);
+    }
 
     // ── 5. Invite link ────────────────────────────────────────────────────────
     const inviteLabel = document.createElement("div");
@@ -3400,20 +3418,17 @@ export class Game {
 
   /**
    * Wire up the username input field on the title screen.
+   * No-op on platforms where canEditUsername is false (e.g. Wavedash) — the
+   * title row is already hidden via CSS; this guard is a belt-and-suspenders.
    * Storage key is cc-username via coolname.ts.
    */
   private setupUsernameUi(): void {
+    if (!this.platform.canEditUsername) return;
     const input = document.getElementById("title-username-input") as HTMLInputElement | null;
     if (!input) return;
     input.value = this.getLocalUsername();
     const commit = () => {
-      // Persist the typed value to coolname storage and flip the override flag
-      // so getLocalUsername() prefers it over the Wavedash SDK cached name.
-      // The SDK exposes no setDisplayName surface (verified against WavedashSdk
-      // interface in platform.ts — no setDisplayName / setUsername method), so
-      // this localStorage flag is the only way to make the edit stick across reloads.
       setCoolLocalUsername(input.value);
-      try { localStorage.setItem("cc.usernameOverrideSdk", "1"); } catch { /* ignore */ }
       input.value = this.getLocalUsername();
       // Broadcast the new name to all connected peers so the lobby player list
       // updates immediately. (The lobby input already does this at game.ts:2081;
@@ -4355,22 +4370,12 @@ export class Game {
   }
 
   private getLocalUsername(): string {
-    // User-override flag: once the player has manually edited their name on
-    // the title screen, their locally stored coolname takes priority over the
-    // SDK-cached display name. Without this, the Wavedash SDK's `getUser()`
-    // name is preferred, and the typed value is immediately overwritten on
-    // the next refresh (the Build #43 "name reverts on blur" bug).
     try {
-      if (localStorage.getItem("cc.usernameOverrideSdk") === "1") {
-        return getCoolLocalUsername();
-      }
-    } catch { /* localStorage may be unavailable */ }
-    try {
-      const wavedashName = this.platform.getUsername();
-      // Only use the wavedash name if it's a real user-set value — not the SDK
+      const platformName = this.platform.getUsername();
+      // Only use the platform name if it's a real user-set value — not the SDK
       // default ("Player"). Fall through to our persisted coolname otherwise.
-      if (wavedashName && wavedashName !== "Player") {
-        return wavedashName;
+      if (platformName && platformName !== "Player") {
+        return platformName;
       }
     } catch { /* SDK may not be available */ }
     return getCoolLocalUsername();

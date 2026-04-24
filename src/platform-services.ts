@@ -50,6 +50,10 @@ export interface IPlatformServices {
   init(): Promise<void>;
   getUsername(): string;
 
+  /** True when the player can change their displayed name from inside the game.
+   *  Wavedash owns the profile externally → false. Tommyato persists locally → true. */
+  readonly canEditUsername: boolean;
+
   // Lifecycle / host signals
   signalLoadComplete(): Promise<void>;
   signalFirstFrame(): void;
@@ -120,8 +124,12 @@ export async function createPlatformServices(): Promise<IPlatformServices> {
   const target = import.meta.env.VITE_PLATFORM ?? "wavedash";
   if (target === "tommyato") {
     const { TommyatoPlatform } = await import("./platform-tommyato");
-    return new TommyatoPlatform();
+    const platform = new TommyatoPlatform();
+    document.body.classList.add("platform-tommyato");
+    return platform;
   }
   const { WavedashPlatform } = await import("./platform-wavedash");
-  return new WavedashPlatform();
+  const platform = new WavedashPlatform();
+  document.body.classList.add("platform-wavedash");
+  return platform;
 }

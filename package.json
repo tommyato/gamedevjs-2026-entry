@@ -14,6 +14,7 @@
     "verify:layout": "npm run build:sim && node scripts/verify-layout.mjs",
     "verify:scripted-ai": "npm run build:sim && npm run build:scripted && node scripts/verify-scripted-ai.mjs",
     "verify:mp-seed": "node scripts/verify-mp-seed-sync.mjs",
+    "verify:mp-tommyato": "node scripts/verify-mp-tommyato.mjs",
     "verify:name-sync": "node scripts/verify-name-sync.mjs",
     "verify:last-survivor": "node scripts/verify-last-survivor.mjs",
     "verify:orbit-cancel": "npm run build:sim && node scripts/verify-orbit-cancel.mjs",
@@ -21,6 +22,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "colyseus.js": "^0.15.28",
     "onnxruntime-web": "^1.24.3",
     "three": "^0.183.0"
   },
