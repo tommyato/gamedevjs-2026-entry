@@ -465,6 +465,8 @@ export class Game {
   private hudScore!: HTMLElement;
   private hudBest!: HTMLElement;
   private hudBolts!: HTMLElement;
+  private hudScoreLive!: HTMLElement;
+  private hudBestScore!: HTMLElement;
   private hudStatus!: HTMLElement;
   private hudToast!: HTMLElement;
   private hudControls!: HTMLElement;
@@ -984,6 +986,8 @@ export class Game {
     const hudScore = document.getElementById("hud-score");
     const hudBest = document.getElementById("hud-best");
     const hudBolts = document.getElementById("hud-bolts");
+    const hudScoreLive = document.getElementById("hud-score-live");
+    const hudBestScore = document.getElementById("hud-best-score");
     const hudStatus = document.getElementById("hud-status");
     const hudToast = document.getElementById("hud-toast");
     const hudControls = document.getElementById("hud-controls");
@@ -997,7 +1001,7 @@ export class Game {
     const tutorialControls = document.getElementById("tutorial-controls");
     const tutorialObjective = document.getElementById("tutorial-objective");
     const zoneAnnouncement = document.getElementById("zone-announcement");
-    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudStatus || !hudToast || !hudControls || !hudCombo || !hudDoubleJumpCharges || !hudShieldCount || !soundToggleBtn || !closeCallOverlay || !shieldSaveOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective || !zoneAnnouncement) {
+    if (!hud || !titleOverlay || !hudScore || !hudBest || !hudBolts || !hudScoreLive || !hudBestScore || !hudStatus || !hudToast || !hudControls || !hudCombo || !hudDoubleJumpCharges || !hudShieldCount || !soundToggleBtn || !closeCallOverlay || !shieldSaveOverlay || !tutorialOverlay || !tutorialControls || !tutorialObjective || !zoneAnnouncement) {
       throw new Error("Missing HUD elements");
     }
     this.hudAiBadge = document.getElementById("hud-ai-badge");
@@ -1034,6 +1038,8 @@ export class Game {
     this.hudScore = hudScore;
     this.hudBest = hudBest;
     this.hudBolts = hudBolts;
+    this.hudScoreLive = hudScoreLive;
+    this.hudBestScore = hudBestScore;
     this.hudStatus = hudStatus;
     this.hudToast = hudToast;
     this.hudControls = hudControls;
@@ -5511,6 +5517,8 @@ export class Game {
     // meant current height was only visible when it was beating best.
     this.hudScore.textContent = `${Math.round(this.heightMaxReached)}m`;
     this.hudBest.textContent = `${Math.max(this.saveData.bestHeight, this.heightMaxReached)}m`;
+    this.hudBestScore.textContent = String(this.saveData.bestScore);
+    this.hudScoreLive.textContent = String(this.score);
     this.hudBolts.textContent = String(this.boltCount);
 
     const aiGs = this.aiGhostEnabled ? this.aiGhost?.getGhostState() : null;

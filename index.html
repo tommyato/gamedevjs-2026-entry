@@ -121,6 +121,18 @@
       color: #ffd35e;
       text-shadow: 0 0 18px rgba(255, 211, 94, 0.35);
     }
+    #hud-score-live {
+      font-size: 18px;
+      font-weight: 700;
+      color: #f3d7b1;
+    }
+    #hud-best-score {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(243, 215, 177, 0.55);
+      margin-top: 1px;
+      letter-spacing: 0.5px;
+    }
     #hud-status {
       margin-top: 14px;
       font-size: 12px;
@@ -1112,6 +1124,12 @@
       #hud-score {
         font-size: 34px;
       }
+      #hud-score-live {
+        font-size: 16px;
+      }
+      #hud-best-score {
+        font-size: 10px;
+      }
       #hud-controls {
         left: 14px;
         bottom: 14px;
@@ -1291,9 +1309,14 @@
           <div>
             <div class="hud-label">BEST</div>
             <div id="hud-best">0</div>
+            <div id="hud-best-score">0</div>
           </div>
         </div>
         <div class="hud-row">
+          <div>
+            <div class="hud-label">SCORE</div>
+            <div id="hud-score-live">0</div>
+          </div>
           <div>
             <div class="hud-label">BOLTS</div>
             <div id="hud-bolts">0</div>
