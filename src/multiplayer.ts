@@ -57,6 +57,10 @@ export type PeerGhost = {
 // ── Callbacks ─────────────────────────────────────────────────────────────────
 
 type MultiplayerCallbacks = {
+  /** Called on demand to get the local player's current display name.
+   *  Used when a new peer connects so we can immediately push a NAME_UPDATE
+   *  without waiting for the next STATE tick (which never carries the name). */
+  getLocalName?: () => string;
   onMatchStart?: (startAtMs: number, matchId: number) => void;
   onCountdownComplete?: () => void;
   onPeerDied?: (userId: string) => void;
@@ -807,6 +811,12 @@ export class MultiplayerManager {
       // When a new peer connects, immediately push our broadcast so they see us
       // without waiting for the next 100 ms tick.
       this.broadcastTimer = BROADCAST_INTERVAL;
+      // Also push our current display name so the late joiner sees the right
+      // name immediately, not the SDK's auto-generated coolname default.
+      // STATE never carries the name; without this explicit push the peer would
+      // show our SDK coolname until a NAME_UPDATE arrived from some other trigger.
+      const name = this.callbacks.getLocalName?.();
+      if (name) this.sendNameUpdate(name);
     });
     this.connectedListenerBound = true;
   }

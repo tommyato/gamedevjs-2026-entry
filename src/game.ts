@@ -2252,6 +2252,9 @@ export class Game {
 
   private setupMultiplayerCallbacks(): void {
     this.multiplayer.setCallbacks({
+      // Supplies the current display name when a new peer connects so they see
+      // the custom name immediately (not the SDK default coolname).
+      getLocalName: () => this.getLobbyDisplayName(),
       onMatchStart: (startAtMs, _matchId) => {
         // edge: client joins after MATCH_START — late-joiner stays in lobby and
         // sees a notice. They'll enter normally when onMatchStart fires next round.
@@ -3382,11 +3385,19 @@ export class Game {
     const commit = () => {
       // Persist the typed value to coolname storage and flip the override flag
       // so getLocalUsername() prefers it over the Wavedash SDK cached name.
-      // The SDK exposes no setDisplayName surface, so this localStorage flag
-      // is the only way to make the user's edit stick across a page reload.
+      // The SDK exposes no setDisplayName surface (verified against WavedashSdk
+      // interface in platform.ts — no setDisplayName / setUsername method), so
+      // this localStorage flag is the only way to make the edit stick across reloads.
       setCoolLocalUsername(input.value);
       try { localStorage.setItem("cc.usernameOverrideSdk", "1"); } catch { /* ignore */ }
       input.value = this.getLocalUsername();
+      // Broadcast the new name to all connected peers so the lobby player list
+      // updates immediately. (The lobby input already does this at game.ts:2081;
+      // this mirrors that pattern for the title-screen input path.)
+      const trimmed = this.getLocalUsername();
+      if (this.multiplayer?.isActive?.()) {
+        this.multiplayer.sendNameUpdate(trimmed);
+      }
     };
     input.addEventListener("blur", commit);
     input.addEventListener("keydown", (e) => {
