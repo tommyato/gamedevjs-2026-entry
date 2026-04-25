@@ -1257,12 +1257,21 @@
         font-size: 10px;
         letter-spacing: 2px;
       }
-      /* Pre-roll contracts preview and the leaderboard teaser are affordances,
-         not gameplay-critical. Hide them at short heights so PLAY + mode row
-         stay reachable without scrolling. */
-      .contracts-preview-panel,
+      /* Leaderboard teaser is an affordance, not gameplay-critical. Hide it
+         at short heights so PLAY + mode row stay reachable without scrolling.
+         Run Contracts stay visible — they're the only pre-roll the player
+         interacts with (reroll button) and Tommy explicitly asked them to
+         remain on Wavedash (which is the primary <560px-tall context). */
       #title-leaderboard-summary {
         display: none;
+      }
+      /* Compact the contracts panel so it fits without pushing PLAY off-screen. */
+      .contracts-preview-panel {
+        padding: 8px 14px;
+      }
+      .contracts-preview-heading {
+        margin-bottom: 6px;
+        font-size: 10px;
       }
       #title-actions {
         gap: 6px;

@@ -157,7 +157,6 @@ async function getJson(path: string): Promise<unknown | null> {
 
 export class TommyatoPlatform implements IPlatformServices {
   readonly multiplayer: IMultiplayerTransport;
-  private cachedUsername: string | null = null;
 
   constructor() {
     this.multiplayer = new TommyatoMultiplayerTransport(() => this.getUsername());
@@ -200,14 +199,11 @@ export class TommyatoPlatform implements IPlatformServices {
   readonly canEditUsername = true;
 
   getUsername(): string {
-    if (this.cachedUsername !== null) return this.cachedUsername;
     const storage = getStorage();
-    if (!storage) {
-      this.cachedUsername = DEFAULT_USERNAME;
-      return DEFAULT_USERNAME;
-    }
+    if (!storage) return DEFAULT_USERNAME;
 
     // One-shot migration: if old key has a value and cc-username is unset, copy it over.
+    // Subsequent calls skip this branch because removeItem() ran the first time.
     const oldValue = storage.getItem(STORAGE_KEYS.username);
     if (oldValue && oldValue.trim().length > 0) {
       try {
@@ -218,9 +214,12 @@ export class TommyatoPlatform implements IPlatformServices {
       } catch { /* ignore */ }
     }
 
-    const name = getLocalUsername();
-    this.cachedUsername = name;
-    return name;
+    // No caching — `setCoolLocalUsername()` writes to the same `cc-username`
+    // localStorage key that `getLocalUsername()` reads, and a stale cache here
+    // would make name edits in the lobby/title input invisible until a page
+    // reload (the user would type a new name, hit Enter, and still see the old
+    // one because this function would return the cached value).
+    return getLocalUsername();
   }
 
   // ── Saves ─────────────────────────────────────────────────────────────────
