@@ -564,7 +564,9 @@ export class Game {
   private readonly _trailColorTemp = new THREE.Color();
   private highlightedGearId: number | null = null;
   private hudOverlaySvg: SVGSVGElement | null = null;
-  private hudPickupLine: SVGLineElement | null = null;
+  private hudPickupTrailLayer: SVGGElement | null = null;
+  private hudPickupTrailPool: SVGCircleElement[] = [];
+  private hudPickupTrailCursor = 0;
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly landingEffectPosition = new THREE.Vector3();
   private readonly steamSpawnPosition = new THREE.Vector3();
@@ -1035,8 +1037,10 @@ export class Game {
     }
     this.hudAiBadge = document.getElementById("hud-ai-badge");
 
-    // Pickup flash overlay — SVG line player→pill, added lazily so the rest of the HUD
-    // doesn't need to know about it. Full-viewport fixed overlay, pointer-events none.
+    // Pickup flash overlay — full-viewport SVG, pointer-events none.
+    // Trail particles fly along a quadratic Bezier from the projected player
+    // position into the corresponding HUD pill so the player reads the link
+    // between what they grabbed and where it lands.
     const overlaySvgNs = "http://www.w3.org/2000/svg";
     const overlaySvg = document.createElementNS(overlaySvgNs, "svg") as SVGSVGElement;
     overlaySvg.id = "hud-pickup-overlay";
@@ -1047,20 +1051,24 @@ export class Game {
     overlaySvg.style.height = "100%";
     overlaySvg.style.pointerEvents = "none";
     overlaySvg.style.zIndex = "12";
-    const pickupLine = document.createElementNS(overlaySvgNs, "line") as SVGLineElement;
-    pickupLine.setAttribute("x1", "0");
-    pickupLine.setAttribute("y1", "0");
-    pickupLine.setAttribute("x2", "0");
-    pickupLine.setAttribute("y2", "0");
-    pickupLine.setAttribute("stroke", "rgba(255, 170, 68, 0.85)");
-    pickupLine.setAttribute("stroke-width", "2");
-    pickupLine.setAttribute("stroke-linecap", "round");
-    pickupLine.style.opacity = "0";
-    pickupLine.style.transition = "opacity 260ms ease-out";
-    overlaySvg.appendChild(pickupLine);
+    const trailLayer = document.createElementNS(overlaySvgNs, "g") as SVGGElement;
+    overlaySvg.appendChild(trailLayer);
+    const trailPool: SVGCircleElement[] = [];
+    for (let i = 0; i < 96; i += 1) {
+      const c = document.createElementNS(overlaySvgNs, "circle") as SVGCircleElement;
+      c.setAttribute("cx", "0");
+      c.setAttribute("cy", "0");
+      c.setAttribute("r", "2.5");
+      c.setAttribute("fill", "rgba(255, 222, 138, 1)");
+      c.style.opacity = "0";
+      c.style.willChange = "transform, opacity";
+      trailLayer.appendChild(c);
+      trailPool.push(c);
+    }
     document.body.appendChild(overlaySvg);
     this.hudOverlaySvg = overlaySvg;
-    this.hudPickupLine = pickupLine;
+    this.hudPickupTrailLayer = trailLayer;
+    this.hudPickupTrailPool = trailPool;
 
     this.hud = hud;
     this.titleOverlay = titleOverlay;
@@ -5600,6 +5608,10 @@ export class Game {
     this.updatePowerupSlot(this.hudDoubleJumpCharges, djCharges, this.lastDoubleJumpCharges);
     if (djCharges !== this.lastDoubleJumpCharges) {
       this.pulsePowerupSlot(this.hudDoubleJumpCharges);
+      // Trail only on collect (count up), not on use (count down).
+      if (djCharges > this.lastDoubleJumpCharges) {
+        this.flashPlayerToSlotTrail(this.hudDoubleJumpCharges, "jump");
+      }
       this.lastDoubleJumpCharges = djCharges;
     }
 
@@ -5608,6 +5620,9 @@ export class Game {
     this.updatePowerupSlot(this.hudShieldCount, shieldCount, this.lastShieldCount);
     if (shieldCount !== this.lastShieldCount) {
       this.pulsePowerupSlot(this.hudShieldCount);
+      if (shieldCount > this.lastShieldCount) {
+        this.flashPlayerToSlotTrail(this.hudShieldCount, "shield");
+      }
       this.lastShieldCount = shieldCount;
     }
     this.updateComboGlow(this.simState?.comboMultiplier ?? 1);
@@ -5647,10 +5662,9 @@ export class Game {
   }
 
   private pulsePowerupSlot(slot: HTMLElement) {
-    // Pickup burst bundle:
+    // Pickup burst bundle (pill-side only — caller fires the trail on collect):
     //   1. Scale burst 1.0 → 1.3 → 1.0 over 250ms (ease-out-back).
     //   2. 180ms amber glow behind the pill via CSS class toggle.
-    //   3. Short line from the player's projected screen pos to the pill center (300ms).
     slot.animate(
       [
         { transform: "scale(1)" },
@@ -5661,13 +5675,12 @@ export class Game {
     );
     slot.classList.add("hud-powerup-pulse");
     window.setTimeout(() => slot.classList.remove("hud-powerup-pulse"), 180);
-    this.flashPlayerToSlotLine(slot);
   }
 
-  private flashPlayerToSlotLine(slot: HTMLElement) {
-    const line = this.hudPickupLine;
-    const svg = this.hudOverlaySvg;
-    if (!line || !svg) {
+  private flashPlayerToSlotTrail(slot: HTMLElement, kind: "jump" | "shield") {
+    const layer = this.hudPickupTrailLayer;
+    const pool = this.hudPickupTrailPool;
+    if (!layer || pool.length === 0) {
       return;
     }
     // Project player world position to screen coords.
@@ -5683,26 +5696,89 @@ export class Game {
     const slotX = rect.left + rect.width / 2;
     const slotY = rect.top + rect.height / 2;
 
-    // Ergonomic skip: don't draw if the pill is >60% of viewport away from the player.
     const dx = slotX - playerX;
     const dy = slotY - playerY;
     const distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance < 1) {
+      return;
+    }
     const viewportDiag = Math.sqrt(viewportW * viewportW + viewportH * viewportH);
-    if (distance > viewportDiag * 0.6) {
+    if (distance > viewportDiag * 0.85) {
       return;
     }
 
-    line.setAttribute("x1", String(playerX));
-    line.setAttribute("y1", String(playerY));
-    line.setAttribute("x2", String(slotX));
-    line.setAttribute("y2", String(slotY));
-    // Ensure a clean transition by resetting opacity quickly, then fading.
-    line.style.transition = "none";
-    line.style.opacity = "0.85";
-    // Force a reflow so the next transition applies.
-    void line.getBoundingClientRect();
-    line.style.transition = "opacity 300ms ease-out";
-    line.style.opacity = "0";
+    // Quadratic Bezier control point: midpoint biased upward so the trail
+    // arches over the playfield instead of cutting straight across.
+    const midX = (playerX + slotX) / 2;
+    const midY = (playerY + slotY) / 2;
+    const archHeight = Math.min(distance * 0.32, 200);
+    const ctrlX = midX;
+    const ctrlY = midY - archHeight;
+
+    // Perpendicular unit vector (for per-particle jitter perpendicular to flight path).
+    const perpX = -dy / distance;
+    const perpY = dx / distance;
+
+    // Gold for jump, silver for shield. Two-tone palettes — slight variation
+    // between particles reads as "dust" rather than uniform sprites.
+    const goldPalette = ["255, 222, 138", "255, 196, 88", "255, 240, 200", "255, 170, 68"];
+    const silverPalette = ["232, 240, 255", "200, 215, 240", "255, 255, 255", "180, 200, 230"];
+    const palette = kind === "shield" ? silverPalette : goldPalette;
+
+    const particleCount = 24;
+    const sampleSteps = 14;
+
+    for (let i = 0; i < particleCount; i += 1) {
+      const circle = pool[this.hudPickupTrailCursor];
+      this.hudPickupTrailCursor = (this.hudPickupTrailCursor + 1) % pool.length;
+
+      const colorRgb = palette[i % palette.length];
+      const radius = 1.4 + Math.random() * 2.2;
+      circle.setAttribute("r", radius.toFixed(2));
+      circle.setAttribute("fill", `rgba(${colorRgb}, 1)`);
+
+      // Jitter perpendicular to the flight path, fading to zero at the endpoints
+      // so the swarm starts focused on the player and re-converges on the pill.
+      const jitterAmplitude = (Math.random() - 0.5) * 28;
+
+      const keyframes: Keyframe[] = [];
+      for (let s = 0; s <= sampleSteps; s += 1) {
+        const t = s / sampleSteps;
+        const inv = 1 - t;
+        const bx = inv * inv * playerX + 2 * inv * t * ctrlX + t * t * slotX;
+        const by = inv * inv * playerY + 2 * inv * t * ctrlY + t * t * slotY;
+        const spread = Math.sin(t * Math.PI); // 0 at endpoints, 1 mid-flight
+        const x = bx + perpX * jitterAmplitude * spread;
+        const y = by + perpY * jitterAmplitude * spread;
+
+        let opacity: number;
+        if (t < 0.12) {
+          opacity = t / 0.12;
+        } else if (t > 0.82) {
+          opacity = (1 - t) / 0.18;
+        } else {
+          opacity = 1;
+        }
+
+        keyframes.push({
+          transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`,
+          opacity: opacity.toFixed(3),
+        });
+      }
+
+      const delay = Math.random() * 160;
+      const duration = 440 + Math.random() * 200;
+
+      const animation = circle.animate(keyframes, {
+        duration,
+        delay,
+        easing: "cubic-bezier(0.42, 0, 0.58, 1)",
+        fill: "forwards",
+      });
+      animation.onfinish = () => {
+        circle.style.opacity = "0";
+      };
+    }
   }
 
   private updateComboHud(multiplier: number) {
