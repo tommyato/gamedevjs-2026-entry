@@ -1186,6 +1186,13 @@
       #game-over-right-col {
         width: 100%;
       }
+      /* On mobile, the title-copy-panel (showing "GAME OVER" heading) eats ~110px
+         of vertical space that pushes the footer buttons below the 640px fold.
+         The stats card below already communicates game-over context. Hide the
+         heading so the game-over-view can center cleanly within the viewport. */
+      #title-overlay.game-over .title-copy-panel {
+        display: none;
+      }
       .game-over-card {
         margin-bottom: 16px;
       }
