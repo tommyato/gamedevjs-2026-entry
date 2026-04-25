@@ -1235,6 +1235,9 @@
         font-size: 42px;
         letter-spacing: 4px;
         white-space: normal;
+        /* Base style uses margin-right: -6px to offset 6px letter-spacing trail.
+           At mobile letter-spacing drops to 4px, so correct to -4px. */
+        margin-right: -4px;
       }
       #title-overlay .tagline {
         font-size: 12px;
