@@ -27,12 +27,25 @@ type Direction = "up" | "down" | "left" | "right";
 
 export const MENU_FOCUS_CLASS = "menu-focused";
 
+/**
+ * Hardcoded directional adjacency table. Maps a button ID + direction
+ * to the target button ID. Use "stay" to keep focus on the current item
+ * (no navigation in that direction). Omit entries to fall through to
+ * geometric scoring.
+ */
+export type DirectionalMap = Record<
+  string /* from id */,
+  Partial<Record<Direction, string /* to id */ | "stay">>
+>;
+
 interface MenuScope {
   items: HTMLElement[];
   index: number;
   // Optional callback for when this scope is popped (e.g. modal close).
   // Currently unused — reserved for future B-button cancel support.
   onCancel?: () => void;
+  // Optional hardcoded adjacency table for fixed-layout menus (title).
+  directional?: DirectionalMap;
 }
 
 export class MenuNavigation {
@@ -47,11 +60,23 @@ export class MenuNavigation {
    * on entering a screen (title / game-over). The first visible item
    * is auto-focused.
    */
-  setScope(items: HTMLElement[]): void {
+  setScope(
+    items: HTMLElement[],
+    options?: { directional?: DirectionalMap }
+  ): void {
     this.clearAll();
     if (items.length === 0) return;
-    this.stack.push({ items, index: 0 });
+    this.stack.push({
+      items,
+      index: 0,
+      directional: options?.directional,
+    });
     this.focusFirstVisible();
+    // Same first-frame suppression pushScope uses — defends against
+    // gamepad button 0 being held at page-load, which would otherwise
+    // read as justPressed('space') on frame 1 and auto-activate the
+    // focused button.
+    this.suppressActivateFrames = 1;
   }
 
   /**
@@ -131,8 +156,31 @@ export class MenuNavigation {
       null;
 
     if (dirPressed !== null) {
-      const next = findNeighbor(dirPressed, visible[visIdx], visible);
-      if (next !== null) {
+      let next: HTMLElement | null = null;
+
+      // Check directional adjacency table first (if provided for this scope).
+      if (scope.directional) {
+        const targetId = scope.directional[currentEl.id]?.[dirPressed];
+        if (targetId === "stay") {
+          // Explicit stay — do not move focus, do not fall through.
+          next = currentEl;
+        } else if (targetId) {
+          // Look up the target by ID in the visible list. If the target
+          // resolves to a hidden element (e.g., VG button not yet visible),
+          // fall through to geometric scoring.
+          const target = visible.find((el) => el.id === targetId);
+          if (target) {
+            next = target;
+          }
+        }
+      }
+
+      // Fall through to geometric scoring if no directional override.
+      if (next === null) {
+        next = findNeighbor(dirPressed, visible[visIdx], visible);
+      }
+
+      if (next !== null && next !== currentEl) {
         scope.index = scope.items.indexOf(next);
       }
     }
@@ -226,6 +274,11 @@ function isInteractable(el: HTMLElement): boolean {
 
 // -----------------------------------------------------------------------
 // Spatial directional navigation — rect-based d-pad algorithm.
+//
+// Title scope uses a hardcoded directional adjacency table (see setScope
+// options.directional). Geometric scoring is the fallback for any scope
+// without a map (e.g., game-over, modal close buttons) or when the map
+// points to a hidden element.
 //
 // Candidate selection (commit 4b8c65e + 85c8018 + aa878f2 + this patch):
 //   1. For horizontal moves (LEFT/RIGHT), aligned candidates are a

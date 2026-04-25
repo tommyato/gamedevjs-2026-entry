@@ -1939,6 +1939,8 @@ export class Game {
   // the order players cycle through with d-pad / arrow keys; the helper
   // filters out hidden / disabled buttons each frame so platform-specific
   // gating (Wavedash hides VERSUS GHOST, etc.) is automatically respected.
+  // Title scope uses a hardcoded directional adjacency table; game-over
+  // keeps geometric scoring (5 buttons in flex-wrap, viewport-dependent).
   // -----------------------------------------------------------------------
   private applyTitleMenuScope(): void {
     const ids = [
@@ -1954,7 +1956,50 @@ export class Game {
       const el = document.getElementById(id);
       if (el) items.push(el);
     }
-    this.menu.setScope(items);
+
+    // Hardcoded 6-button adjacency table for title screen navigation.
+    // VG (title-btn-raceai) is hidden by default; when hidden, lookups
+    // to it fall through to geometric scoring, so DAILY↔VERSUS wraps.
+    const directional: import("./menu-navigation").DirectionalMap = {
+      "title-play-btn": {
+        up: "stay",
+        down: "title-btn-achievements",
+        left: "title-btn-achievements",
+        right: "title-btn-leaderboard",
+      },
+      "title-btn-achievements": {
+        up: "title-play-btn",
+        down: "title-btn-daily",
+        left: "title-btn-leaderboard",
+        right: "title-btn-leaderboard",
+      },
+      "title-btn-leaderboard": {
+        up: "title-play-btn",
+        down: "title-btn-versus",
+        left: "title-btn-achievements",
+        right: "title-btn-achievements",
+      },
+      "title-btn-daily": {
+        up: "title-btn-achievements",
+        down: "stay",
+        left: "title-btn-versus",
+        right: "title-btn-raceai",
+      },
+      "title-btn-raceai": {
+        up: "title-play-btn",
+        down: "stay",
+        left: "title-btn-daily",
+        right: "title-btn-versus",
+      },
+      "title-btn-versus": {
+        up: "title-btn-leaderboard",
+        down: "stay",
+        left: "title-btn-raceai",
+        right: "title-btn-daily",
+      },
+    };
+
+    this.menu.setScope(items, { directional });
   }
 
   private applyGameOverMenuScope(): void {
