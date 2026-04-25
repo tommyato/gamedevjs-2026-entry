@@ -37,13 +37,14 @@ import { BoltCollectible } from "./bolt";
 import { Gear } from "./gear";
 import { GearPool } from "./gear-pool";
 import { Input } from "./input";
+import { MenuNavigation } from "./menu-navigation";
 import {
   createOcclusionSilhouette,
   OCCLUDER_LAYER,
   SILHOUETTE_PLAYER_LAYER,
 } from "./occlusion-silhouette";
 import { ParticleSystem } from "./particles";
-import type { AchievementProgress, IPlatformServices } from "./platform-services";
+import type { AchievementProgress, IPlatformServices, LeaderboardSlug } from "./platform-services";
 import { createPlatformServices } from "./platform-services";
 import { AIGhost, getAIGhostModelUrl, isAIGhostEnabled } from "./ai-ghost";
 import {
@@ -149,6 +150,15 @@ type LeaderboardDisplayEntry = {
   rank: number;
 };
 
+type LeaderboardSurface = "title" | "gameover" | "modal";
+
+type LeaderboardCacheEntry = {
+  entries: LeaderboardDisplayEntry[];
+  fetchedAt: number;
+  requestId: number;
+  loading: boolean;
+};
+
 type AchievementCatalogEntry = {
   id: string;
   title: string;
@@ -163,6 +173,20 @@ const DEFAULT_SAVE_DATA: SaveData = {
   totalBolts: 0,
   totalPlaytime: 0,
   audioEnabled: true,
+};
+
+const LEADERBOARD_CACHE_TTL_MS = 60_000;
+const LEADERBOARD_TABS: readonly LeaderboardSlug[] = [
+  "high-score",
+  "highest-climb",
+  "best-combo",
+  "daily-score",
+];
+const LEADERBOARD_EMPTY_STATES: Record<LeaderboardSlug, string> = {
+  "high-score": "NO SCORES RECORDED",
+  "highest-climb": "No climbs recorded yet - reach the top of the tower to qualify.",
+  "best-combo": "No combos recorded yet - chain 3+ flips to qualify.",
+  "daily-score": "No scores today yet - be the first.",
 };
 
 function fnv1a(str: string): number {
@@ -233,6 +257,14 @@ function formatCountdown(ms: number): string {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatDailyResetLine(date = new Date()): string {
+  // TODO: confirm reset window with the backend if it ever exposes a daily window.
+  const totalMinutes = Math.max(0, Math.ceil(getUtcMsUntilTomorrow(date) / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `RESETS IN ${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
 /** Rounds to integer and adds thousands separators. */
@@ -415,6 +447,12 @@ export class Game {
   private hasRenderedFirstFrame = false;
 
   private readonly input = new Input();
+  // Gamepad/keyboard cursor for the title and game-over button menus.
+  // Scope is set in applyTitleMenuScope / applyGameOverMenuScope and
+  // cleared in startGame. Set per frame in loop() so per-state handlers
+  // can skip legacy keyboard shortcuts that would double-fire.
+  private readonly menu = new MenuNavigation();
+  private menuConsumedActivateThisFrame = false;
   private readonly regularSeed = Math.floor(Math.random() * 0x1_0000_0000);
   private readonly sim = new ClockworkClimbSimulation({ seed: this.regularSeed, fixedDt: SIM_FIXED_DT });
   private simState: SimState | null = null;
@@ -458,6 +496,20 @@ export class Game {
   private saveData: SaveData = { ...DEFAULT_SAVE_DATA };
   private titleLeaderboardEntries: LeaderboardDisplayEntry[] = [];
   private gameOverLeaderboardEntries: LeaderboardDisplayEntry[] = [];
+  private leaderboardEntriesBySlug: Record<LeaderboardSlug, LeaderboardDisplayEntry[]> = {
+    "high-score": [],
+    "highest-climb": [],
+    "best-combo": [],
+    "daily-score": [],
+  };
+  private leaderboardCacheBySlug: Record<LeaderboardSlug, LeaderboardCacheEntry> = {
+    "high-score": { entries: [], fetchedAt: 0, requestId: 0, loading: false },
+    "highest-climb": { entries: [], fetchedAt: 0, requestId: 0, loading: false },
+    "best-combo": { entries: [], fetchedAt: 0, requestId: 0, loading: false },
+    "daily-score": { entries: [], fetchedAt: 0, requestId: 0, loading: false },
+  };
+  private activeLeaderboardSlug: LeaderboardSlug = "high-score";
+  private gameOverLeaderboardSlug: LeaderboardSlug = "high-score";
 
   private hud!: HTMLElement;
   private titleOverlay!: HTMLElement;
@@ -521,6 +573,12 @@ export class Game {
   private gameOverLeaderboardContext!: HTMLElement;
   private gameOverLeaderboardThreshold!: HTMLElement;
   private gameOverLeaderboardList!: HTMLElement;
+  private leaderboardModalCloseButton!: HTMLButtonElement;
+  private leaderboardModalStatus!: HTMLElement;
+  private leaderboardModalList!: HTMLElement;
+  private leaderboardModalDailyNote!: HTMLElement;
+  private leaderboardModalTabButtons = new Map<LeaderboardSlug, HTMLButtonElement>();
+  private leaderboardModalCountdownTimer: number | null = null;
 
   private readonly player = new Player();
   private gears: Gear[] = [];
@@ -758,6 +816,9 @@ export class Game {
     await this.init();
     this.resumeAnimationLoop();
     this.platform.signalGameReady();
+    // First entry to the title screen — give the gamepad/keyboard cursor
+    // the title button stack to navigate. Re-applied in returnToTitle().
+    this.applyTitleMenuScope();
   }
 
   private async init() {
@@ -1348,32 +1409,59 @@ export class Game {
     return panel;
   }
 
-  private async refreshLeaderboardPanels(slug: "high-score" | "daily-score" = "high-score") {
-    const entries = await this.platform.fetchLeaderboardScores(slug);
-    const normalizedEntries = entries.map((entry, index) => ({
-      username: entry.username,
-      score: entry.score,
-      rank: entry.rank ?? index + 1,
-    }));
-    this.titleLeaderboardEntries = normalizedEntries;
-    this.gameOverLeaderboardEntries = normalizedEntries;
-    this.renderLeaderboardList(
-      this.titleLeaderboardContext,
-      this.titleLeaderboardList,
-      this.titleLeaderboardEntries,
-      this.titleLeaderboardEntries.length > 0 ? "WAVEDASH OR LOCAL TOP RUNS" : "NO RUNS YET"
-    );
-    this.titleLeaderboardThreshold.textContent = this.getLeaderboardThresholdCallout(this.titleLeaderboardEntries);
-    this.renderLeaderboardList(
-      this.gameOverLeaderboardContext,
-      this.gameOverLeaderboardList,
-      this.gameOverLeaderboardEntries,
-      slug === "daily-score"
-        ? `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · THIS RUN ${fmt(this.score)}`
-        : `THIS RUN ${fmt(this.score)} · BEST ${fmt(this.saveData.bestScore)}`
-    );
-    this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
-    this.renderTitleLeaderboardSummary();
+  private async refreshLeaderboardPanels(
+    slug: LeaderboardSlug = "high-score",
+    target: LeaderboardSurface = "title"
+  ): Promise<void> {
+    const cache = this.leaderboardCacheBySlug[slug];
+    const hadEntries = cache.entries.length > 0;
+    const ageMs = Date.now() - cache.fetchedAt;
+    const isFresh = hadEntries && ageMs < LEADERBOARD_CACHE_TTL_MS;
+
+    if (target === "modal") {
+      this.activeLeaderboardSlug = slug;
+      if (!hadEntries && !cache.loading) {
+        cache.loading = true;
+        this.renderLeaderboardModalBody();
+      }
+    }
+
+    const shouldFetchNow = target !== "modal" || !isFresh;
+    const entries = shouldFetchNow
+      ? await this.loadLeaderboardEntries(slug, target !== "modal" && !hadEntries)
+      : cache.entries;
+
+    if (target === "title") {
+      if (slug === "high-score") {
+        this.titleLeaderboardEntries = entries;
+      }
+      this.renderLeaderboardList(
+        this.titleLeaderboardContext,
+        this.titleLeaderboardList,
+        this.titleLeaderboardEntries,
+        this.titleLeaderboardEntries.length > 0 ? "WAVEDASH OR LOCAL TOP RUNS" : "NO RUNS YET"
+      );
+      this.titleLeaderboardThreshold.textContent = this.getLeaderboardThresholdCallout(this.titleLeaderboardEntries);
+      this.renderTitleLeaderboardSummary();
+      return;
+    }
+
+    if (target === "gameover") {
+      this.gameOverLeaderboardSlug = slug;
+      this.gameOverLeaderboardEntries = entries;
+      this.renderLeaderboardList(
+        this.gameOverLeaderboardContext,
+        this.gameOverLeaderboardList,
+        this.gameOverLeaderboardEntries,
+        slug === "daily-score"
+          ? `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · THIS RUN ${fmt(this.score)}`
+          : `THIS RUN ${fmt(this.score)} · BEST ${fmt(this.saveData.bestScore)}`
+      );
+      this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
+      return;
+    }
+
+    this.renderLeaderboardModalBody();
   }
 
   private renderLeaderboardList(
@@ -1485,10 +1573,29 @@ export class Game {
     const closeBtn = document.getElementById("leaderboard-modal-close") as HTMLButtonElement | null;
     const titleBtn = document.getElementById("title-btn-leaderboard") as HTMLButtonElement | null;
     const gameOverBtn = document.getElementById("gameover-leaderboard") as HTMLButtonElement | null;
+    const tabButtons = document.querySelectorAll<HTMLButtonElement>("[data-leaderboard-tab]");
     if (!modal || !body || !closeBtn) return;
 
     this.leaderboardModal = modal;
     this.leaderboardModalBody = body;
+    this.leaderboardModalCloseButton = closeBtn;
+    this.leaderboardModalStatus = document.getElementById("leaderboard-modal-status") as HTMLElement;
+    this.leaderboardModalList = document.getElementById("leaderboard-modal-list") as HTMLElement;
+    this.leaderboardModalDailyNote = document.getElementById("leaderboard-modal-daily-note") as HTMLElement;
+
+    for (const button of tabButtons) {
+      const slug = button.dataset.leaderboardTab as LeaderboardSlug | undefined;
+      if (!slug) continue;
+      this.leaderboardModalTabButtons.set(slug, button);
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.activeLeaderboardSlug = slug;
+        void this.refreshLeaderboardPanels(slug, "modal").catch((error: unknown) => {
+          console.error("Failed to refresh leaderboard modal", error);
+        });
+      });
+    }
 
     const open = (event: Event) => {
       event.preventDefault();
@@ -1522,33 +1629,178 @@ export class Game {
 
   private openLeaderboardModal(): void {
     if (!this.leaderboardModal || !this.leaderboardModalBody) return;
-    this.renderLeaderboardModalBody();
+    this.activeLeaderboardSlug = "high-score";
+    this.syncLeaderboardModalTabState();
     this.leaderboardModal.classList.remove("hidden");
     this.leaderboardModal.setAttribute("aria-hidden", "false");
+    void this.refreshLeaderboardPanels(this.activeLeaderboardSlug, "modal").catch((error: unknown) => {
+      console.error("Failed to refresh leaderboard modal", error);
+    });
+    if (this.leaderboardModalCountdownTimer !== null) {
+      clearInterval(this.leaderboardModalCountdownTimer);
+    }
+    this.leaderboardModalCountdownTimer = window.setInterval(() => {
+      if (
+        this.leaderboardModal &&
+        !this.leaderboardModal.classList.contains("hidden") &&
+        this.activeLeaderboardSlug === "daily-score"
+      ) {
+        this.renderLeaderboardModalBody();
+      }
+    }, 60_000);
+    const focusables = [
+      this.leaderboardModalCloseButton,
+      ...LEADERBOARD_TABS.map((slug) => this.leaderboardModalTabButtons.get(slug) ?? null),
+    ].filter((item): item is HTMLButtonElement => item !== null);
+    if (focusables.length > 0 && this.menu.isActive()) {
+      this.menu.pushScope(focusables);
+    }
+    this.leaderboardModalCloseButton?.focus();
   }
 
   private closeLeaderboardModal(): void {
     if (!this.leaderboardModal) return;
     this.leaderboardModal.classList.add("hidden");
     this.leaderboardModal.setAttribute("aria-hidden", "true");
+    if (this.leaderboardModalCountdownTimer !== null) {
+      clearInterval(this.leaderboardModalCountdownTimer);
+      this.leaderboardModalCountdownTimer = null;
+    }
+    if (this.menu.isActive()) {
+      this.menu.popScope();
+    }
   }
 
   private renderLeaderboardModalBody(): void {
-    if (!this.leaderboardModalBody) return;
-    const entries = this.titleLeaderboardEntries;
-    if (entries.length === 0) {
-      this.leaderboardModalBody.innerHTML =
-        "<div style='font-size:13px; letter-spacing:2px; color:#8f8a85;'>NO SCORES RECORDED</div>";
-      return;
+    if (!this.leaderboardModalBody || !this.leaderboardModalStatus || !this.leaderboardModalList || !this.leaderboardModalDailyNote) return;
+    const slug = this.activeLeaderboardSlug;
+    const cache = this.leaderboardCacheBySlug[slug];
+    const entries = cache.entries;
+    const loading = cache.loading;
+    this.syncLeaderboardModalTabState();
+    this.leaderboardModalStatus.textContent = loading && entries.length === 0 ? "LOADING..." : "";
+    if (loading && entries.length === 0) {
+      this.leaderboardModalList.innerHTML =
+        "<div style='font-size:13px; letter-spacing:2px; color:#9ac9e8;'>LOADING...</div>";
+    } else if (entries.length === 0) {
+      this.leaderboardModalList.innerHTML =
+        `<div style='font-size:13px; letter-spacing:2px; color:#9ac9e8;'>${LEADERBOARD_EMPTY_STATES[slug]}</div>`;
+    } else {
+      this.leaderboardModalList.innerHTML = entries.slice(0, 10).map((entry) => (
+        `<div style="display:grid; grid-template-columns: 40px 1fr auto; gap:12px; padding:8px 4px; align-items:baseline; font-size:14px; letter-spacing:1px; border-bottom:1px solid rgba(127,214,255,0.08);">
+          <span style="color:#c7a271;">#${entry.rank}</span>
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(entry.username)}</span>
+          <span style="color:#ffaa44; font-weight:700;">${fmt(entry.score)}</span>
+        </div>`
+      )).join("");
     }
-    const rows = entries.slice(0, 10).map((entry) => (
-      `<div style="display:grid; grid-template-columns: 40px 1fr auto; gap:12px; padding:8px 4px; align-items:baseline; font-size:14px; letter-spacing:1px; border-bottom:1px solid rgba(127,214,255,0.08);">
-        <span style="color:#c7a271;">#${entry.rank}</span>
-        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(entry.username)}</span>
-        <span style="color:#ffaa44; font-weight:700;">${fmt(entry.score)}</span>
-      </div>`
-    )).join("");
-    this.leaderboardModalBody.innerHTML = rows;
+
+    if (slug === "daily-score") {
+      this.leaderboardModalDailyNote.textContent = formatDailyResetLine();
+      this.leaderboardModalDailyNote.classList.remove("hidden");
+    } else {
+      this.leaderboardModalDailyNote.textContent = "";
+      this.leaderboardModalDailyNote.classList.add("hidden");
+    }
+  }
+
+  private syncLeaderboardModalTabState(): void {
+    for (const slug of LEADERBOARD_TABS) {
+      const button = this.leaderboardModalTabButtons.get(slug);
+      if (!button) continue;
+      const active = slug === this.activeLeaderboardSlug;
+      button.setAttribute("aria-selected", active ? "true" : "false");
+      button.classList.toggle("active", active);
+    }
+  }
+
+  private async loadLeaderboardEntries(slug: LeaderboardSlug, force = false): Promise<LeaderboardDisplayEntry[]> {
+    const cache = this.leaderboardCacheBySlug[slug];
+    const ageMs = Date.now() - cache.fetchedAt;
+    const isFresh = cache.entries.length > 0 && ageMs < LEADERBOARD_CACHE_TTL_MS;
+    if (!force && isFresh) {
+      return cache.entries;
+    }
+    if (!force && cache.entries.length > 0) {
+      if (!cache.loading) {
+        void this.loadLeaderboardEntries(slug, true).catch(() => {
+          // Ignore background refresh failures; the cached board stays visible.
+        });
+      }
+      return cache.entries;
+    }
+    if (cache.loading && cache.requestId > 0) {
+      return cache.entries;
+    }
+
+    cache.loading = true;
+    const requestId = ++cache.requestId;
+    if (
+      this.leaderboardModal &&
+      !this.leaderboardModal.classList.contains("hidden") &&
+      this.activeLeaderboardSlug === slug
+    ) {
+      this.renderLeaderboardModalBody();
+    }
+
+    try {
+      const entries = await this.platform.fetchLeaderboardScores(slug);
+      if (this.leaderboardCacheBySlug[slug].requestId !== requestId) {
+        return this.leaderboardCacheBySlug[slug].entries;
+      }
+
+      const normalizedEntries = entries.map((entry, index) => ({
+        username: entry.username,
+        score: entry.score,
+        rank: entry.rank ?? index + 1,
+      }));
+      cache.entries = normalizedEntries;
+      cache.fetchedAt = Date.now();
+      this.leaderboardEntriesBySlug[slug] = normalizedEntries;
+      if (slug === "high-score") {
+        this.titleLeaderboardEntries = normalizedEntries;
+      }
+      if (slug === this.gameOverLeaderboardSlug) {
+        this.gameOverLeaderboardEntries = normalizedEntries;
+      }
+      if (slug === "high-score" && this.titleLeaderboardPanel && !this.titleLeaderboardPanel.classList.contains("hidden")) {
+        this.renderLeaderboardList(
+          this.titleLeaderboardContext,
+          this.titleLeaderboardList,
+          this.titleLeaderboardEntries,
+          this.titleLeaderboardEntries.length > 0 ? "WAVEDASH OR LOCAL TOP RUNS" : "NO RUNS YET"
+        );
+        this.titleLeaderboardThreshold.textContent = this.getLeaderboardThresholdCallout(this.titleLeaderboardEntries);
+        this.renderTitleLeaderboardSummary();
+      }
+      if (
+        slug === this.gameOverLeaderboardSlug &&
+        this.gameOverLeaderboardPanel &&
+        !this.gameOverLeaderboardPanel.classList.contains("hidden")
+      ) {
+        this.renderLeaderboardList(
+          this.gameOverLeaderboardContext,
+          this.gameOverLeaderboardList,
+          this.gameOverLeaderboardEntries,
+          slug === "daily-score"
+            ? `DAILY CHALLENGE · ${formatHumanDate(this.dailyChallengeDate)} · THIS RUN ${fmt(this.score)}`
+            : `THIS RUN ${fmt(this.score)} · BEST ${fmt(this.saveData.bestScore)}`
+        );
+        this.gameOverLeaderboardThreshold.textContent = this.getGameOverCallout();
+      }
+      if (
+        this.leaderboardModal &&
+        !this.leaderboardModal.classList.contains("hidden") &&
+        this.activeLeaderboardSlug === slug
+      ) {
+        this.renderLeaderboardModalBody();
+      }
+      return normalizedEntries;
+    } finally {
+      if (this.leaderboardCacheBySlug[slug].requestId === requestId) {
+        cache.loading = false;
+      }
+    }
   }
 
   private renderTitleLeaderboardSummary(): void {
@@ -1578,6 +1830,46 @@ export class Game {
       playAgain.addEventListener("click", handler);
       playAgain.addEventListener("touchend", handler, { passive: false });
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Menu cursor scope helpers — wire the title and game-over button stacks
+  // into the gamepad/keyboard cursor (MenuNavigation). Items are listed in
+  // the order players cycle through with d-pad / arrow keys; the helper
+  // filters out hidden / disabled buttons each frame so platform-specific
+  // gating (Wavedash hides VERSUS GHOST, etc.) is automatically respected.
+  // -----------------------------------------------------------------------
+  private applyTitleMenuScope(): void {
+    const ids = [
+      "title-play-btn",
+      "title-btn-versus",
+      "title-btn-raceai",
+      "title-btn-daily",
+      "title-btn-leaderboard",
+      "title-btn-achievements",
+    ];
+    const items: HTMLElement[] = [];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) items.push(el);
+    }
+    this.menu.setScope(items);
+  }
+
+  private applyGameOverMenuScope(): void {
+    const ids = [
+      "gameover-play-again",
+      "share-score-btn",
+      "gameover-leaderboard",
+      "gameover-achievements",
+      "gameover-title",
+    ];
+    const items: HTMLElement[] = [];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) items.push(el);
+    }
+    this.menu.setScope(items);
   }
 
   // -----------------------------------------------------------------------
@@ -1797,6 +2089,10 @@ export class Game {
     this.renderAchievementsList();
     this.achievementsPanel.classList.remove("hidden");
     this.achievementsPanel.setAttribute("aria-hidden", "false");
+    const closeBtn = document.getElementById("achievements-close");
+    if (closeBtn && this.menu.isActive()) {
+      this.menu.pushScope([closeBtn]);
+    }
   }
 
   private closeAchievementsPanel() {
@@ -1806,6 +2102,9 @@ export class Game {
     playClick();
     this.achievementsPanel.classList.add("hidden");
     this.achievementsPanel.setAttribute("aria-hidden", "true");
+    if (this.menu.isActive()) {
+      this.menu.popScope();
+    }
   }
 
   private renderAchievementsList() {
@@ -1944,6 +2243,9 @@ export class Game {
     this.rerollPreviewContracts();
     this.renderContractsPreview();
     this.contractsPreviewPanel.classList.remove("hidden");
+
+    // Restore the gamepad/keyboard cursor on the title button stack.
+    this.applyTitleMenuScope();
   }
 
   // -----------------------------------------------------------------------
@@ -3833,6 +4135,10 @@ export class Game {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     this.elapsedTime += dt;
     this.input.update();
+    // Drive the title/game-over menu cursor before per-state handlers so
+    // legacy "justPressed space" branches in updateTitle can skip when
+    // the menu just activated a button (avoids double-firing startGame).
+    this.menuConsumedActivateThisFrame = this.menu.update(this.input);
 
     switch (this.state) {
       case GameState.Title:
@@ -3882,7 +4188,11 @@ export class Game {
     // Keyboard restart from title. Click-to-start on empty title is handled by
     // the titleOverlay click listener, which correctly ignores clicks that
     // land on a button (ACHIEVEMENTS, MULTIPLAYER, PLAY A GHOST, etc.).
-    if (this.input.justPressed("space")) {
+    //
+    // Skip when the menu cursor consumed Space/A this frame — the focused
+    // button's click handler is already firing (startGame for PLAY, modal
+    // open for LEADERBOARD, etc.), and we don't want to double-fire here.
+    if (this.input.justPressed("space") && !this.menuConsumedActivateThisFrame) {
       this.startGame();
     }
   }
@@ -3910,6 +4220,9 @@ export class Game {
       // Dismissing the game-over overlay — flush any queued unlocks.
       this.flushAchievementUnlockQueue();
     }
+    // Detach the menu cursor while playing — gamepad goes back to driving
+    // the player. Re-applied in returnToTitle / enterGameOver.
+    this.menu.detach();
     this.state = GameState.Playing;
     this.runStartElapsedTime = this.elapsedTime;
     this.toastTimer = 0;
@@ -4291,7 +4604,10 @@ export class Game {
         console.error("Failed to submit daily score", error);
       });
     }
-    void this.refreshLeaderboardPanels(this.isDailyChallenge ? "daily-score" : "high-score").catch((error: unknown) => {
+    void this.refreshLeaderboardPanels(
+      this.isDailyChallenge ? "daily-score" : "high-score",
+      "gameover"
+    ).catch((error: unknown) => {
       console.error("Failed to refresh leaderboard panels", error);
     });
 
@@ -4405,6 +4721,11 @@ export class Game {
     if (this.aiGhostButton) {
       this.aiGhostButton.style.display = "inline-flex";
     }
+
+    // Hand the gamepad/keyboard cursor the game-over button stack.
+    // Detached again on PLAY AGAIN (startGame) or replaced by the title
+    // scope on TITLE SCREEN (returnToTitle).
+    this.applyGameOverMenuScope();
   }
 
   private renderMultiplayerGameOverBoard() {
