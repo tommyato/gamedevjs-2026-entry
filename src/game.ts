@@ -76,6 +76,33 @@ const GHOST_COLORS = [0x00ddff, 0xff00dd, 0x00ff88, 0xff8800];
  */
 const CAMERA_Y_FREEZE_VY_THRESHOLD = 0.5;
 
+// Biome zone table — hoisted from updateEnvironment() so the hot render path
+// does arithmetic only, without allocating 5 object literals every frame.
+type Zone = {
+  height: number;
+  bg: number;
+  fogDensity: number;
+  ambient: number;
+  ambientIntensity: number;
+  bloom: number;
+  name: string;
+};
+// Five dramatically distinct biomes — hue family per band so transitions
+// read as obvious zone shifts during a 60s climb video:
+//   amber → teal → gold → icy-blue → magenta
+const ZONES: Zone[] = [
+  // Band 0 (0–25m) — Workshop: smoky amber workshop, dense fog, hot glow
+  { height: 0,   bg: 0x2d1205, fogDensity: 0.024, ambient: 0xff8020, ambientIntensity: 0.85, bloom: 0.22, name: "Workshop" },
+  // Band 1 (25–50m) — Storm Deck: cool slate-teal, heavy overcast, exposed
+  { height: 25,  bg: 0x041520, fogDensity: 0.016, ambient: 0x30a8c8, ambientIntensity: 1.15, bloom: 0.28, name: "Storm Deck" },
+  // Band 2 (50–75m) — Brass Cathedral: olive-green, saturated gold light, tall reverb
+  { height: 50,  bg: 0x1c2e04, fogDensity: 0.010, ambient: 0xd4b800, ambientIntensity: 1.50, bloom: 0.38, name: "Brass Cathedral" },
+  // Band 3 (75–100m) — Chrome Spire: blue-grey steel, thin airy fog, icy bright
+  { height: 75,  bg: 0x182840, fogDensity: 0.005, ambient: 0xa8d4ff, ambientIntensity: 2.20, bloom: 0.50, name: "Chrome Spire" },
+  // Band 4 (100m+) — Cosmic Void: deep indigo, near-zero fog, vivid magenta rim
+  { height: 100, bg: 0x0e0620, fogDensity: 0.002, ambient: 0xd040f0, ambientIntensity: 1.80, bloom: 0.60, name: "Cosmic Void" },
+];
+
 type GhostVisual = {
   group: THREE.Group;
   body: THREE.Mesh;
@@ -83,6 +110,10 @@ type GhostVisual = {
   eyes: THREE.Mesh[];
   label: HTMLDivElement;
   colorHex: number;
+  /** Last textContent written — skip DOM write when string is unchanged. */
+  lastLabelText: string;
+  /** Last display value written — skip DOM write when on/off-screen state unchanged. */
+  lastLabelDisplay: string;
 };
 
 enum GameState {
@@ -530,6 +561,13 @@ export class Game {
   private lastDoubleJumpCharges = 0;
   private lastShieldCount = 0;
   private shieldSaveFlashTimer = 0;
+  // HUD textContent cache — avoids DOM mutation every frame when values are unchanged.
+  private lastHudScoreStr = "";
+  private lastHudBestStr = "";
+  private lastHudBestScoreStr = "";
+  private lastHudScoreLiveStr = "";
+  private lastHudBoltsStr = "";
+  private lastHudStatusStr = "";
   private comboGlowOverlay!: HTMLDivElement;
   private scorePopLayer!: HTMLDivElement;
   private soundToggleBtn!: HTMLElement;
@@ -3583,7 +3621,11 @@ export class Game {
     const label = document.createElement("div");
     Object.assign(label.style, {
       position: "absolute",
-      transform: "translate(-50%, -100%)",
+      // Pinned to the origin of the label layer; transform in updateGhosts
+      // positions it each frame via translate3d (GPU-composited, no layout).
+      left: "0",
+      top: "0",
+      display: "none",
       padding: "3px 8px",
       borderRadius: "8px",
       background: "rgba(8, 12, 18, 0.65)",
@@ -3607,6 +3649,8 @@ export class Game {
       eyes: [leftEye, rightEye],
       label,
       colorHex,
+      lastLabelText: "",
+      lastLabelDisplay: "none",
     };
     this.ghostMeshes.set(peer.userId, visual);
     return visual;
@@ -3669,12 +3713,23 @@ export class Game {
         if (onScreen) {
           const screenX = halfW + this.ghostTmpVec.x * halfW;
           const screenY = halfH - this.ghostTmpVec.y * halfH;
-          visual.label.style.display = "block";
-          visual.label.style.left = `${screenX}px`;
-          visual.label.style.top = `${screenY}px`;
-          visual.label.textContent = `${peer.username} · ${fmt(peer.score)}`;
+          // Single GPU-composited write — no layout recalc (left/top removed).
+          // Centering (-50%, -100%) folds into the same transform string.
+          visual.label.style.transform = `translate(-50%, -100%) translate3d(${screenX}px, ${screenY}px, 0)`;
+          if (visual.lastLabelDisplay !== "block") {
+            visual.label.style.display = "block";
+            visual.lastLabelDisplay = "block";
+          }
+          const labelText = `${peer.username} · ${fmt(peer.score)}`;
+          if (labelText !== visual.lastLabelText) {
+            visual.label.textContent = labelText;
+            visual.lastLabelText = labelText;
+          }
         } else {
-          visual.label.style.display = "none";
+          if (visual.lastLabelDisplay !== "none") {
+            visual.label.style.display = "none";
+            visual.lastLabelDisplay = "none";
+          }
         }
       }
     });
@@ -3856,7 +3911,10 @@ export class Game {
 
       const lbl = document.createElement("div");
       Object.assign(lbl.style, {
-        position: "absolute", transform: "translate(-50%, -100%)",
+        position: "absolute",
+        left: "0",
+        top: "0",
+        display: "none",
         padding: "3px 8px", borderRadius: "8px",
         background: "rgba(8,12,18,0.65)", border: "1px solid #ff4400",
         color: "#ffcc88", fontFamily: 'ui-monospace,"Cascadia Code","Fira Code",monospace',
@@ -3865,7 +3923,7 @@ export class Game {
       lbl.textContent = "AI";
       this.multiplayerLabelLayer?.appendChild(lbl);
 
-      this.ghostMeshes.set(AID, { group: grp, body, bodyMaterial: mat, eyes: [lEye, rEye], label: lbl, colorHex: c });
+      this.ghostMeshes.set(AID, { group: grp, body, bodyMaterial: mat, eyes: [lEye, rEye], label: lbl, colorHex: c, lastLabelText: "", lastLabelDisplay: "none" });
     }
 
     const v = this.ghostMeshes.get(AID)!;
@@ -3880,12 +3938,21 @@ export class Game {
       const vis = this.ghostTmpVec.z > -1 && this.ghostTmpVec.z < 1 &&
         Math.abs(this.ghostTmpVec.x) < 1.2 && Math.abs(this.ghostTmpVec.y) < 1.2;
       if (vis) {
-        v.label.style.display = "block";
-        v.label.style.left = `${hw + this.ghostTmpVec.x * hw}px`;
-        v.label.style.top = `${hh - this.ghostTmpVec.y * hh}px`;
-        v.label.textContent = `AI \u00B7 ${fmt(gs.score)}`;
+        v.label.style.transform = `translate(-50%, -100%) translate3d(${hw + this.ghostTmpVec.x * hw}px, ${hh - this.ghostTmpVec.y * hh}px, 0)`;
+        if (v.lastLabelDisplay !== "block") {
+          v.label.style.display = "block";
+          v.lastLabelDisplay = "block";
+        }
+        const aiLabelText = `AI \u00B7 ${fmt(gs.score)}`;
+        if (aiLabelText !== v.lastLabelText) {
+          v.label.textContent = aiLabelText;
+          v.lastLabelText = aiLabelText;
+        }
       } else {
-        v.label.style.display = "none";
+        if (v.lastLabelDisplay !== "none") {
+          v.label.style.display = "none";
+          v.lastLabelDisplay = "none";
+        }
       }
     }
   }
@@ -5899,20 +5966,46 @@ export class Game {
     // HEIGHT = current live height in meters (grows continuously). BEST = the
     // all-time best height. Previously HEIGHT incorrectly showed score, which
     // meant current height was only visible when it was beating best.
-    this.hudScore.textContent = `${fmt(this.heightMaxReached)}m`;
-    this.hudBest.textContent = `${fmt(Math.max(this.saveData.bestHeight, this.heightMaxReached))}m`;
-    this.hudBestScore.textContent = fmt(this.saveData.bestScore);
-    this.hudScoreLive.textContent = fmt(this.score);
-    this.hudBolts.textContent = fmt(this.boltCount);
+    // Cache comparisons avoid DOM mutation every frame when values are stable.
+    const hudScoreStr = `${fmt(this.heightMaxReached)}m`;
+    if (hudScoreStr !== this.lastHudScoreStr) {
+      this.hudScore.textContent = hudScoreStr;
+      this.lastHudScoreStr = hudScoreStr;
+    }
+    const hudBestStr = `${fmt(Math.max(this.saveData.bestHeight, this.heightMaxReached))}m`;
+    if (hudBestStr !== this.lastHudBestStr) {
+      this.hudBest.textContent = hudBestStr;
+      this.lastHudBestStr = hudBestStr;
+    }
+    const hudBestScoreStr = fmt(this.saveData.bestScore);
+    if (hudBestScoreStr !== this.lastHudBestScoreStr) {
+      this.hudBestScore.textContent = hudBestScoreStr;
+      this.lastHudBestScoreStr = hudBestScoreStr;
+    }
+    const hudScoreLiveStr = fmt(this.score);
+    if (hudScoreLiveStr !== this.lastHudScoreLiveStr) {
+      this.hudScoreLive.textContent = hudScoreLiveStr;
+      this.lastHudScoreLiveStr = hudScoreLiveStr;
+    }
+    const hudBoltsStr = fmt(this.boltCount);
+    if (hudBoltsStr !== this.lastHudBoltsStr) {
+      this.hudBolts.textContent = hudBoltsStr;
+      this.lastHudBoltsStr = hudBoltsStr;
+    }
 
     const aiGs = this.aiGhostEnabled ? this.aiGhost?.getGhostState() : null;
     const aiHeightStr = aiGs ? ` · AI ${fmt(aiGs.height)}m` : "";
+    let hudStatusStr: string;
     if (this.isChallengeMode && this.ghostPlayback) {
-      this.hudStatus.textContent = `CHASING ${this.ghostPlayback.ghostName.toUpperCase()} (${fmt(this.ghostPlayback.ghostHeight)}m) · YOU ${fmt(this.heightMaxReached)}m · NEXT ${this.nextMilestone}m`;
+      hudStatusStr = `CHASING ${this.ghostPlayback.ghostName.toUpperCase()} (${fmt(this.ghostPlayback.ghostHeight)}m) · YOU ${fmt(this.heightMaxReached)}m · NEXT ${this.nextMilestone}m`;
     } else {
-      this.hudStatus.textContent = this.isDailyChallenge
+      hudStatusStr = this.isDailyChallenge
         ? `DAILY · ${formatHumanDate(this.dailyChallengeDate)} · SAME TOWER FOR EVERYONE · HEIGHT ${fmt(this.heightMaxReached)}m · NEXT ${this.nextMilestone}m`
         : `HEIGHT ${fmt(this.heightMaxReached)}m${aiHeightStr} · NEXT ${this.nextMilestone}m · BEST COMBO x${Math.max(this.saveData.bestCombo, this.bestCombo)}`;
+    }
+    if (hudStatusStr !== this.lastHudStatusStr) {
+      this.hudStatus.textContent = hudStatusStr;
+      this.lastHudStatusStr = hudStatusStr;
     }
 
     if (this.hudAiBadge) {
@@ -6385,50 +6478,25 @@ export class Game {
   }
 
   private updateEnvironment(height: number) {
-    type Zone = {
-      height: number;
-      bg: number;
-      fogDensity: number;
-      ambient: number;
-      ambientIntensity: number;
-      bloom: number;
-      name: string;
-    };
-    // Five dramatically distinct biomes — hue family per band so transitions
-    // read as obvious zone shifts during a 60s climb video:
-    //   amber → teal → gold → icy-blue → magenta
-    const zones: Zone[] = [
-      // Band 0 (0–25m) — Workshop: smoky amber workshop, dense fog, hot glow
-      { height: 0,   bg: 0x2d1205, fogDensity: 0.024, ambient: 0xff8020, ambientIntensity: 0.85, bloom: 0.22, name: "Workshop" },
-      // Band 1 (25–50m) — Storm Deck: cool slate-teal, heavy overcast, exposed
-      { height: 25,  bg: 0x041520, fogDensity: 0.016, ambient: 0x30a8c8, ambientIntensity: 1.15, bloom: 0.28, name: "Storm Deck" },
-      // Band 2 (50–75m) — Brass Cathedral: olive-green, saturated gold light, tall reverb
-      { height: 50,  bg: 0x1c2e04, fogDensity: 0.010, ambient: 0xd4b800, ambientIntensity: 1.50, bloom: 0.38, name: "Brass Cathedral" },
-      // Band 3 (75–100m) — Chrome Spire: blue-grey steel, thin airy fog, icy bright
-      { height: 75,  bg: 0x182840, fogDensity: 0.005, ambient: 0xa8d4ff, ambientIntensity: 2.20, bloom: 0.50, name: "Chrome Spire" },
-      // Band 4 (100m+) — Cosmic Void: deep indigo, near-zero fog, vivid magenta rim
-      { height: 100, bg: 0x0e0620, fogDensity: 0.002, ambient: 0xd040f0, ambientIntensity: 1.80, bloom: 0.60, name: "Cosmic Void" },
-    ];
-
     // Fire zone-entry banner once per zone boundary crossing.
     let currentZoneIndex = 0;
-    for (let i = zones.length - 1; i >= 0; i -= 1) {
-      if (height >= zones[i].height) {
+    for (let i = ZONES.length - 1; i >= 0; i -= 1) {
+      if (height >= ZONES[i].height) {
         currentZoneIndex = i;
         break;
       }
     }
     if (currentZoneIndex !== this.lastAnnouncedZone) {
       this.lastAnnouncedZone = currentZoneIndex;
-      this.showZoneAnnouncement(zones[currentZoneIndex].name.toUpperCase());
+      this.showZoneAnnouncement(ZONES[currentZoneIndex].name.toUpperCase());
     }
 
-    let from = zones[0];
-    let to = zones[0];
+    let from = ZONES[0];
+    let to = ZONES[0];
     let t = 0;
-    for (let index = 0; index < zones.length - 1; index += 1) {
-      const a = zones[index];
-      const b = zones[index + 1];
+    for (let index = 0; index < ZONES.length - 1; index += 1) {
+      const a = ZONES[index];
+      const b = ZONES[index + 1];
       if (height <= a.height) {
         from = a;
         to = a;
@@ -6448,7 +6516,7 @@ export class Game {
         t = (height - bandStart) / 5;
         break;
       }
-      if (index === zones.length - 2) {
+      if (index === ZONES.length - 2) {
         from = b;
         to = b;
       }
