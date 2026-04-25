@@ -245,7 +245,7 @@ function findNeighbor(
   const curPrimary = horizontal ? curCx : curCy;
   const curPerp    = horizontal ? curCy : curCx;
 
-  interface Scored { el: HTMLElement; score: number }
+  interface Scored { el: HTMLElement; aligned: boolean; score: number }
 
   function scoreCandidate(el: HTMLElement): Scored | null {
     const r  = el.getBoundingClientRect();
@@ -263,21 +263,29 @@ function findNeighbor(
     const primaryDist = Math.abs(candidatePrimary - curPrimary);
     const perpOffset  = Math.abs(candidatePerp    - curPerp);
 
-    // Zero the perpendicular penalty when the candidate's rect brackets
-    // our center on the cross-axis — buttons in the same row/column snap
-    // cleanly without fighting the primary axis distance.
-    const perpSpans = horizontal
+    // Aligned: candidate's rect brackets our center on the cross-axis
+    // (same row when going horizontal, same column when going vertical).
+    // Aligned candidates win categorically over diagonal ones — pressing
+    // RIGHT from a button must land on whatever is directly to the right
+    // in the same row, even if a diagonal is closer in primary distance.
+    // Without this, e.g. RIGHT from ACHIEVEMENTS picks PLAY (up+right,
+    // closer) instead of LEADERBOARD (same-row right, farther).
+    const aligned = horizontal
       ? r.top  <= curCy && r.bottom >= curCy
       : r.left <= curCx && r.right  >= curCx;
 
-    const perpPenalty = perpSpans ? 0 : perpOffset * PERP_MULT;
-    return { el, score: primaryDist + perpPenalty };
+    return { el, aligned, score: primaryDist + (aligned ? 0 : perpOffset * PERP_MULT) };
   }
 
   const scored = candidates
     .map(scoreCandidate)
     .filter((s): s is Scored => s !== null)
-    .sort((a, b) => a.score - b.score);
+    .sort((a, b) => {
+      // Aligned candidates always beat non-aligned. Within each tier,
+      // shorter primary distance wins (with perp penalty for non-aligned).
+      if (a.aligned !== b.aligned) return a.aligned ? -1 : 1;
+      return a.score - b.score;
+    });
 
   if (scored.length > 0) return scored[0].el;
 
