@@ -556,6 +556,8 @@ export class Game {
   private hudCombo!: HTMLElement;
   private hudDoubleJumpCharges!: HTMLElement;
   private hudShieldCount!: HTMLElement;
+  private _hudDoubleJumpCountEl: HTMLElement | null = null;
+  private _hudShieldCountEl: HTMLElement | null = null;
   private doubleJumpFlashTimer = 0;
   private shieldFlashTimer = 0;
   private lastDoubleJumpCharges = 0;
@@ -568,6 +570,14 @@ export class Game {
   private lastHudScoreLiveStr = "";
   private lastHudBoltsStr = "";
   private lastHudStatusStr = "";
+  // HUD style caches — avoids redundant style writes on frames where overlay state is unchanged.
+  private _lastComboGlowColor = "";
+  private _lastToastOpacity = "";
+  private _lastToastTransform = "";
+  private _lastZoneOpacity = "";
+  private _lastZoneTransform = "";
+  private _lastCloseCallOpacity = "";
+  private _lastShieldSaveOpacity = "";
   private comboGlowOverlay!: HTMLDivElement;
   private scorePopLayer!: HTMLDivElement;
   private soundToggleBtn!: HTMLElement;
@@ -624,6 +634,10 @@ export class Game {
   private readonly visualGearMap = new Map<number, Gear>();
   private readonly visualBoltMap = new Map<number, BoltCollectible>();
   private readonly visualPowerUpMap = new Map<number, THREE.Mesh>();
+  // Scratch Sets for syncVisuals — reused each frame to avoid per-frame allocations.
+  private readonly _nextGearIds = new Set<number>();
+  private readonly _nextBoltIds = new Set<number>();
+  private readonly _nextPowerUpIds = new Set<number>();
   private towerBase!: THREE.Mesh;
   private playerLight!: THREE.PointLight;
   private topDownShadow!: TopDownShadowSystem;
@@ -799,6 +813,7 @@ export class Game {
   private windParticleTimer = 0;
   private magnetParticleTimer = 0;
   private gearFreezeParticleTimer = 0;
+  private readonly _gearPosScratch = new THREE.Vector3();
   private trailWispTimer = 0;
   private gearFreezeActive = false;
   private personalBestHeight = 0;
@@ -815,6 +830,9 @@ export class Game {
   // only. Contract bonuses generate their own pops at the moment they
   // complete; they would double-count if routed through this diff.
   private lastSimScore = 0;
+
+  // Class-level event buffer — reused each frame in updatePlaying to avoid per-frame array allocation.
+  private readonly _aggregatedEvents: SimEvent[] = [];
 
   // Run Contracts state.
   private activeContracts: ContractInstance[] = [];
@@ -1182,6 +1200,8 @@ export class Game {
     this.hudCombo = hudCombo;
     this.hudDoubleJumpCharges = hudDoubleJumpCharges;
     this.hudShieldCount = hudShieldCount;
+    this._hudDoubleJumpCountEl = hudDoubleJumpCharges.querySelector<HTMLElement>('[data-role="count"]');
+    this._hudShieldCountEl = hudShieldCount.querySelector<HTMLElement>('[data-role="count"]');
     this.soundToggleBtn = soundToggleBtn;
     this.closeCallOverlay = closeCallOverlay;
     this.shieldSaveOverlay = shieldSaveOverlay;
@@ -4451,7 +4471,7 @@ export class Game {
     this.simAccumulator = Math.min(0.25, this.simAccumulator + dt);
 
     let state: SimState = this.simState ?? this.sim.getState();
-    const aggregatedEvents: SimEvent[] = [];
+    this._aggregatedEvents.length = 0;
     let firstStep = true;
     while (this.simAccumulator >= SIM_FIXED_DT) {
       // `jump` is edge-triggered. Deliver it to the first sim step of this
@@ -4467,13 +4487,13 @@ export class Game {
         action.jump = false;
       }
       state = result.state;
-      for (const ev of result.events) aggregatedEvents.push(ev);
+      for (const ev of result.events) this._aggregatedEvents.push(ev);
       this.simAccumulator -= SIM_FIXED_DT;
       firstStep = false;
     }
 
     this.consumeState(state);
-    this.handleEvents(aggregatedEvents, state);
+    this.handleEvents(this._aggregatedEvents, state);
 
     // ── Multiplayer finish detection (100 m crossing) ──────────────────────────
     if (
@@ -4917,9 +4937,10 @@ export class Game {
   }
 
   private syncVisuals(state: SimState) {
-    const nextGearIds = new Set(state.gears.map((gear) => gear.id));
+    this._nextGearIds.clear();
+    for (const gear of state.gears) this._nextGearIds.add(gear.id);
     for (const [id, gear] of this.visualGearMap) {
-      if (nextGearIds.has(id)) {
+      if (this._nextGearIds.has(id)) {
         continue;
       }
       // Release to pool (removes mesh from scene; keeps instance for future reuse).
@@ -4945,11 +4966,16 @@ export class Game {
       }
       this.applySimGearToVisual(gear, simGear, state.elapsedTime);
     }
-    this.gears = state.gears.map((gear) => this.visualGearMap.get(gear.id)).filter((gear): gear is Gear => gear !== undefined);
+    this.gears.length = 0;
+    for (const simGear of state.gears) {
+      const g = this.visualGearMap.get(simGear.id);
+      if (g) this.gears.push(g);
+    }
 
-    const nextBoltIds = new Set(state.bolts.map((bolt) => bolt.id));
+    this._nextBoltIds.clear();
+    for (const bolt of state.bolts) this._nextBoltIds.add(bolt.id);
     for (const [id, bolt] of this.visualBoltMap) {
-      if (nextBoltIds.has(id)) {
+      if (this._nextBoltIds.has(id)) {
         continue;
       }
       this.scene.remove(bolt.mesh);
@@ -4969,12 +4995,17 @@ export class Game {
       }
       this.applySimBoltToVisual(bolt, simBolt);
     }
-    this.bolts = state.bolts.map((bolt) => this.visualBoltMap.get(bolt.id)).filter((bolt): bolt is BoltCollectible => bolt !== undefined);
+    this.bolts.length = 0;
+    for (const simBolt of state.bolts) {
+      const b = this.visualBoltMap.get(simBolt.id);
+      if (b) this.bolts.push(b);
+    }
 
     // Sync power-up visuals
-    const nextPowerUpIds = new Set(state.powerUps.map((p) => p.id));
+    this._nextPowerUpIds.clear();
+    for (const p of state.powerUps) this._nextPowerUpIds.add(p.id);
     for (const [id, mesh] of this.visualPowerUpMap) {
-      if (nextPowerUpIds.has(id)) {
+      if (this._nextPowerUpIds.has(id)) {
         continue;
       }
       this.scene.remove(mesh);
@@ -5359,8 +5390,7 @@ export class Game {
           this.windParticleTimer -= dt;
           if (this.windParticleTimer <= 0) {
             this.windParticleTimer = 0.09;
-            const gearPos = new THREE.Vector3(activeGear.x, activeGear.y + activeGear.height / 2, activeGear.z);
-            this.particles.spawnWindGust(gearPos, activeGear.radius, activeGear.windAngle);
+            this.particles.spawnWindGust(this._gearPosScratch.set(activeGear.x, activeGear.y + activeGear.height / 2, activeGear.z), activeGear.radius, activeGear.windAngle);
           }
         } else {
           this.windParticleTimer = 0;
@@ -5370,8 +5400,7 @@ export class Game {
           this.magnetParticleTimer -= dt;
           if (this.magnetParticleTimer <= 0) {
             this.magnetParticleTimer = 0.12;
-            const gearPos = new THREE.Vector3(activeGear.x, activeGear.y + activeGear.height / 2, activeGear.z);
-            this.particles.spawnMagnetPull(gearPos, activeGear.radius);
+            this.particles.spawnMagnetPull(this._gearPosScratch.set(activeGear.x, activeGear.y + activeGear.height / 2, activeGear.z), activeGear.radius);
           }
         } else {
           this.magnetParticleTimer = 0;
@@ -5388,8 +5417,7 @@ export class Game {
               const dz = simGear.z - this.simState.player.z;
               if (dx * dx + dz * dz > 20 * 20) continue;
               if (Math.random() > 0.35) continue;
-              const gearPos = new THREE.Vector3(simGear.x, simGear.y + simGear.height / 2, simGear.z);
-              this.particles.spawnIceCrystals(gearPos, simGear.radius);
+              this.particles.spawnIceCrystals(this._gearPosScratch.set(simGear.x, simGear.y + simGear.height / 2, simGear.z), simGear.radius);
             }
           }
         } else {
@@ -6019,7 +6047,7 @@ export class Game {
 
     const djCharges = this.simState?.player.doubleJumpCharges ?? 0;
     this.doubleJumpFlashTimer = Math.max(0, this.doubleJumpFlashTimer - dt);
-    this.updatePowerupSlot(this.hudDoubleJumpCharges, djCharges, this.lastDoubleJumpCharges);
+    this.updatePowerupSlot(this.hudDoubleJumpCharges, djCharges, this.lastDoubleJumpCharges, this._hudDoubleJumpCountEl);
     if (djCharges !== this.lastDoubleJumpCharges) {
       this.pulsePowerupSlot(this.hudDoubleJumpCharges);
       // Trail only on collect (count up), not on use (count down).
@@ -6031,7 +6059,7 @@ export class Game {
 
     const shieldCount = this.simState?.player.shieldCount ?? 0;
     this.shieldFlashTimer = Math.max(0, this.shieldFlashTimer - dt);
-    this.updatePowerupSlot(this.hudShieldCount, shieldCount, this.lastShieldCount);
+    this.updatePowerupSlot(this.hudShieldCount, shieldCount, this.lastShieldCount, this._hudShieldCountEl);
     if (shieldCount !== this.lastShieldCount) {
       this.pulsePowerupSlot(this.hudShieldCount);
       if (shieldCount > this.lastShieldCount) {
@@ -6044,8 +6072,10 @@ export class Game {
     this.toastTimer = Math.max(0, this.toastTimer - dt);
     const toastVisible = this.toastTimer > 0;
     const visibility = Math.min(this.toastTimer / 0.9, 1);
-    this.hudToast.style.opacity = toastVisible ? String(visibility) : "0";
-    this.hudToast.style.transform = `translate(-50%, ${toastVisible ? (1 - visibility) * 10 : 12}px)`;
+    const newToastOpacity = toastVisible ? String(visibility) : "0";
+    const newToastTransform = `translate(-50%, ${toastVisible ? (1 - visibility) * 10 : 12}px)`;
+    if (newToastOpacity !== this._lastToastOpacity) { this.hudToast.style.opacity = newToastOpacity; this._lastToastOpacity = newToastOpacity; }
+    if (newToastTransform !== this._lastToastTransform) { this.hudToast.style.transform = newToastTransform; this._lastToastTransform = newToastTransform; }
 
     this.zoneAnnouncementTimer = Math.max(0, this.zoneAnnouncementTimer - dt);
     const zoneVisible = this.zoneAnnouncementTimer > 0;
@@ -6053,14 +6083,15 @@ export class Game {
     const fadeIn = Math.min((this.zoneAnnouncementDuration - this.zoneAnnouncementTimer) / fadeDuration, 1);
     const fadeOut = Math.min(this.zoneAnnouncementTimer / fadeDuration, 1);
     const zoneOpacity = zoneVisible ? Math.min(fadeIn, fadeOut) : 0;
-    this.zoneAnnouncement.style.opacity = String(zoneOpacity);
-    this.zoneAnnouncement.style.transform = `translate(-50%, ${zoneVisible ? (1 - zoneOpacity) * 12 : 12}px)`;
+    const newZoneOpacity = String(zoneOpacity);
+    const newZoneTransform = `translate(-50%, ${zoneVisible ? (1 - zoneOpacity) * 12 : 12}px)`;
+    if (newZoneOpacity !== this._lastZoneOpacity) { this.zoneAnnouncement.style.opacity = newZoneOpacity; this._lastZoneOpacity = newZoneOpacity; }
+    if (newZoneTransform !== this._lastZoneTransform) { this.zoneAnnouncement.style.transform = newZoneTransform; this._lastZoneTransform = newZoneTransform; }
 
     this.updateScorePops(dt);
   }
 
-  private updatePowerupSlot(slot: HTMLElement, count: number, previousCount: number) {
-    const countEl = slot.querySelector<HTMLElement>('[data-role="count"]');
+  private updatePowerupSlot(slot: HTMLElement, count: number, previousCount: number, countEl: HTMLElement | null) {
     if (count > 0) {
       slot.classList.remove("empty");
       if (countEl) {
@@ -6197,7 +6228,9 @@ export class Game {
 
   private updateComboHud(multiplier: number) {
     if (multiplier > 1) {
-      this.hudCombo.textContent = `COMBO x${multiplier}`;
+      if (multiplier !== this.lastComboMultiplier) {
+        this.hudCombo.textContent = `COMBO x${multiplier}`;
+      }
       this.hudCombo.classList.add("active");
       if (multiplier > this.lastComboMultiplier) {
         this.hudCombo.animate(
@@ -6210,7 +6243,9 @@ export class Game {
         );
       }
     } else {
-      this.hudCombo.textContent = "";
+      if (multiplier !== this.lastComboMultiplier) {
+        this.hudCombo.textContent = "";
+      }
       this.hudCombo.classList.remove("active");
     }
     this.lastComboMultiplier = multiplier;
@@ -6231,7 +6266,10 @@ export class Game {
 
     const intensity = THREE.MathUtils.clamp((multiplier - 1) / 6, 0, 1);
     const opacity = THREE.MathUtils.clamp(0.08 + intensity * 0.5, 0.08, 0.58);
-    this.comboGlowOverlay.style.background = `radial-gradient(circle at center, rgba(255,255,255,0) 55%, rgba(${color}, ${0.12 + intensity * 0.34}) 100%)`;
+    if (color !== this._lastComboGlowColor) {
+      this.comboGlowOverlay.style.background = `radial-gradient(circle at center, rgba(255,255,255,0) 55%, rgba(${color}, ${0.12 + intensity * 0.34}) 100%)`;
+      this._lastComboGlowColor = color;
+    }
     this.comboGlowOverlay.style.opacity = String(opacity);
   }
 
@@ -6638,18 +6676,18 @@ export class Game {
 
     if (this.closeCallFlashTimer > 0) {
       this.closeCallFlashTimer = Math.max(0, this.closeCallFlashTimer - dt);
-      const opacity = THREE.MathUtils.clamp(this.closeCallFlashTimer / 0.2, 0, 1);
-      this.closeCallOverlay.style.opacity = String(opacity);
+      const ccOpacityStr = String(THREE.MathUtils.clamp(this.closeCallFlashTimer / 0.2, 0, 1));
+      if (ccOpacityStr !== this._lastCloseCallOpacity) { this.closeCallOverlay.style.opacity = ccOpacityStr; this._lastCloseCallOpacity = ccOpacityStr; }
     } else {
-      this.closeCallOverlay.style.opacity = "0";
+      if (this._lastCloseCallOpacity !== "0") { this.closeCallOverlay.style.opacity = "0"; this._lastCloseCallOpacity = "0"; }
     }
 
     if (this.shieldSaveFlashTimer > 0) {
       this.shieldSaveFlashTimer = Math.max(0, this.shieldSaveFlashTimer - dt);
-      const opacity = THREE.MathUtils.clamp(this.shieldSaveFlashTimer / 0.8, 0, 1) * 0.5;
-      this.shieldSaveOverlay.style.opacity = String(opacity);
+      const ssOpacityStr = String(THREE.MathUtils.clamp(this.shieldSaveFlashTimer / 0.8, 0, 1) * 0.5);
+      if (ssOpacityStr !== this._lastShieldSaveOpacity) { this.shieldSaveOverlay.style.opacity = ssOpacityStr; this._lastShieldSaveOpacity = ssOpacityStr; }
     } else {
-      this.shieldSaveOverlay.style.opacity = "0";
+      if (this._lastShieldSaveOpacity !== "0") { this.shieldSaveOverlay.style.opacity = "0"; this._lastShieldSaveOpacity = "0"; }
     }
   }
 
