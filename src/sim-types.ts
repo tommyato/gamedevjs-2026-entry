@@ -74,6 +74,14 @@ export type SimPlayer = {
   lastLandedGearX: number;
   lastLandedGearY: number;
   lastLandedGearZ: number;
+  /** Position of the last NON-crumbling gear the player landed on.
+   *  Shield revive uses this so a chain of crumbling gears doesn't
+   *  drop the player back onto a collapsed surface (universal polish
+   *  rule 6 — death+revive must not loop). Updated only when the gear
+   *  variant is something the player can stand on indefinitely. */
+  lastStableGearX: number;
+  lastStableGearY: number;
+  lastStableGearZ: number;
 };
 
 export type SimState = {

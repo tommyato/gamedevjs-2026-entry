@@ -1128,6 +1128,11 @@ export class Game {
     // Footstep trail removed - replaced with jump/landing particle bursts
     this.player.reset(0, 2);
     this.player.mesh.position.set(0, 0.32, 0);
+    // Initial state is Title — the avatar lives at world origin, which
+    // would otherwise show the body (and its silhouette pass cutout)
+    // sitting in the middle of the title scene. Hide visuals until the
+    // run starts; startGame()/returnToTitle() flip this.
+    this.player.setVisualVisible(false);
 
     const hud = document.getElementById("hud");
     const titleOverlay = document.getElementById("title-overlay");
@@ -1711,7 +1716,9 @@ export class Game {
       ...LEADERBOARD_TABS.map((slug) => this.leaderboardModalTabButtons.get(slug) ?? null),
     ].filter((item): item is HTMLButtonElement => item !== null);
     if (focusables.length > 0 && this.menu.isActive()) {
-      this.menu.pushScope(focusables);
+      // onCancel runs when the user presses Esc / gamepad B with the
+      // modal scope on top — closeLeaderboardModal pops the scope itself.
+      this.menu.pushScope(focusables, () => this.closeLeaderboardModal());
     }
     this.leaderboardModalCloseButton?.focus();
   }
@@ -2149,7 +2156,8 @@ export class Game {
     this.achievementsPanel.setAttribute("aria-hidden", "false");
     const closeBtn = document.getElementById("achievements-close");
     if (closeBtn && this.menu.isActive()) {
-      this.menu.pushScope([closeBtn]);
+      // Esc / gamepad B closes the panel via the onCancel callback.
+      this.menu.pushScope([closeBtn], () => this.closeAchievementsPanel());
     }
   }
 
@@ -2250,6 +2258,9 @@ export class Game {
 
     this.player.resetVisuals();
     this.player.reset(0, 2);
+    // Back on the title screen — hide the avatar so it doesn't render at
+    // world origin behind the title UI (regular pass + silhouette pass).
+    this.player.setVisualVisible(false);
 
     this.resetVisualWorld();
     const { state } = this.sim.reset();
@@ -4310,6 +4321,9 @@ export class Game {
     // Detach the menu cursor while playing — gamepad goes back to driving
     // the player. Re-applied in returnToTitle / enterGameOver.
     this.menu.detach();
+    // Reveal the avatar now that a run is starting. Hidden on the title
+    // screen so the silhouette pass doesn't leak the world-origin player.
+    this.player.setVisualVisible(true);
     this.state = GameState.Playing;
     this.runStartElapsedTime = this.elapsedTime;
     this.toastTimer = 0;

@@ -117,6 +117,18 @@ export class Player {
     });
   }
 
+  /**
+   * Show or hide the avatar's renderable visuals. Toggles `visualRoot`
+   * (not the parent `mesh`) so the silhouette pass — which keys off the
+   * SILHOUETTE_PLAYER_LAYER stamped onto every Mesh under `visualRoot` —
+   * is also gated, since Three.js skips invisible subtrees during render
+   * regardless of layer mask. Used to hide the player on the title and
+   * pre-run screens where the avatar would otherwise sit at world origin.
+   */
+  setVisualVisible(visible: boolean) {
+    this.visualRoot.visible = visible;
+  }
+
   update(dt: number, input: Input, cameraAngle = 0): PlayerUpdateResult {
     this.prevY = this.mesh.position.y;
     const move = input.getMovement();

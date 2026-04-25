@@ -310,6 +310,11 @@ export class ClockworkClimbSimulation {
       lastLandedGearX: 0,
       lastLandedGearY: 0,
       lastLandedGearZ: 0,
+      // Spawn gear sits at the world origin and is non-crumbling, so it
+      // qualifies as a stable revive point until the player lands again.
+      lastStableGearX: 0,
+      lastStableGearY: 0,
+      lastStableGearZ: 0,
     };
 
     return {
@@ -1119,6 +1124,18 @@ export class ClockworkClimbSimulation {
     this.state.player.lastLandedGearX = gear.x;
     this.state.player.lastLandedGearY = getGearTopY(gear);
     this.state.player.lastLandedGearZ = gear.z;
+    // Track the most recent STABLE landing separately. Crumbling gears
+    // collapse 1.5s after the player lands, so reviving onto one
+    // produces an immediate re-death (universal polish rule 6). Holding
+    // the last non-crumbling top means a chain of N crumbling gears in
+    // a row falls back to the platform before the chain — backwards,
+    // not forwards (forward respawn would let players cheese hard
+    // sections by suiciding into a shield).
+    if (gear.variant !== "crumbling") {
+      this.state.player.lastStableGearX = gear.x;
+      this.state.player.lastStableGearY = getGearTopY(gear);
+      this.state.player.lastStableGearZ = gear.z;
+    }
 
     if (gear.variant === "crumbling" && !gear.crumbleArmed) {
       gear.crumbleArmed = true;
@@ -1716,9 +1733,24 @@ export class ClockworkClimbSimulation {
         this.state.player.shieldCount -= 1;
         this.shieldSaveCount += 1;
         this.state.shieldSaveCount = this.shieldSaveCount;
-        this.state.player.x = this.state.player.lastLandedGearX;
-        this.state.player.y = this.state.player.lastLandedGearY + 1.5;
-        this.state.player.z = this.state.player.lastLandedGearZ;
+        // Revive at the last STABLE gear (walks backwards through any
+        // chain of crumbling gears). Falls back to lastLandedGear* if
+        // the player has not yet landed on a stable surface — preserves
+        // the legacy "drop where you died" behavior in the unreachable
+        // edge case where the run starts on a crumbling gear.
+        const haveStable =
+          this.state.player.lastStableGearY !== 0 ||
+          this.state.player.lastStableGearX !== 0 ||
+          this.state.player.lastStableGearZ !== 0;
+        this.state.player.x = haveStable
+          ? this.state.player.lastStableGearX
+          : this.state.player.lastLandedGearX;
+        this.state.player.y = (haveStable
+          ? this.state.player.lastStableGearY
+          : this.state.player.lastLandedGearY) + 1.5;
+        this.state.player.z = haveStable
+          ? this.state.player.lastStableGearZ
+          : this.state.player.lastLandedGearZ;
         this.state.player.vx = 0;
         this.state.player.vy = 0;
         this.state.player.vz = 0;

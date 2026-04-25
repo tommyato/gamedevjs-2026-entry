@@ -118,11 +118,16 @@ export class MenuNavigation {
       scope.index = scope.items.indexOf(visible[0]);
     }
 
+    // Use justPressedDir (keyboard arrows/WASD + gamepad d-pad +
+    // left-stick threshold) so menu nav works without a mouse on every
+    // platform. Plain `justPressed("up")` etc. would miss gamepad input
+    // because the stick/d-pad are folded into gamepadMovement, not the
+    // keyboard "up/down/left/right" channels.
     const dirPressed: Direction | null =
-      input.justPressed("up")    ? "up"    :
-      input.justPressed("down")  ? "down"  :
-      input.justPressed("left")  ? "left"  :
-      input.justPressed("right") ? "right" :
+      input.justPressedDir("up")    ? "up"    :
+      input.justPressedDir("down")  ? "down"  :
+      input.justPressedDir("left")  ? "left"  :
+      input.justPressedDir("right") ? "right" :
       null;
 
     if (dirPressed !== null) {
@@ -134,6 +139,18 @@ export class MenuNavigation {
     // Ensure visual focus stays on the current element (covers the case
     // where DOM was re-rendered and class was wiped).
     this.applyFocusClass(scope);
+
+    // Cancel/back (Esc + gamepad B): if the topmost scope was opened
+    // with an onCancel handler (modals push themselves with one), fire
+    // it. The handler is responsible for closing whatever it opened —
+    // which itself calls popScope, restoring parent focus.
+    if (input.justPressedCancel()) {
+      const cancel = scope.onCancel;
+      if (cancel) {
+        cancel();
+        return false;
+      }
+    }
 
     if (this.suppressActivateFrames > 0) {
       this.suppressActivateFrames -= 1;

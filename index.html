@@ -473,8 +473,11 @@
       display: flex;
       flex-direction: column;
       gap: 0;
-      /* Cap height so footer stays pinned; inner content scrolls if needed */
-      max-height: 280px;
+      /* Fixed height — the leaderboard panel inside used to grow/shrink
+         with row count, jumping the game-over layout each refresh.
+         height (not max-height) keeps empty and full states identical;
+         inner content scrolls when needed (per universal polish rule 3). */
+      height: 280px;
       overflow-y: auto;
     }
     .game-over-footer {
@@ -973,7 +976,10 @@
     .achievements-card,
     .leaderboard-modal-card {
       width: min(720px, calc(100vw - 32px));
-      max-height: min(82vh, 760px);
+      /* Fixed chrome height — empty and full states render at the same
+         dimensions, per universal polish rule 3. Inner list scrolls.
+         Was max-height (chrome shrank with row count); height pins it. */
+      height: min(82vh, 760px);
       padding: 24px 26px 22px;
       border-radius: 22px;
       border: 1px solid rgba(127, 214, 255, 0.18);
@@ -986,7 +992,10 @@
       pointer-events: auto;
     }
     .leaderboard-modal-card {
-      overflow: auto;
+      /* Card is fixed-height; the inner #leaderboard-modal-body claims
+         flex remainder and scrolls its list. Card itself does not
+         scroll — keeps the CLOSE button pinned at the top. */
+      overflow: hidden;
     }
     .achievements-head,
     .leaderboard-modal-head {
@@ -1031,6 +1040,10 @@
     #achievements-list {
       display: grid;
       gap: 10px;
+      /* Claim remaining card height — list scrolls, chrome stays pinned,
+         empty state matches full-state dimensions. */
+      flex: 1 1 0;
+      min-height: 0;
       overflow: auto;
       padding-right: 4px;
     }
@@ -1078,12 +1091,15 @@
       color: #8a9cac;
     }
     #leaderboard-modal-body {
-      overflow: auto;
+      /* Claim all remaining card height so the list inside can scroll
+         while the head stays pinned. min-height:0 unbreaks flex column
+         scrolling in older browsers. */
+      flex: 1 1 0;
+      min-height: 0;
       font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
       display: flex;
       flex-direction: column;
       gap: 14px;
-      min-height: 0;
     }
     .leaderboard-modal-tabs {
       display: grid;
@@ -1123,6 +1139,9 @@
     #leaderboard-modal-list {
       display: grid;
       gap: 6px;
+      /* Claim remaining body height so this is the surface that scrolls
+         when entries overflow. Empty state still occupies the same area. */
+      flex: 1 1 0;
       min-height: 0;
       overflow: auto;
       padding-right: 4px;
