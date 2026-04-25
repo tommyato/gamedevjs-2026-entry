@@ -101,6 +101,22 @@ export class Player {
     applyTopDownShadowToObject(this.mesh, uniforms);
   }
 
+  /**
+   * Enable an extra Three.js render layer on every Mesh in the avatar's
+   * visualRoot. Used by the occlusion-silhouette pass: the silhouette
+   * pass renders ONLY this layer with a bronze override material, so the
+   * player reads as a coloured cutout when occluded by the pole or gears.
+   * Layer 0 (default) stays enabled so the avatar still draws normally
+   * in the main render pass.
+   */
+  enableSilhouetteLayer(layer: number) {
+    this.visualRoot.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.layers.enable(layer);
+      }
+    });
+  }
+
   update(dt: number, input: Input, cameraAngle = 0): PlayerUpdateResult {
     this.prevY = this.mesh.position.y;
     const move = input.getMovement();

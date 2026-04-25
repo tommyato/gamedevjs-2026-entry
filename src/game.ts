@@ -37,6 +37,11 @@ import { BoltCollectible } from "./bolt";
 import { Gear } from "./gear";
 import { GearPool } from "./gear-pool";
 import { Input } from "./input";
+import {
+  createOcclusionSilhouette,
+  OCCLUDER_LAYER,
+  SILHOUETTE_PLAYER_LAYER,
+} from "./occlusion-silhouette";
 import { ParticleSystem } from "./particles";
 import type { AchievementProgress, IPlatformServices } from "./platform-services";
 import { createPlatformServices } from "./platform-services";
@@ -402,6 +407,7 @@ export class Game {
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
   private composer!: EffectComposer;
+  private occlusionSilhouette!: ReturnType<typeof createOcclusionSilhouette>;
   private bloomPass!: UnrealBloomPass;
   private clock = new THREE.Clock();
   private readonly animationLoop = () => this.loop();
@@ -925,6 +931,16 @@ export class Game {
     this.composer.addPass(renderPass);
     this.composer.addPass(this.bloomPass);
 
+    // Player-silhouette pass: paints a bronze cutout of the avatar wherever
+    // it's hidden behind the centre pole or a gear. The orbit camera nudges
+    // itself to clear gear overlap, but during the lerp (and behind the pole)
+    // the player can disappear for several frames — silhouette closes the gap.
+    this.occlusionSilhouette = createOcclusionSilhouette(
+      this.renderer,
+      this.scene,
+      this.camera,
+    );
+
     this.input.init(this.renderer.domElement, (connected) => {
       this.showToast(connected ? "CONTROLLER CONNECTED" : "CONTROLLER DISCONNECTED");
     });
@@ -958,6 +974,7 @@ export class Game {
     });
     this.towerBase = new THREE.Mesh(towerGeo, towerMat);
     this.towerBase.position.y = 9990;
+    this.towerBase.layers.enable(OCCLUDER_LAYER);
     applyTopDownShadowToObject(this.towerBase, this.topDownShadow.uniforms);
     this.scene.add(this.towerBase);
 
@@ -978,6 +995,7 @@ export class Game {
     this.scene.add(this.particles.group);
     this.scene.add(this.ghostGroup);
     this.player.enableTopDownShadow(this.topDownShadow.uniforms);
+    this.player.enableSilhouetteLayer(SILHOUETTE_PLAYER_LAYER);
     this.scene.add(this.player.mesh);
     this.initBiomeParticles();
     this.landingCueGroup.add(this.landingCueGlow, this.landingCueRing, this.landingCueCore);
@@ -3825,6 +3843,9 @@ export class Game {
     this.topDownShadow.update(this.player.mesh.position);
     this.topDownShadow.render();
     this.composer.render();
+    // Player silhouette overlay — depth-test GreaterDepth against pole + gear
+    // depth so the bronze cutout only appears where the avatar is occluded.
+    this.occlusionSilhouette.render();
     if (!this.hasRenderedFirstFrame) {
       this.hasRenderedFirstFrame = true;
       this.platform.signalFirstFrame();

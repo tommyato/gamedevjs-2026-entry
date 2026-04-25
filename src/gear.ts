@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { applyTopDownShadowToObject, type TopDownShadowUniforms } from "./shadow";
+import { OCCLUDER_LAYER } from "./occlusion-silhouette";
 
 export type GearVariant = "normal" | "crumbling" | "speed" | "reverse" | "piston" | "wind" | "magnetic" | "bouncy" | "milestone";
 
@@ -206,6 +207,15 @@ export class Gear {
       this.addMagnetIndicator();
     }
 
+    // Tag every gear sub-mesh as an occluder so the player-silhouette pass
+    // (occlusion-silhouette.ts) can write depth from gears and paint a bronze
+    // cutout of the avatar wherever it sits behind one. Layer 0 stays enabled
+    // so the gear still renders normally in the main pass.
+    this.mesh.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.layers.enable(OCCLUDER_LAYER);
+      }
+    });
   }
 
   /**
