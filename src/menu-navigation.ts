@@ -243,6 +243,15 @@ function isInteractable(el: HTMLElement): boolean {
 /** Buttons that land within the same visual row should compete together. */
 const ROW_TOLERANCE = 30;
 
+/**
+ * Minimum off-axis displacement (as a fraction of the current element's
+ * size on the pressed axis) required for a candidate to count as being
+ * in that direction. Prevents a button that is "directly below" the
+ * current one from being picked as a LEFT/RIGHT neighbor just because
+ * its center is 1–2px off-axis from sub-pixel flex centering.
+ */
+const HALF_PLANE_DEADBAND = 0.4;
+
 
 /**
  * Return the best navigable neighbor in `direction` from `currentEl`
@@ -270,6 +279,9 @@ function findNeighbor(
   const curPrimary = horizontal ? curCx : curCy;
   const curPerp    = horizontal ? curCy : curCx;
 
+  const curSize = horizontal ? cur.width : cur.height;
+  const minDelta = curSize * HALF_PLANE_DEADBAND;
+
   interface Scored {
     el: HTMLElement;
     index: number;
@@ -286,9 +298,16 @@ function findNeighbor(
     const candidatePrimary = horizontal ? cx : cy;
     const candidatePerp    = horizontal ? cy : cx;
 
-    // Exclude candidates behind us on the primary axis.
-    if (forward ? candidatePrimary <= curPrimary : candidatePrimary >= curPrimary) {
-      return null;
+    // Exclude candidates not meaningfully ahead of us on the primary axis.
+    // The deadband (HALF_PLANE_DEADBAND × current element size) rejects any
+    // button whose center is within the deadband of ours on the pressed axis —
+    // preventing a button that is "directly below" from winning a sideways
+    // press when sub-pixel flex centering leaves its cx 1–2px off from ours.
+    const delta = candidatePrimary - curPrimary;
+    if (forward) {
+      if (delta < minDelta) return null;
+    } else {
+      if (delta > -minDelta) return null;
     }
 
     const primaryDist = Math.abs(candidatePrimary - curPrimary);
