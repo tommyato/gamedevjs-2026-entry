@@ -227,16 +227,22 @@ function isInteractable(el: HTMLElement): boolean {
 // -----------------------------------------------------------------------
 // Spatial directional navigation — rect-based d-pad algorithm.
 //
-// Standard scoring used by browsers and consoles:
-//   score = primaryAxisDist + perpendicularOffset * PERP_MULT
-// where the perpendicular penalty is zeroed when the candidate's rect
-// brackets our center on the cross-axis (same row/column alignment → snap).
+// Candidate selection (commit 4b8c65e + 85c8018 + this patch):
+//   1. Aligned candidates (their rect brackets our center on the cross-axis,
+//      i.e. same row for horizontal moves, same column for vertical moves)
+//      win categorically over non-aligned. The original tier1 stratification
+//      (±ROW_TOLERANCE around minPrimaryDist) ensures an aligned candidate
+//      that is in a farther row doesn't win over a closer non-aligned row.
+//   2. When NO aligned candidates exist, snap to the nearest perpendicular
+//      row/column first (smallest perpOffset), then break ties by primaryDist.
+//      This is the "snap to nearest row" intuition: pressing LEFT from a
+//      full-width centered PLAY button should land on row-2 ACHIEVEMENTS,
+//      not row-3 VERSUS GHOST which shares the same horizontal midpoint.
 // -----------------------------------------------------------------------
 
-/** Perpendicular penalty weight. Higher values prefer aligned neighbors. */
-const PERP_MULT = 2;
 /** Buttons that land within the same visual row should compete together. */
 const ROW_TOLERANCE = 30;
+
 
 /**
  * Return the best navigable neighbor in `direction` from `currentEl`
@@ -270,7 +276,6 @@ function findNeighbor(
     aligned: boolean;
     primaryDist: number;
     perpOffset: number;
-    score: number;
   }
 
   function scoreCandidate(el: HTMLElement, index: number): Scored | null {
@@ -293,14 +298,7 @@ function findNeighbor(
       ? r.top  <= curCy && r.bottom >= curCy
       : r.left <= curCx && r.right  >= curCx;
 
-    return {
-      el,
-      index,
-      aligned,
-      primaryDist,
-      perpOffset,
-      score: primaryDist + (aligned ? 0 : perpOffset * PERP_MULT),
-    };
+    return { el, index, aligned, primaryDist, perpOffset };
   }
 
   const scored = candidates
@@ -308,9 +306,19 @@ function findNeighbor(
     .filter((s): s is Scored => s !== null);
 
   if (scored.length > 0) {
-    const minPrimary = scored.reduce((min, candidate) => Math.min(min, candidate.primaryDist), Number.POSITIVE_INFINITY);
-    const tier1 = scored.filter((candidate) => candidate.primaryDist <= minPrimary + ROW_TOLERANCE);
-    if (tier1.length > 0) {
+    if (scored.some((s) => s.aligned)) {
+      // At least one aligned candidate — use the original tier1 stratification
+      // (commit 85c8018). Limiting to minPrimary ± ROW_TOLERANCE naturally
+      // excludes aligned candidates that are in a farther row/column (e.g.
+      // DOWN-from-PLAY: VERSUS GHOST is "aligned" because it sits directly
+      // below, but it's in row 3; ACHIEVEMENTS/LEADERBOARD in row 2 are
+      // closer and land in tier1 instead). Within tier1, aligned wins over
+      // non-aligned via the perpOffset≈0 advantage they inherently have.
+      const minPrimary = scored.reduce(
+        (min, c) => Math.min(min, c.primaryDist),
+        Number.POSITIVE_INFINITY,
+      );
+      const tier1 = scored.filter((c) => c.primaryDist <= minPrimary + ROW_TOLERANCE);
       tier1.sort((a, b) => {
         if (a.perpOffset !== b.perpOffset) return a.perpOffset - b.perpOffset;
         if (a.aligned !== b.aligned) return a.aligned ? -1 : 1;
@@ -318,18 +326,18 @@ function findNeighbor(
       });
       return tier1[0].el;
     }
-  }
 
-  const scoredFallback = scored
-    .slice()
-    .sort((a, b) => {
-      // Preserve the original "aligned beats non-aligned" ordering as
-      // a last-resort fallback when no row-stratified tier wins.
-      if (a.aligned !== b.aligned) return a.aligned ? -1 : 1;
-      return a.score - b.score;
+    // No row/col-aligned candidates — snap to the nearest row/column first
+    // (smallest perpOffset), then closest primary-axis distance as a
+    // tie-breaker. This fixes LEFT-from-PLAY landing on VERSUS GHOST (row 3)
+    // instead of ACHIEVEMENTS (row 2) when VERSUS GHOST's center happens to
+    // share PLAY's horizontal midpoint, giving it a near-zero primaryDist.
+    const nonAligned = scored.slice().sort((a, b) => {
+      if (a.perpOffset !== b.perpOffset) return a.perpOffset - b.perpOffset;
+      return a.primaryDist - b.primaryDist;
     });
-
-  if (scoredFallback.length > 0) return scoredFallback[0].el;
+    return nonAligned[0].el;
+  }
 
   // Wraparound — no candidates in the primary half-plane. Return the item
   // at the extreme opposite end of the pressed axis, breaking ties by
