@@ -128,7 +128,6 @@ class OnnxPolicy {
           ort.env.wasm.wasmPaths = ORT_WASM_URL;
           ort.env.wasm.numThreads = 1;
           this.session = await ort.InferenceSession.create(this.modelUrl);
-          console.log("[ai-ghost] ONNX model loaded successfully");
           return true;
         } catch (err) {
           this.failed = true;
@@ -285,7 +284,6 @@ export class AIGhost {
       if (this.isScriptedMode()) {
         this.scripted = new ScriptedPolicy();
         this.loaded = true;
-        console.log("[ai-ghost] Scripted policy ready");
         return true;
       }
 
@@ -304,7 +302,6 @@ export class AIGhost {
       const layers = loadWeights(raw);
       this.mlp = new TinyMLP(layers);
       this.loaded = true;
-      console.log("[ai-ghost] MLP model loaded successfully");
       return true;
     } catch (err) {
       console.warn("[ai-ghost] Error loading model:", err);

@@ -178,21 +178,14 @@ export async function loadGhostChallenge(url = "ghost-challenge.json"): Promise<
   try {
     const res = await fetch(url, { cache: "no-cache" });
     if (!res.ok) {
-      if (res.status === 404) {
-        console.info("[ghost-playback] No ghost available yet — the pool is still empty.");
-      } else {
-        console.warn(`[ghost-playback] ghost-challenge.json fetch failed: ${res.status}`);
-      }
       return null;
     }
     const data = (await res.json()) as GhostRecord;
     if (!data || !Array.isArray(data.frames) || data.frames.length < 2) {
-      console.warn("[ghost-playback] ghost-challenge.json has no usable frames.");
       return null;
     }
     return data;
-  } catch (err) {
-    console.warn("[ghost-playback] Failed to load ghost-challenge.json:", err);
+  } catch {
     return null;
   }
 }

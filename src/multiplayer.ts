@@ -337,6 +337,8 @@ export class MultiplayerManager {
           });
         }
         this.peers.delete(userId);
+        this.pendingNames.delete(userId);
+        this.pendingProgress.delete(userId);
         this.callbacks.onPeerLeft?.(userId);
       }
     }

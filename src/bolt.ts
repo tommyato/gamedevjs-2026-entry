@@ -6,6 +6,7 @@ export class BoltCollectible {
 
   private readonly gear: Gear;
   private readonly materials: THREE.MeshStandardMaterial[] = [];
+  private readonly scratchPos = new THREE.Vector3();
   private available = true;
   private collectTimer = 0;
   private readonly hoverPhase = Math.random() * Math.PI * 2;
@@ -58,7 +59,7 @@ export class BoltCollectible {
   update(dt: number, elapsedTime: number) {
     if (this.available) {
       const bob = Math.sin(elapsedTime * 2.4 + this.hoverPhase) * 0.12;
-      const gearPosition = this.gear.getPosition();
+      const gearPosition = this.gear.getPosition(this.scratchPos);
       this.mesh.position.set(gearPosition.x, this.gear.getTopY() + 0.75 + bob, gearPosition.z);
       this.mesh.rotation.y += dt * 1.8;
       return;
