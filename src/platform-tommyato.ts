@@ -1,7 +1,7 @@
 /**
  * Tommyato (own-droplet) implementation of `IPlatformServices`.
  *
- *   - localStorage saves / achievements / stats (with a one-shot username prompt)
+ *   - localStorage saves / achievements / stats
  *   - HTTP leaderboards against api.tommyato.com (SQLite-backed)
  *   - Colyseus client → IMultiplayerTransport shim that emits PeerMessage callbacks
  *
@@ -22,6 +22,7 @@ import type {
   RunScores,
 } from "./platform-services";
 import { Client, type Room } from "colyseus.js";
+import { getLocalUsername, setLocalUsername } from "./coolname";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -195,7 +196,7 @@ export class TommyatoPlatform implements IPlatformServices {
 
   // ── Identity ──────────────────────────────────────────────────────────────
 
-  /** Player can edit their name locally — prompt logic implemented by Phase 3 worker. */
+  /** Player can edit their name locally. */
   readonly canEditUsername = true;
 
   getUsername(): string {
@@ -206,33 +207,20 @@ export class TommyatoPlatform implements IPlatformServices {
       return DEFAULT_USERNAME;
     }
 
-    const existing = storage.getItem(STORAGE_KEYS.username);
-    if (existing && existing.trim().length > 0) {
-      this.cachedUsername = existing;
-      return existing;
-    }
-
-    // First run — prompt once. If dismissed/empty, fall back to default and
-    // persist it so we don't re-prompt on every call.
-    let chosen = DEFAULT_USERNAME;
-    try {
-      if (typeof window !== "undefined" && typeof window.prompt === "function") {
-        const answer = window.prompt("Pick a display name:", "Climber");
-        if (answer && answer.trim().length > 0) {
-          chosen = answer.trim().slice(0, 32);
+    // One-shot migration: if old key has a value and cc-username is unset, copy it over.
+    const oldValue = storage.getItem(STORAGE_KEYS.username);
+    if (oldValue && oldValue.trim().length > 0) {
+      try {
+        if (!storage.getItem("cc-username")) {
+          setLocalUsername(oldValue.trim());
         }
-      }
-    } catch {
-      // prompt blocked / unavailable — use default
+        storage.removeItem(STORAGE_KEYS.username);
+      } catch { /* ignore */ }
     }
 
-    try {
-      storage.setItem(STORAGE_KEYS.username, chosen);
-    } catch {
-      // ignore
-    }
-    this.cachedUsername = chosen;
-    return chosen;
+    const name = getLocalUsername();
+    this.cachedUsername = name;
+    return name;
   }
 
   // ── Saves ─────────────────────────────────────────────────────────────────

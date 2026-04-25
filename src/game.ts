@@ -420,6 +420,17 @@ export class Game {
    * ghosts render on the correct gear. See src/simulation.ts:SIM_FIXED_DT.
    */
   private simAccumulator = 0;
+  /**
+   * Edge-triggered jump press buffered across render frames until a sim step
+   * actually consumes it. `justPressed("space")` is true for ONE render frame
+   * only; if `simAccumulator < SIM_FIXED_DT` that frame, no sim step runs and
+   * the press would be silently dropped. On a 120Hz display (or any frame
+   * cadence not perfectly aligned to 60Hz), this happens routinely — caused a
+   * showstopper "stuck on ground, multiple space presses to unstick" bug.
+   * The flag is set when the player presses jump and cleared the moment a sim
+   * step actually receives `jump: true`.
+   */
+  private bufferedJump = false;
   private state = GameState.Title;
   private isDailyChallenge = false;
   private dailyChallengeDate = utcDateKey();
@@ -2441,13 +2452,10 @@ export class Game {
         return;
       }
     } catch {
-      // fall through to prompt fallback
+      // clipboard unavailable — show status and restore panel
     }
-    try {
-      window.prompt("Copy this invite link:", link);
-    } catch {
-      // ignore
-    }
+    this.setMultiplayerStatus("LINK COPY UNAVAILABLE");
+    setTimeout(() => this.refreshMultiplayerPanel(), 1500);
   }
 
   private async leaveMultiplayer(): Promise<void> {
@@ -3037,20 +3045,30 @@ export class Game {
 
   // ── Lobby display helpers ─────────────────────────────────────────────────
 
-  /** Returns the lobby-specific display name (cc.displayName), falling back to the coolname. */
+  /**
+   * Returns the player's display name. Single source of truth: `cc-username`
+   * via `getLocalUsername()` from coolname.ts. The lobby input writes through
+   * here too — keeping leaderboard-submitted name === lobby-displayed name ===
+   * what the user actually typed. One-shot migration absorbs any old
+   * `cc.displayName` value from prior builds.
+   */
   private getLobbyDisplayName(): string {
     try {
-      const stored = localStorage.getItem("cc.displayName");
-      if (stored && stored.trim().length > 0) return stored.trim();
+      // One-shot migration: if old cc.displayName exists and cc-username is unset, migrate.
+      const oldDisplay = localStorage.getItem("cc.displayName");
+      if (oldDisplay && oldDisplay.trim().length > 0) {
+        if (!localStorage.getItem("cc-username")) {
+          setCoolLocalUsername(oldDisplay.trim());
+        }
+        localStorage.removeItem("cc.displayName");
+      }
     } catch { /* localStorage unavailable */ }
     return this.getLocalUsername();
   }
 
-  /** Persists the lobby display name to localStorage. */
+  /** Persists the player display name to the unified `cc-username` key. */
   private setLobbyDisplayName(name: string): void {
-    try {
-      localStorage.setItem("cc.displayName", name);
-    } catch { /* ignore */ }
+    setCoolLocalUsername(name);
   }
 
   /** Re-renders the player list rows (self first, then peers).
@@ -4004,11 +4022,17 @@ export class Game {
     // Gate all player input during the pre-match countdown.
     const blocked = this.countdownActive;
     const movement = blocked ? { x: 0, y: 0 } : this.input.getMovement();
-    const jumpPressed = blocked ? false : this.input.justPressed("space");
+    // Buffer the edge-triggered jump press until a sim step consumes it.
+    // Without this, frames where simAccumulator < SIM_FIXED_DT (common on
+    // 120Hz displays or any sub-60Hz jitter) would drop the press.
+    if (!blocked && this.input.justPressed("space")) {
+      this.bufferedJump = true;
+    }
+    if (blocked) this.bufferedJump = false;
     const action: SimAction = {
       moveX: movement.x,
       moveY: movement.y,
-      jump: jumpPressed,
+      jump: this.bufferedJump,
     };
 
     // Fixed-timestep accumulator. Drive the sim in SIM_FIXED_DT ticks so two
@@ -4021,13 +4045,18 @@ export class Game {
     const aggregatedEvents: SimEvent[] = [];
     let firstStep = true;
     while (this.simAccumulator >= SIM_FIXED_DT) {
-      // `jump` is edge-triggered ("just pressed"). Only deliver it to the
-      // first sim step of this render frame, otherwise we'd queue N jumps
+      // `jump` is edge-triggered. Deliver it to the first sim step of this
+      // render frame only, then clear the buffer so we don't queue N jumps
       // per key press when multiple ticks fire in one frame.
       if (!firstStep && action.jump) {
         action.jump = false;
       }
       const result = this.sim.step(action, SIM_FIXED_DT);
+      if (action.jump) {
+        // Press has now been delivered to a sim step — clear the buffer.
+        this.bufferedJump = false;
+        action.jump = false;
+      }
       state = result.state;
       for (const ev of result.events) aggregatedEvents.push(ev);
       this.simAccumulator -= SIM_FIXED_DT;

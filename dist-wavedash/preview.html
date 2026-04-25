@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clockwork Climb — 16:9 preview</title>
+  <meta name="robots" content="noindex" />
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      background: #0a0a0a;
+      color: #e5e5e5;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      box-sizing: border-box;
+    }
+
+    /* Tailwind-container-style responsive max-width.
+       Caps at 1280px (xl) so the 16:9 frame renders like a windowed
+       embed — matches how Wavedash / tommyato.com present the game. */
+    .container {
+      width: 100%;
+      max-width: 100%;
+      margin-inline: auto;
+    }
+    @media (min-width: 640px)  { .container { max-width: 640px; } }
+    @media (min-width: 768px)  { .container { max-width: 768px; } }
+    @media (min-width: 1024px) { .container { max-width: 1024px; } }
+    @media (min-width: 1280px) { .container { max-width: 1280px; } }
+
+    #frame-box {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border: 1px solid #262626;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="frame-box">
+      <iframe
+        id="game-frame"
+        src="./index.html"
+        allow="autoplay; fullscreen; gamepad; pointer-lock"
+        title="Clockwork Climb"
+      ></iframe>
+    </div>
+  </div>
+  <script>
+    const frame = document.getElementById("game-frame");
+    const query = window.location.search || "";
+    const hash = window.location.hash || "";
+    frame.src = `./index.html${query}${hash}`;
+  </script>
+</body>
+</html>
