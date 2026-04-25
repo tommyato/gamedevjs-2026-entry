@@ -23,6 +23,8 @@
 
 import type { Input } from "./input";
 
+type Direction = "up" | "down" | "left" | "right";
+
 export const MENU_FOCUS_CLASS = "menu-focused";
 
 interface MenuScope {
@@ -116,23 +118,22 @@ export class MenuNavigation {
       scope.index = scope.items.indexOf(visible[0]);
     }
 
-    const stepNext = input.justPressed("down") || input.justPressed("right");
-    const stepPrev = input.justPressed("up") || input.justPressed("left");
+    const dirPressed: Direction | null =
+      input.justPressed("up")    ? "up"    :
+      input.justPressed("down")  ? "down"  :
+      input.justPressed("left")  ? "left"  :
+      input.justPressed("right") ? "right" :
+      null;
 
-    if (stepNext && !stepPrev) {
-      visIdx = (visIdx + 1) % visible.length;
-      scope.index = scope.items.indexOf(visible[visIdx]);
-      this.applyFocusClass(scope);
-    } else if (stepPrev && !stepNext) {
-      visIdx = (visIdx - 1 + visible.length) % visible.length;
-      scope.index = scope.items.indexOf(visible[visIdx]);
-      this.applyFocusClass(scope);
-    } else {
-      // Even if no nav this frame, ensure visual focus stays on the
-      // current element (covers the case where DOM was re-rendered
-      // and class was wiped).
-      this.applyFocusClass(scope);
+    if (dirPressed !== null) {
+      const next = findNeighbor(dirPressed, visible[visIdx], visible);
+      if (next !== null) {
+        scope.index = scope.items.indexOf(next);
+      }
     }
+    // Ensure visual focus stays on the current element (covers the case
+    // where DOM was re-rendered and class was wiped).
+    this.applyFocusClass(scope);
 
     if (this.suppressActivateFrames > 0) {
       this.suppressActivateFrames -= 1;
@@ -204,4 +205,110 @@ function isInteractable(el: HTMLElement): boolean {
   if (el.getAttribute("aria-disabled") === "true") return false;
   if (el.classList.contains("hidden")) return false;
   return true;
+}
+
+// -----------------------------------------------------------------------
+// Spatial directional navigation — rect-based d-pad algorithm.
+//
+// Standard scoring used by browsers and consoles:
+//   score = primaryAxisDist + perpendicularOffset * PERP_MULT
+// where the perpendicular penalty is zeroed when the candidate's rect
+// brackets our center on the cross-axis (same row/column alignment → snap).
+// -----------------------------------------------------------------------
+
+/** Perpendicular penalty weight. Higher values prefer aligned neighbors. */
+const PERP_MULT = 2;
+
+/**
+ * Return the best navigable neighbor in `direction` from `currentEl`
+ * among the `visible` list, using spatial rect scoring.
+ *
+ * - Candidates in the wrong half-plane are excluded.
+ * - If none exist (edge of the layout), wraps to the farthest item in
+ *   the opposite direction, preferring the closest perpendicular offset.
+ */
+function findNeighbor(
+  direction: Direction,
+  currentEl: HTMLElement,
+  visible: HTMLElement[]
+): HTMLElement | null {
+  const candidates = visible.filter((el) => el !== currentEl);
+  if (candidates.length === 0) return null;
+
+  const cur  = currentEl.getBoundingClientRect();
+  const curCx = (cur.left + cur.right) / 2;
+  const curCy = (cur.top  + cur.bottom) / 2;
+
+  const horizontal = direction === "right" || direction === "left";
+  const forward    = direction === "right" || direction === "down";
+
+  const curPrimary = horizontal ? curCx : curCy;
+  const curPerp    = horizontal ? curCy : curCx;
+
+  interface Scored { el: HTMLElement; score: number }
+
+  function scoreCandidate(el: HTMLElement): Scored | null {
+    const r  = el.getBoundingClientRect();
+    const cx = (r.left + r.right) / 2;
+    const cy = (r.top  + r.bottom) / 2;
+
+    const candidatePrimary = horizontal ? cx : cy;
+    const candidatePerp    = horizontal ? cy : cx;
+
+    // Exclude candidates behind us on the primary axis.
+    if (forward ? candidatePrimary <= curPrimary : candidatePrimary >= curPrimary) {
+      return null;
+    }
+
+    const primaryDist = Math.abs(candidatePrimary - curPrimary);
+    const perpOffset  = Math.abs(candidatePerp    - curPerp);
+
+    // Zero the perpendicular penalty when the candidate's rect brackets
+    // our center on the cross-axis — buttons in the same row/column snap
+    // cleanly without fighting the primary axis distance.
+    const perpSpans = horizontal
+      ? r.top  <= curCy && r.bottom >= curCy
+      : r.left <= curCx && r.right  >= curCx;
+
+    const perpPenalty = perpSpans ? 0 : perpOffset * PERP_MULT;
+    return { el, score: primaryDist + perpPenalty };
+  }
+
+  const scored = candidates
+    .map(scoreCandidate)
+    .filter((s): s is Scored => s !== null)
+    .sort((a, b) => a.score - b.score);
+
+  if (scored.length > 0) return scored[0].el;
+
+  // Wraparound — no candidates in the primary half-plane. Return the item
+  // at the extreme opposite end of the pressed axis, breaking ties by
+  // perpendicular closeness to our center.
+  //
+  // "right" wraps to leftmost  (minimum cx)   → extremeVal =  cx
+  // "left"  wraps to rightmost (maximum cx)   → extremeVal = -cx
+  // "down"  wraps to topmost   (minimum cy)   → extremeVal =  cy
+  // "up"    wraps to bottommost (maximum cy)  → extremeVal = -cy
+  interface Wrapped { el: HTMLElement; extremeVal: number; perpOffset: number }
+
+  const wrapped = candidates
+    .map((el): Wrapped => {
+      const r  = el.getBoundingClientRect();
+      const cx = (r.left + r.right) / 2;
+      const cy = (r.top  + r.bottom) / 2;
+      const candidatePrimary = horizontal ? cx : cy;
+      const candidatePerp    = horizontal ? cy : cx;
+      return {
+        el,
+        extremeVal: forward ? candidatePrimary : -candidatePrimary,
+        perpOffset: Math.abs(candidatePerp - curPerp),
+      };
+    })
+    .sort((a, b) =>
+      a.extremeVal !== b.extremeVal
+        ? a.extremeVal - b.extremeVal
+        : a.perpOffset - b.perpOffset
+    );
+
+  return wrapped[0]?.el ?? null;
 }
