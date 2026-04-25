@@ -227,17 +227,23 @@ function isInteractable(el: HTMLElement): boolean {
 // -----------------------------------------------------------------------
 // Spatial directional navigation — rect-based d-pad algorithm.
 //
-// Candidate selection (commit 4b8c65e + 85c8018 + this patch):
+// Candidate selection (commit 4b8c65e + 85c8018 + aa878f2 + this patch):
 //   1. For horizontal moves (LEFT/RIGHT), aligned candidates are a
 //      categorical partition: if any candidate brackets our center on the
 //      cross-axis, choose the smallest primary distance among those aligned
 //      candidates, then break ties by perpendicular offset and DOM order.
-//      Only when no aligned candidates exist do we snap to the nearest row
-//      via the non-aligned sort.
-//   2. For vertical moves (UP/DOWN), keep the original tier1 stratification:
+//   2. When no aligned candidates exist (non-aligned horizontal snap), a
+//      row-cap limits candidates to those within 1 row of the current element.
+//      Rows are bucketed by cy within ROW_TOLERANCE, with curCy included so
+//      the current element's own row is always represented. This prevents a
+//      full-width centered button (PLAY, row 1) from skipping row 2 to land
+//      in row 3 — PLAY → RIGHT stays on LEADERBOARD, not RACE. The deadband
+//      filter (lines 308-313) is kept as defence-in-depth against sub-pixel
+//      cx-rounding for buttons that share a horizontal midpoint with PLAY.
+//   3. For vertical moves (UP/DOWN), keep the original tier1 stratification:
 //      aligned candidates still compete with the closest row/column band so a
 //      farther aligned item does not outrank a nearer non-aligned one.
-//   3. When no candidate survives the half-plane filter, wrap to the farthest
+//   4. When no candidate survives the half-plane filter, wrap to the farthest
 //      item in the opposite direction, preferring the closest perpendicular
 //      offset.
 // -----------------------------------------------------------------------
@@ -290,6 +296,8 @@ function findNeighbor(
     aligned: boolean;
     primaryDist: number;
     perpOffset: number;
+    /** Raw perpendicular position (cy for horizontal, cx for vertical). */
+    perpVal: number;
   }
 
   function scoreCandidate(el: HTMLElement, index: number): Scored | null {
@@ -319,7 +327,7 @@ function findNeighbor(
       ? r.top  <= curCy && r.bottom >= curCy
       : r.left <= curCx && r.right  >= curCx;
 
-    return { el, index, aligned, primaryDist, perpOffset };
+    return { el, index, aligned, primaryDist, perpOffset, perpVal: candidatePerp };
   }
 
   const scored = candidates
@@ -338,9 +346,46 @@ function findNeighbor(
         return aligned[0].el;
       }
 
-      // No row-aligned candidates — snap to the nearest row first
-      // (smallest perpOffset), then closest primary-axis distance.
-      const nonAligned = scored.slice().sort((a, b) => {
+      // No row-aligned candidates — snap to nearest row, capped to ≤1 row away.
+      //
+      // Build row buckets from the scored candidates plus curPerp (the current
+      // element's own perpendicular position) so that PLAY's row is always
+      // represented even though PLAY itself is excluded from candidates. Two
+      // values share a bucket when they are within ROW_TOLERANCE of the bucket
+      // representative. Sort inputs ascending so adjacent values cluster first.
+      const bucketVals = [curPerp, ...scored.map((s) => s.perpVal)].sort((a, b) => a - b);
+      const rowBuckets: number[] = [];
+      for (const v of bucketVals) {
+        const prev = rowBuckets[rowBuckets.length - 1];
+        if (rowBuckets.length === 0 || Math.abs(v - prev) > ROW_TOLERANCE) {
+          rowBuckets.push(v);
+        }
+      }
+
+      // Find the bucket index for the current element's row.
+      let curRowIdx = 0;
+      {
+        let bestD = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < rowBuckets.length; i++) {
+          const d = Math.abs(rowBuckets[i] - curPerp);
+          if (d < bestD) { bestD = d; curRowIdx = i; }
+        }
+      }
+
+      // Map each candidate to its bucket index, keep only those ≤1 row away.
+      function candRowIdx(s: Scored): number {
+        let ri = 0, bestD = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < rowBuckets.length; i++) {
+          const d = Math.abs(rowBuckets[i] - s.perpVal);
+          if (d < bestD) { bestD = d; ri = i; }
+        }
+        return ri;
+      }
+      const rowCapped = scored.filter((s) => Math.abs(candRowIdx(s) - curRowIdx) <= 1);
+
+      // Sort the row-capped set (fallback to full scored if cap empties it).
+      const toSort = rowCapped.length > 0 ? rowCapped : scored;
+      const nonAligned = toSort.slice().sort((a, b) => {
         if (a.perpOffset !== b.perpOffset) return a.perpOffset - b.perpOffset;
         return a.primaryDist - b.primaryDist;
       });
