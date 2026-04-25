@@ -1138,13 +1138,32 @@
     }
     #leaderboard-modal-list {
       display: grid;
+      grid-auto-rows: 42px;
       gap: 6px;
+      align-content: start;
       /* Claim remaining body height so this is the surface that scrolls
          when entries overflow. Empty state still occupies the same area. */
       flex: 1 1 0;
       min-height: 0;
       overflow: auto;
       padding-right: 4px;
+    }
+    .leaderboard-modal-row {
+      display: grid;
+      grid-template-columns: 40px 1fr auto;
+      gap: 12px;
+      padding: 8px 4px;
+      align-items: baseline;
+      font-size: 14px;
+      letter-spacing: 1px;
+      border-bottom: 1px solid rgba(127, 214, 255, 0.08);
+      min-width: 0;
+    }
+    .leaderboard-modal-row-placeholder {
+      color: rgba(127, 214, 255, 0.18);
+    }
+    .leaderboard-modal-row-placeholder span:last-child {
+      color: rgba(127, 214, 255, 0.18);
     }
     .leaderboard-modal-daily-note {
       font-size: 11px;

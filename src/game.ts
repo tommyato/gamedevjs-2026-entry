@@ -207,6 +207,7 @@ const DEFAULT_SAVE_DATA: SaveData = {
 };
 
 const LEADERBOARD_CACHE_TTL_MS = 60_000;
+const LEADERBOARD_MODAL_ROWS = 10;
 const LEADERBOARD_TABS: readonly LeaderboardSlug[] = [
   "high-score",
   "highest-climb",
@@ -465,6 +466,30 @@ function formatContractProgress(instance: ContractInstance): string {
   return `${Math.min(Math.floor(progress), def.target)}/${def.target}`;
 }
 
+class FrameClock {
+  private running = true;
+  private lastTime = performance.now();
+
+  start(): void {
+    this.running = true;
+    this.lastTime = performance.now();
+  }
+
+  stop(): void {
+    this.running = false;
+  }
+
+  getDelta(): number {
+    if (!this.running) {
+      return 0;
+    }
+    const now = performance.now();
+    const delta = (now - this.lastTime) / 1000;
+    this.lastTime = now;
+    return delta;
+  }
+}
+
 export class Game {
   private renderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
@@ -472,7 +497,7 @@ export class Game {
   private composer!: EffectComposer;
   private occlusionSilhouette!: ReturnType<typeof createOcclusionSilhouette>;
   private bloomPass!: UnrealBloomPass;
-  private clock = new THREE.Clock();
+  private clock = new FrameClock();
   private readonly animationLoop = () => this.loop();
   private animationLoopRunning = false;
   private hasRenderedFirstFrame = false;
@@ -1751,13 +1776,24 @@ export class Game {
       this.leaderboardModalList.innerHTML =
         `<div style='font-size:13px; letter-spacing:2px; color:#9ac9e8;'>${LEADERBOARD_EMPTY_STATES[slug]}</div>`;
     } else {
-      this.leaderboardModalList.innerHTML = entries.slice(0, 10).map((entry) => (
-        `<div style="display:grid; grid-template-columns: 40px 1fr auto; gap:12px; padding:8px 4px; align-items:baseline; font-size:14px; letter-spacing:1px; border-bottom:1px solid rgba(127,214,255,0.08);">
+      const rows = entries.slice(0, LEADERBOARD_MODAL_ROWS);
+      const placeholders = Array.from({ length: Math.max(0, LEADERBOARD_MODAL_ROWS - rows.length) }, (_, index) => index);
+      this.leaderboardModalList.innerHTML = [
+        ...rows.map((entry) => (
+          `<div class="leaderboard-modal-row">
           <span style="color:#c7a271;">#${entry.rank}</span>
           <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(entry.username)}</span>
           <span style="color:#ffaa44; font-weight:700;">${fmt(entry.score)}</span>
-        </div>`
-      )).join("");
+          </div>`
+        )),
+        ...placeholders.map(() => (
+          `<div class="leaderboard-modal-row leaderboard-modal-row-placeholder" aria-hidden="true">
+            <span>—</span>
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
+            <span>—</span>
+          </div>`
+        )),
+      ].join("");
     }
 
     if (slug === "daily-score") {

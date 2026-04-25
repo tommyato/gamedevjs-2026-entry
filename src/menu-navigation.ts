@@ -235,6 +235,8 @@ function isInteractable(el: HTMLElement): boolean {
 
 /** Perpendicular penalty weight. Higher values prefer aligned neighbors. */
 const PERP_MULT = 2;
+/** Buttons that land within the same visual row should compete together. */
+const ROW_TOLERANCE = 30;
 
 /**
  * Return the best navigable neighbor in `direction` from `currentEl`
@@ -262,9 +264,16 @@ function findNeighbor(
   const curPrimary = horizontal ? curCx : curCy;
   const curPerp    = horizontal ? curCy : curCx;
 
-  interface Scored { el: HTMLElement; aligned: boolean; score: number }
+  interface Scored {
+    el: HTMLElement;
+    index: number;
+    aligned: boolean;
+    primaryDist: number;
+    perpOffset: number;
+    score: number;
+  }
 
-  function scoreCandidate(el: HTMLElement): Scored | null {
+  function scoreCandidate(el: HTMLElement, index: number): Scored | null {
     const r  = el.getBoundingClientRect();
     const cx = (r.left + r.right) / 2;
     const cy = (r.top  + r.bottom) / 2;
@@ -280,31 +289,47 @@ function findNeighbor(
     const primaryDist = Math.abs(candidatePrimary - curPrimary);
     const perpOffset  = Math.abs(candidatePerp    - curPerp);
 
-    // Aligned: candidate's rect brackets our center on the cross-axis
-    // (same row when going horizontal, same column when going vertical).
-    // Aligned candidates win categorically over diagonal ones — pressing
-    // RIGHT from a button must land on whatever is directly to the right
-    // in the same row, even if a diagonal is closer in primary distance.
-    // Without this, e.g. RIGHT from ACHIEVEMENTS picks PLAY (up+right,
-    // closer) instead of LEADERBOARD (same-row right, farther).
     const aligned = horizontal
       ? r.top  <= curCy && r.bottom >= curCy
       : r.left <= curCx && r.right  >= curCx;
 
-    return { el, aligned, score: primaryDist + (aligned ? 0 : perpOffset * PERP_MULT) };
+    return {
+      el,
+      index,
+      aligned,
+      primaryDist,
+      perpOffset,
+      score: primaryDist + (aligned ? 0 : perpOffset * PERP_MULT),
+    };
   }
 
   const scored = candidates
-    .map(scoreCandidate)
-    .filter((s): s is Scored => s !== null)
+    .map((el, index) => scoreCandidate(el, index))
+    .filter((s): s is Scored => s !== null);
+
+  if (scored.length > 0) {
+    const minPrimary = scored.reduce((min, candidate) => Math.min(min, candidate.primaryDist), Number.POSITIVE_INFINITY);
+    const tier1 = scored.filter((candidate) => candidate.primaryDist <= minPrimary + ROW_TOLERANCE);
+    if (tier1.length > 0) {
+      tier1.sort((a, b) => {
+        if (a.perpOffset !== b.perpOffset) return a.perpOffset - b.perpOffset;
+        if (a.aligned !== b.aligned) return a.aligned ? -1 : 1;
+        return a.index - b.index;
+      });
+      return tier1[0].el;
+    }
+  }
+
+  const scoredFallback = scored
+    .slice()
     .sort((a, b) => {
-      // Aligned candidates always beat non-aligned. Within each tier,
-      // shorter primary distance wins (with perp penalty for non-aligned).
+      // Preserve the original "aligned beats non-aligned" ordering as
+      // a last-resort fallback when no row-stratified tier wins.
       if (a.aligned !== b.aligned) return a.aligned ? -1 : 1;
       return a.score - b.score;
     });
 
-  if (scored.length > 0) return scored[0].el;
+  if (scoredFallback.length > 0) return scoredFallback[0].el;
 
   // Wraparound — no candidates in the primary half-plane. Return the item
   // at the extreme opposite end of the pressed axis, breaking ties by
