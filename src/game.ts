@@ -4828,7 +4828,10 @@ export class Game {
     this.titleOverlay.classList.add("game-over");
     this.titleOverlay.style.overflowY = "auto";
     this.titleBest.classList.add("hidden");
-    this.shareScoreBtn.classList.remove("hidden");
+    // SHARE ON X is hidden until the share-text composition bug is fixed —
+    // currently the score/height aren't interpolated correctly. Tommy: hide
+    // the feature until it works rather than ship a broken share link.
+    this.shareScoreBtn.classList.add("hidden");
     this.titleLeaderboardPanel.classList.add("hidden");
     this.buildTitleBackdrop();
     this.titleHeading.textContent = "GAME OVER";
