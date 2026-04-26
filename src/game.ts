@@ -2005,7 +2005,7 @@ export class Game {
   private applyGameOverMenuScope(): void {
     const ids = [
       "gameover-play-again",
-      "share-score-btn",
+      // "share-score-btn" — hidden until share-text bug fixed; skip in menu nav.
       "gameover-leaderboard",
       "gameover-achievements",
       "gameover-title",
