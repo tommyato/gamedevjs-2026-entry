@@ -5006,7 +5006,12 @@ export class Game {
     // through the title-overlay click handler (which respects button targets),
     // so we don't blanket-consume global clicks here — that would collapse
     // every button click into "start game".
-    if (this.input.justPressed("space")) {
+    // Guard with menuConsumedActivateThisFrame — same as updateTitle — so that
+    // pressing A/Space to open the leaderboard (or achievements) modal doesn't
+    // simultaneously call startGame() and detach the menu, which would prevent
+    // pushScope from running inside openLeaderboardModal (isActive() would be
+    // false) and break gamepad d-pad tab navigation in the modal.
+    if (this.input.justPressed("space") && !this.menuConsumedActivateThisFrame) {
       this.startGame();
     }
   }
