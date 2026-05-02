@@ -1,3 +1,11 @@
 node_modules
 .DS_Store
 artifacts
+
+# Debug/test/baseline screenshots — never commit. Save to tommyato-scratchpad/ for review or ephemeral scratch for worker self-verification.
+# README cover/gameplay/gameover screenshots are explicit exceptions (referenced from README.md).
+screenshots/*
+!screenshots/title.png
+!screenshots/gameplay.png
+!screenshots/gameover.png
+test-screens/
